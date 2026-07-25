@@ -1,0 +1,168 @@
+// Touch controls: left virtual stick, right look drag, action buttons.
+// Desktop fallback: WASD + pointer lock mouse for testing.
+export const input = {
+  move: { x: 0, y: 0 },          // -1..1
+  lookDelta: { x: 0, y: 0 },     // accumulated per-frame, consumed by player
+  fire: false,                   // held
+  firePressed: false,            // edge
+  ads: false,
+  reloadPressed: false,
+  nadePressed: false,
+  swapPressed: false,
+  breachPressed: false,
+  breath: false,
+  pausePressed: false,
+  sensitivity: 1.0,
+  invertY: false,
+};
+
+const el = id => document.getElementById(id);
+
+export function initInput() {
+  const stickZone = el('stick-zone');
+  const lookZone = el('look-zone');
+  const stickBase = el('stick-base');
+  const stickNub = el('stick-nub');
+
+  let stickTouch = null, stickOrigin = { x: 0, y: 0 };
+  let lookTouch = null, lookLast = { x: 0, y: 0 };
+  const STICK_R = 55;
+
+  stickZone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    stickTouch = t.identifier;
+    stickOrigin = { x: t.clientX, y: t.clientY };
+    stickBase.style.display = 'block';
+    stickNub.style.display = 'block';
+    stickBase.style.left = (t.clientX - STICK_R) + 'px';
+    stickBase.style.top = (t.clientY - STICK_R) + 'px';
+    stickNub.style.left = (t.clientX - 24) + 'px';
+    stickNub.style.top = (t.clientY - 24) + 'px';
+  }, { passive: false });
+
+  stickZone.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier !== stickTouch) continue;
+      let dx = t.clientX - stickOrigin.x, dy = t.clientY - stickOrigin.y;
+      const len = Math.hypot(dx, dy);
+      if (len > STICK_R) { dx = dx / len * STICK_R; dy = dy / len * STICK_R; }
+      input.move.x = dx / STICK_R;
+      input.move.y = dy / STICK_R;
+      stickNub.style.left = (stickOrigin.x + dx - 24) + 'px';
+      stickNub.style.top = (stickOrigin.y + dy - 24) + 'px';
+    }
+  }, { passive: false });
+
+  const stickEnd = e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier !== stickTouch) continue;
+      stickTouch = null;
+      input.move.x = 0; input.move.y = 0;
+      stickBase.style.display = 'none';
+      stickNub.style.display = 'none';
+    }
+  };
+  stickZone.addEventListener('touchend', stickEnd);
+  stickZone.addEventListener('touchcancel', stickEnd);
+
+  lookZone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (lookTouch !== null) return;
+    const t = e.changedTouches[0];
+    lookTouch = t.identifier;
+    lookLast = { x: t.clientX, y: t.clientY };
+  }, { passive: false });
+
+  lookZone.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier !== lookTouch) continue;
+      input.lookDelta.x += (t.clientX - lookLast.x) * 0.0045 * input.sensitivity;
+      input.lookDelta.y += (t.clientY - lookLast.y) * 0.0045 * input.sensitivity * (input.invertY ? -1 : 1);
+      lookLast = { x: t.clientX, y: t.clientY };
+    }
+  }, { passive: false });
+
+  const lookEnd = e => {
+    for (const t of e.changedTouches) if (t.identifier === lookTouch) lookTouch = null;
+  };
+  lookZone.addEventListener('touchend', lookEnd);
+  lookZone.addEventListener('touchcancel', lookEnd);
+
+  // --- Buttons ---
+  const hold = (id, on, off) => {
+    const b = el(id);
+    b.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); b.classList.add('pressed'); on(); }, { passive: false });
+    const end = e => { e.preventDefault(); b.classList.remove('pressed'); off && off(); };
+    b.addEventListener('touchend', end);
+    b.addEventListener('touchcancel', end);
+    // mouse fallback
+    b.addEventListener('mousedown', e => { e.stopPropagation(); on(); });
+    b.addEventListener('mouseup', () => off && off());
+  };
+
+  hold('btn-fire', () => { input.fire = true; input.firePressed = true; }, () => { input.fire = false; });
+  hold('btn-ads', () => { input.ads = !input.ads; });
+  hold('btn-reload', () => { input.reloadPressed = true; });
+  hold('btn-nade', () => { input.nadePressed = true; });
+  hold('btn-swap', () => { input.swapPressed = true; });
+  hold('btn-breach', () => { input.breachPressed = true; });
+  hold('btn-breath', () => { input.breath = true; }, () => { input.breath = false; });
+  hold('btn-pause', () => { input.pausePressed = true; });
+
+  // --- Desktop fallback ---
+  const keys = {};
+  window.addEventListener('keydown', e => {
+    if (keys[e.code]) return;
+    keys[e.code] = true;
+    if (e.code === 'KeyR') input.reloadPressed = true;
+    if (e.code === 'KeyG') input.nadePressed = true;
+    if (e.code === 'KeyQ') input.swapPressed = true;
+    if (e.code === 'KeyE' || e.code === 'KeyF') input.breachPressed = true;
+    if (e.code === 'Escape' || e.code === 'KeyP') input.pausePressed = true;
+    if (e.code === 'ShiftLeft') input.breath = true;
+    updateKeyMove();
+  });
+  window.addEventListener('keyup', e => {
+    keys[e.code] = false;
+    if (e.code === 'ShiftLeft') input.breath = false;
+    updateKeyMove();
+  });
+  function updateKeyMove() {
+    let x = 0, y = 0;
+    if (keys['KeyW'] || keys['ArrowUp']) y -= 1;
+    if (keys['KeyS'] || keys['ArrowDown']) y += 1;
+    if (keys['KeyA'] || keys['ArrowLeft']) x -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) x += 1;
+    // don't clobber an active touch stick
+    if (stickTouch === null) { input.move.x = x; input.move.y = y; }
+  }
+
+  const canvas = el('game-canvas');
+  canvas.addEventListener('mousedown', e => {
+    if (document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
+    if (e.button === 0) { input.fire = true; input.firePressed = true; }
+    if (e.button === 2) input.ads = !input.ads;
+  });
+  window.addEventListener('mouseup', e => { if (e.button === 0) input.fire = false; });
+  window.addEventListener('mousemove', e => {
+    if (document.pointerLockElement !== canvas) return;
+    input.lookDelta.x += e.movementX * 0.0022 * input.sensitivity;
+    input.lookDelta.y += e.movementY * 0.0022 * input.sensitivity * (input.invertY ? -1 : 1);
+  });
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+// Call at end of each frame to clear edge-triggered flags.
+export function clearEdges() {
+  input.firePressed = false;
+  input.reloadPressed = false;
+  input.nadePressed = false;
+  input.swapPressed = false;
+  input.breachPressed = false;
+  input.pausePressed = false;
+  input.lookDelta.x = 0;
+  input.lookDelta.y = 0;
+}

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0e12">
+<title>Breach Protocol</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0a0e12; font-family:-apple-system, 'Helvetica Neue', Arial, sans-serif; color:#cfd8dc; position:fixed; touch-action:none; }
+  #game-canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+  /* ---------- HUD ---------- */
+  #hud { position:absolute; inset:0; pointer-events:none; display:none; }
+  #crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:24px; height:24px; }
+  #crosshair::before, #crosshair::after { content:''; position:absolute; background:#e8f5e9; }
+  #crosshair::before { left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
+  #crosshair::after { top:50%; left:0; height:2px; width:100%; transform:translateY(-50%); }
+  #crosshair.hit::before, #crosshair.hit::after { background:#ff5252; }
+  #hitmarker { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) rotate(45deg); width:30px; height:30px; opacity:0; }
+  #hitmarker::before, #hitmarker::after { content:''; position:absolute; background:#fff; }
+  #hitmarker::before { left:50%; top:0; width:3px; height:100%; transform:translateX(-50%); }
+  #hitmarker::after { top:50%; left:0; height:3px; width:100%; transform:translateY(-50%); }
+  #hitmarker.show { animation:hitpop .25s ease-out; }
+  @keyframes hitpop { 0%{opacity:1; transform:translate(-50%,-50%) rotate(45deg) scale(1.4);} 100%{opacity:0; transform:translate(-50%,-50%) rotate(45deg) scale(.8);} }
+
+  #health-bar { position:absolute; left:max(20px, env(safe-area-inset-left)); bottom:calc(150px + env(safe-area-inset-bottom)); width:140px; height:10px; background:rgba(255,255,255,.15); border-radius:5px; overflow:hidden; }
+  #health-fill { height:100%; width:100%; background:#66bb6a; border-radius:5px; transition:width .2s; }
+  #ammo { position:absolute; right:max(20px, env(safe-area-inset-right)); bottom:calc(170px + env(safe-area-inset-bottom)); font-size:26px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000; text-align:right; }
+  #ammo small { font-size:15px; color:#90a4ae; }
+  #weapon-name { position:absolute; right:max(20px, env(safe-area-inset-right)); bottom:calc(152px + env(safe-area-inset-bottom)); font-size:12px; letter-spacing:1px; color:#90a4ae; text-align:right; }
+  #objective { position:absolute; top:calc(14px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); font-size:13px; letter-spacing:.5px; color:#e0e0e0; background:rgba(0,0,0,.45); padding:6px 14px; border-radius:14px; white-space:nowrap; max-width:90%; overflow:hidden; text-overflow:ellipsis; }
+  #score-line { position:absolute; top:calc(48px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); font-size:11px; color:#90a4ae; }
+  #noshoot-warn { position:absolute; top:35%; left:50%; transform:translateX(-50%); font-size:22px; font-weight:800; color:#ff5252; text-shadow:0 0 12px rgba(255,0,0,.6); opacity:0; letter-spacing:2px; }
+  #noshoot-warn.show { animation:warnflash 1.2s ease-out; }
+  @keyframes warnflash { 0%{opacity:1;} 80%{opacity:1;} 100%{opacity:0;} }
+  #damage-vignette { position:absolute; inset:0; box-shadow:inset 0 0 120px rgba(255,0,0,.0); transition:box-shadow .15s; }
+  #kill-feed { position:absolute; top:calc(80px + env(safe-area-inset-top)); right:max(14px, env(safe-area-inset-right)); text-align:right; font-size:11px; color:#b0bec5; }
+  #kill-feed div { margin-bottom:3px; text-shadow:0 1px 2px #000; }
+
+  /* ---------- Touch controls ---------- */
+  #controls { position:absolute; inset:0; pointer-events:none; display:none; }
+  #stick-zone { position:absolute; left:0; bottom:0; width:45%; height:65%; pointer-events:auto; }
+  #look-zone { position:absolute; right:0; bottom:0; width:55%; height:100%; pointer-events:auto; }
+  #stick-base { position:absolute; width:110px; height:110px; border-radius:50%; background:rgba(255,255,255,.07); border:2px solid rgba(255,255,255,.18); display:none; }
+  #stick-nub { position:absolute; width:48px; height:48px; border-radius:50%; background:rgba(255,255,255,.28); display:none; }
+  .btn { position:absolute; border-radius:50%; background:rgba(255,255,255,.10); border:2px solid rgba(255,255,255,.22); color:#eceff1; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; letter-spacing:.5px; pointer-events:auto; text-shadow:0 1px 2px #000; }
+  .btn:active, .btn.pressed { background:rgba(255,255,255,.3); }
+  #btn-fire { right:max(24px, env(safe-area-inset-right)); bottom:calc(56px + env(safe-area-inset-bottom)); width:84px; height:84px; font-size:14px; background:rgba(244,67,54,.22); border-color:rgba(244,67,54,.55); }
+  #btn-ads { right:calc(118px + env(safe-area-inset-right)); bottom:calc(40px + env(safe-area-inset-bottom)); width:60px; height:60px; }
+  #btn-reload { right:calc(120px + env(safe-area-inset-right)); bottom:calc(112px + env(safe-area-inset-bottom)); width:54px; height:54px; }
+  #btn-nade { right:max(30px, env(safe-area-inset-right)); bottom:calc(152px + env(safe-area-inset-bottom)); width:54px; height:54px; }
+  #btn-swap { right:calc(190px + env(safe-area-inset-right)); bottom:calc(30px + env(safe-area-inset-bottom)); width:48px; height:48px; font-size:10px; }
+  #btn-breach { left:50%; transform:translateX(-50%); bottom:calc(120px + env(safe-area-inset-bottom)); width:120px; height:52px; border-radius:26px; background:rgba(255,193,7,.25); border-color:rgba(255,193,7,.7); font-size:14px; display:none; }
+  #btn-breath { right:calc(190px + env(safe-area-inset-right)); bottom:calc(90px + env(safe-area-inset-bottom)); width:56px; height:56px; font-size:10px; display:none; }
+  #btn-pause { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:max(14px, env(safe-area-inset-left)); width:40px; height:40px; font-size:15px; }
+
+  /* ---------- Scope overlay ---------- */
+  #scope { position:absolute; inset:0; display:none; pointer-events:none; }
+  #scope-mask { position:absolute; inset:0; background:radial-gradient(circle at 50% 50%, transparent 34%, rgba(0,0,0,.97) 35.5%); }
+  #scope-cross { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:70vmin; height:70vmin; }
+  #scope-cross::before { content:''; position:absolute; left:50%; top:0; width:1.5px; height:100%; background:rgba(0,0,0,.85); transform:translateX(-50%); }
+  #scope-cross::after { content:''; position:absolute; top:50%; left:0; height:1.5px; width:100%; background:rgba(0,0,0,.85); transform:translateY(-50%); }
+
+  /* ---------- Screens ---------- */
+  .screen { position:absolute; inset:0; background:linear-gradient(160deg,#0a0e12 0%,#101820 60%,#0d1a24 100%); display:none; flex-direction:column; align-items:center; justify-content:center; padding:24px env(safe-area-inset-right) 24px env(safe-area-inset-left); text-align:center; z-index:10; overflow-y:auto; }
+  .screen.active { display:flex; }
+  h1.logo { font-size:34px; font-weight:900; letter-spacing:4px; color:#fff; }
+  h1.logo span { color:#ffc107; }
+  .tagline { font-size:12px; letter-spacing:3px; color:#607d8b; margin:6px 0 30px; }
+  .menu-btn { pointer-events:auto; display:block; width:min(300px, 80vw); margin:7px auto; padding:14px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16); border-radius:10px; color:#eceff1; font-size:15px; font-weight:600; letter-spacing:1px; }
+  .menu-btn:active { background:rgba(255,255,255,.18); }
+  .menu-btn.primary { background:rgba(255,193,7,.16); border-color:rgba(255,193,7,.5); color:#ffd54f; }
+  .menu-btn:disabled { opacity:.35; }
+  .menu-btn .sub { display:block; font-size:10px; font-weight:400; color:#78909c; letter-spacing:.5px; margin-top:3px; }
+  #level-list { max-height:60vh; overflow-y:auto; width:100%; -webkit-overflow-scrolling:touch; }
+  .diff-row { display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin:10px 0 18px; }
+  .diff-pill { padding:8px 13px; border-radius:16px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.05); font-size:12px; color:#b0bec5; }
+  .diff-pill.sel { background:rgba(255,193,7,.2); border-color:#ffc107; color:#ffd54f; font-weight:700; }
+  .brief-text { max-width:420px; font-size:14px; line-height:1.55; color:#b0bec5; margin:14px 0 26px; }
+  .debrief-grid { display:grid; grid-template-columns:auto auto; gap:8px 26px; font-size:14px; margin:18px 0 26px; text-align:left; }
+  .debrief-grid .val { text-align:right; font-weight:700; color:#fff; }
+  .grade { font-size:52px; font-weight:900; color:#ffc107; margin:6px 0; }
+  .small-note { font-size:11px; color:#546e7a; margin-top:16px; }
+  .sens-row { display:flex; align-items:center; gap:12px; margin:12px 0; }
+  input[type=range] { pointer-events:auto; width:200px; }
+  #rotate-hint { display:none; position:absolute; inset:0; z-index:50; background:#0a0e12; color:#90a4ae; align-items:center; justify-content:center; font-size:16px; text-align:center; padding:30px; }
+  @media (orientation: portrait) { #rotate-hint { display:flex; } }
+</style>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+
+<div id="hud">
+  <div id="damage-vignette"></div>
+  <div id="crosshair"></div>
+  <div id="hitmarker"></div>
+  <div id="objective">OBJECTIVE</div>
+  <div id="score-line"></div>
+  <div id="noshoot-warn">CIVILIAN DOWN</div>
+  <div id="kill-feed"></div>
+  <div id="health-bar"><div id="health-fill"></div></div>
+  <div id="ammo">12 <small>/ 48</small></div>
+  <div id="weapon-name">M9 SIDEARM</div>
+</div>
+
+<div id="scope"><div id="scope-mask"></div><div id="scope-cross"></div></div>
+
+<div id="controls">
+  <div id="stick-zone"></div>
+  <div id="look-zone"></div>
+  <div id="stick-base"></div>
+  <div id="stick-nub"></div>
+  <div class="btn" id="btn-fire">FIRE</div>
+  <div class="btn" id="btn-ads">ADS</div>
+  <div class="btn" id="btn-reload">R</div>
+  <div class="btn" id="btn-nade">G</div>
+  <div class="btn" id="btn-swap">SWAP</div>
+  <div class="btn" id="btn-breach">BREACH</div>
+  <div class="btn" id="btn-breath">HOLD<br>BREATH</div>
+  <div class="btn" id="btn-pause">II</div>
+</div>
+
+<div class="screen active" id="screen-menu">
+  <h1 class="logo">BREACH <span>PROTOCOL</span></h1>
+  <div class="tagline">URBAN COUNTER-TERROR OPERATIONS</div>
+  <button class="menu-btn primary" id="menu-continue">CONTINUE CAMPAIGN</button>
+  <button class="menu-btn" id="menu-levels">MISSION SELECT</button>
+  <button class="menu-btn" id="menu-settings">SETTINGS</button>
+</div>
+
+<div class="screen" id="screen-levels">
+  <h1 class="logo" style="font-size:22px">MISSIONS</h1>
+  <div class="diff-row" id="diff-row"></div>
+  <div id="level-list"></div>
+  <button class="menu-btn" id="levels-back" style="margin-top:14px">BACK</button>
+</div>
+
+<div class="screen" id="screen-settings">
+  <h1 class="logo" style="font-size:22px">SETTINGS</h1>
+  <div class="sens-row"><span style="font-size:13px">Look sensitivity</span><input type="range" id="sens-slider" min="0.3" max="2.5" step="0.1" value="1"></div>
+  <div class="sens-row"><span style="font-size:13px">Invert Y</span><button class="menu-btn" id="invert-btn" style="width:80px;margin:0;padding:8px">OFF</button></div>
+  <button class="menu-btn" id="settings-back" style="margin-top:20px">BACK</button>
+</div>
+
+<div class="screen" id="screen-brief">
+  <div style="font-size:11px;letter-spacing:3px;color:#607d8b" id="brief-num">MISSION 1</div>
+  <h1 class="logo" style="font-size:26px" id="brief-title">FIRST DOOR</h1>
+  <div class="brief-text" id="brief-text"></div>
+  <button class="menu-btn primary" id="brief-go">DEPLOY</button>
+  <button class="menu-btn" id="brief-back">BACK</button>
+</div>
+
+<div class="screen" id="screen-debrief">
+  <div style="font-size:11px;letter-spacing:3px;color:#607d8b" id="debrief-status">MISSION COMPLETE</div>
+  <div class="grade" id="debrief-grade">A</div>
+  <div class="debrief-grid" id="debrief-grid"></div>
+  <button class="menu-btn primary" id="debrief-next">NEXT MISSION</button>
+  <button class="menu-btn" id="debrief-retry">RETRY</button>
+  <button class="menu-btn" id="debrief-menu">MAIN MENU</button>
+</div>
+
+<div class="screen" id="screen-pause">
+  <h1 class="logo" style="font-size:24px">PAUSED</h1>
+  <button class="menu-btn primary" id="pause-resume">RESUME</button>
+  <button class="menu-btn" id="pause-restart">RESTART MISSION</button>
+  <button class="menu-btn" id="pause-quit">ABANDON TO MENU</button>
+</div>
+
+<div id="rotate-hint">Rotate your phone to landscape<br><br>BREACH PROTOCOL plays sideways.</div>
+
+<script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
+<script type="module" src="src/main.js"></script>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
