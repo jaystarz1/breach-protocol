@@ -40,36 +40,142 @@ function limb(w, h, d, color, x, y, z) {
   return m;
 }
 
-// Enemy: dark tactical gear + visible rifle. Civilian: bright clothes, hands raised, NO weapon.
-export function makeCharacter({ hostile, hostage, skin = 0xc8a888 }) {
+// Articulated low-poly human. Enemy: tactical gear, helmet, red chest rig, rifle raised.
+// Civilian: bright clothes, visible face, hands up, NO weapon. Hostage: kneeling, hands behind head.
+const SKINS = [0xd9b08c, 0xc68863, 0xa9714b, 0x8d5a3b, 0xe8c39e];
+
+function jointed(w, h, d, color) {
+  // box whose origin is at its TOP so rotating the group bends at the joint
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+  m.position.y = -h / 2;
+  return m;
+}
+
+export function makeCharacter({ hostile, hostage }) {
   const g = new THREE.Group();
-  const gear = hostile ? 0x2b2f33 : [0xef9a9a, 0x90caf9, 0xfff59d, 0xa5d6a7, 0xce93d8][Math.floor(Math.random() * 5)];
-  const pants = hostile ? 0x1c1f22 : 0x546e7a;
-  // legs
-  g.add(limb(0.16, 0.75, 0.16, pants, -0.12, 0.375, 0));
-  g.add(limb(0.16, 0.75, 0.16, pants, 0.12, 0.375, 0));
-  // torso
-  g.add(limb(0.5, 0.62, 0.28, gear, 0, 1.06, 0));
-  // head
-  g.add(limb(0.26, 0.26, 0.26, hostile ? 0x15181b : skin, 0, 1.53, 0)); // enemies wear balaclava
+  const skin = SKINS[Math.floor(Math.random() * SKINS.length)];
+  const shirt = hostile ? 0x3d4a42 : [0xef9a9a, 0x90caf9, 0xfff59d, 0xa5d6a7, 0xce93d8, 0xffcc80][Math.floor(Math.random() * 6)];
+  const pants = hostile ? 0x2c343a : [0x546e7a, 0x6d4c41, 0x37474f][Math.floor(Math.random() * 3)];
+  const boots = hostile ? 0x15181b : 0x3e2723;
+
+  // hips + torso (slight taper: chest wider than waist)
+  g.add(limb(0.32, 0.14, 0.2, pants, 0, 0.92, 0));
+  g.add(limb(0.34, 0.3, 0.2, shirt, 0, 1.13, 0));
+  g.add(limb(0.4, 0.3, 0.22, shirt, 0, 1.4, 0));       // chest
   if (hostile) {
-    // red chest rig — readable threat cue at range (backs up the rifle silhouette)
-    g.add(limb(0.52, 0.2, 0.3, 0x9c2b2b, 0, 1.18, 0));
-    // rifle held across chest — THE visual tell
-    const rifle = limb(0.08, 0.1, 0.85, 0x0a0a0a, 0.18, 1.1, 0.28);
-    rifle.rotation.x = -0.25;
-    g.add(rifle);
-    g.add(limb(0.14, 0.5, 0.14, gear, -0.32, 1.1, 0.1)); // arms forward
-    g.add(limb(0.14, 0.5, 0.14, gear, 0.32, 1.1, 0.18));
-  } else {
-    // hands up — unarmed silhouette
-    const la = limb(0.13, 0.55, 0.13, gear, -0.34, 1.45, 0);
-    const ra = limb(0.13, 0.55, 0.13, gear, 0.34, 1.45, 0);
-    la.rotation.z = 0.25; ra.rotation.z = -0.25;
-    g.add(la, ra);
+    g.add(limb(0.42, 0.26, 0.26, 0x9c2b2b, 0, 1.38, 0)); // red chest rig
+    g.add(limb(0.14, 0.1, 0.28, 0x1c1f22, -0.1, 1.24, 0.02)); // mag pouches
+    g.add(limb(0.14, 0.1, 0.28, 0x1c1f22, 0.1, 1.24, 0.02));
   }
-  if (hostage) { g.scale.y = 0.62; } // kneeling
+
+  // head group with face
+  const headG = new THREE.Group();
+  headG.position.set(0, 1.62, 0);
+  const headColor = hostile ? 0x1c2024 : skin;              // balaclava vs skin
+  headG.add(limb(0.22, 0.24, 0.24, headColor, 0, 0.06, 0));
+  // eyes (a strip for enemies — balaclava opening; two dots for civilians)
+  if (hostile) {
+    headG.add(limb(0.18, 0.05, 0.02, skin, 0, 0.09, 0.125));
+    headG.add(limb(0.26, 0.1, 0.27, 0x2e3438, 0, 0.2, 0)); // helmet
+    headG.add(limb(0.26, 0.05, 0.1, 0x2e3438, 0, 0.14, -0.1));
+  } else {
+    headG.add(limb(0.035, 0.035, 0.02, 0x2a2a2a, -0.05, 0.08, 0.125));
+    headG.add(limb(0.035, 0.035, 0.02, 0x2a2a2a, 0.05, 0.08, 0.125));
+    headG.add(limb(0.24, 0.09, 0.25, [0x2e2620, 0x4e342e, 0x9e9e9e, 0x212121][Math.floor(Math.random() * 4)], 0, 0.16, -0.01)); // hair
+  }
+  g.add(headG);
+
+  // legs: pivot at hip, knee implied by two segments
+  const mkLeg = (x) => {
+    const lg = new THREE.Group();
+    lg.position.set(x, 0.86, 0);
+    lg.add(jointed(0.15, 0.42, 0.17, pants));
+    const shin = new THREE.Group();
+    shin.position.y = -0.42;
+    shin.add(jointed(0.13, 0.4, 0.15, pants));
+    const foot = limb(0.13, 0.09, 0.24, boots, 0, -0.42, 0.04);
+    shin.add(foot);
+    lg.add(shin);
+    lg.userData.shin = shin;
+    g.add(lg);
+    return lg;
+  };
+  const mkArm = (x, color) => {
+    const ag = new THREE.Group();
+    ag.position.set(x, 1.5, 0);
+    ag.add(jointed(0.11, 0.3, 0.13, color));
+    const fore = new THREE.Group();
+    fore.position.y = -0.3;
+    fore.add(jointed(0.1, 0.28, 0.11, hostile ? color : skin)); // civilians: rolled sleeves
+    const hand = limb(0.09, 0.08, 0.09, skin, 0, -0.3, 0);
+    fore.add(hand);
+    ag.add(fore);
+    ag.userData.fore = fore;
+    g.add(ag);
+    return ag;
+  };
+  const lLeg = mkLeg(-0.11), rLeg = mkLeg(0.11);
+  const lArm = mkArm(-0.26, shirt), rArm = mkArm(0.26, shirt);
+
+  let rifle = null;
+  if (hostile) {
+    // rifle raised across the chest — THE visual tell
+    rifle = new THREE.Group();
+    const body = limb(0.06, 0.09, 0.72, 0x0a0a0a, 0, 0, -0.18);
+    const mag = limb(0.05, 0.14, 0.07, 0x14171a, 0, -0.1, -0.12);
+    mag.rotation.x = -0.2;
+    rifle.add(body, mag);
+    rifle.position.set(0.1, 1.32, 0.22);
+    rifle.rotation.y = 0.35;
+    g.add(rifle);
+    // arms hold the rifle
+    lArm.rotation.x = -0.9; lArm.userData.fore.rotation.x = -0.5;
+    rArm.rotation.x = -1.05; rArm.userData.fore.rotation.x = -0.35;
+  } else if (hostage) {
+    // kneeling: thighs forward, shins folded back, hands behind head
+    lLeg.rotation.x = -1.5; rLeg.rotation.x = -1.5;
+    lLeg.userData.shin.rotation.x = 1.6; rLeg.userData.shin.rotation.x = 1.6;
+    for (const c of g.children) c.position.y -= 0.42; // drop the whole body to kneel height
+    lArm.rotation.x = Math.PI - 0.4; lArm.rotation.z = 0.5; lArm.userData.fore.rotation.x = -1.1;
+    rArm.rotation.x = Math.PI - 0.4; rArm.rotation.z = -0.5; rArm.userData.fore.rotation.x = -1.1;
+  } else {
+    // hands straight up
+    lArm.rotation.x = Math.PI - 0.15; lArm.rotation.z = 0.18;
+    rArm.rotation.x = Math.PI - 0.15; rArm.rotation.z = -0.18;
+  }
+
+  g.userData.rig = { headG, lLeg, rLeg, lArm, rArm, rifle, hostile, hostage };
   return g;
+}
+
+// Walk cycle: swing legs (and arms for civilians). phase advances with distance moved.
+export function animateRig(g, phase, moving) {
+  const r = g.userData.rig;
+  if (!r) return;
+  const swing = moving ? Math.sin(phase) * 0.55 : 0;
+  r.lLeg.rotation.x = swing;
+  r.rLeg.rotation.x = -swing;
+  r.lLeg.userData.shin.rotation.x = moving ? Math.max(0, -Math.sin(phase)) * 0.7 : 0;
+  r.rLeg.userData.shin.rotation.x = moving ? Math.max(0, Math.sin(phase)) * 0.7 : 0;
+  if (!r.hostile && !r.hostage) {
+    // panicked civilians pump raised arms slightly
+    r.lArm.rotation.z = 0.18 + (moving ? Math.sin(phase * 2) * 0.08 : 0);
+    r.rArm.rotation.z = -0.18 - (moving ? Math.sin(phase * 2) * 0.08 : 0);
+  }
+  // subtle bob
+  g.userData.bob = moving ? Math.abs(Math.sin(phase)) * 0.05 : 0;
+}
+
+// Death sprawl: called once at kill time to splay the figure before it tips over.
+export function deathPose(g) {
+  const r = g.userData.rig;
+  if (!r) return;
+  const s = () => (Math.random() - 0.5);
+  r.lArm.rotation.set(-0.4 + s() * 0.5, 0, 0.9 + s() * 0.4);
+  r.rArm.rotation.set(-0.3 + s() * 0.5, 0, -0.9 + s() * 0.4);
+  r.lLeg.rotation.x = s() * 0.5; r.rLeg.rotation.x = s() * 0.5;
+  if (r.rifle) { r.rifle.rotation.z = 0.9; r.rifle.position.y = 0.9; }
+  g.rotation.z = s() * 0.35;
 }
 
 // Breachable door mesh

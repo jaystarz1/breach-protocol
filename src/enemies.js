@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeCharacter } from './levelgen.js';
+import { makeCharacter, animateRig, deathPose } from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { sfx } from './audio.js';
 
@@ -29,6 +29,8 @@ export class Enemy {
     this.lastKnown = null;
     this.aggro = def.aggro || false;   // hunt player when alerted without LOS
     this.range = def.range || 55;      // spotting range
+    this.walkPhase = Math.random() * 6;
+    this.moving = false;
   }
 
   get pos() { return this.mesh.position; }
@@ -41,6 +43,7 @@ export class Enemy {
     if (this.health <= 0) {
       this.dead = true;
       this.deathAnim = 0.001;
+      deathPose(this.mesh);
       sfx.kill();
       world.onEnemyKilled(this);
     } else {
@@ -58,6 +61,7 @@ export class Enemy {
       return;
     }
     const p = this.pos;
+    this.moving = false;
     const target = world.sniperTeam && !world.sniperTeam.dead ? world.sniperTeam.pos : world.playerPos;
     const dx = target.x - p.x, dz = target.z - p.z;
     const dist = Math.hypot(dx, dy3(target.y, p.y), dz);
@@ -107,6 +111,7 @@ export class Enemy {
     const g = groundHeight(world.solids, p.x, p.z, 0.3, p.y + 0.6);
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.mesh.rotation.y = this.yaw;
+    animateRig(this.mesh, this.walkPhase, this.moving);
   }
 
   doPatrol(dt, world) {
@@ -116,8 +121,6 @@ export class Enemy {
     const d = Math.hypot(wp.x - p.x, wp.z - p.z);
     if (d < 0.8) { this.patrolIdx = (this.patrolIdx + 1) % this.patrol.length; return; }
     this.moveToward(wp.x, wp.z, dt, world, this.speed * 0.55);
-    // walk bob
-    this.mesh.position.y += Math.abs(Math.sin(performance.now() / 150)) * 0.0;
   }
 
   moveToward(tx, tz, dt, world, speed) {
@@ -130,6 +133,8 @@ export class Enemy {
   }
 
   moveBy(mx, mz, world) {
+    this.moving = true;
+    this.walkPhase += Math.hypot(mx, mz) * 5.5;
     const p = this.pos;
     p.x += mx; p.z += mz;
     resolveXZ(world.solids, p, 0.35, p.y + 0.2, p.y + 1.6);

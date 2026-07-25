@@ -1,4 +1,4 @@
-import { makeCharacter } from './levelgen.js';
+import { makeCharacter, animateRig, deathPose } from './levelgen.js';
 import { groundHeight, resolveXZ } from './physics.js';
 
 // No-shoot actors. Hostages kneel in place; free civilians cower or flee when shooting starts.
@@ -8,9 +8,11 @@ export class Civilian {
     this.mesh = makeCharacter({ hostile: false, hostage: this.hostage });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
     this.mesh.rotation.y = (def.yaw ?? Math.random() * 360) * Math.PI / 180;
+    if (this.hostage && this.mesh.userData.rig) this.mesh.position.y -= 0; // kneel handled by pose
     scene.add(this.mesh);
     this.dead = false;
     this.deathAnim = 0;
+    this.walkPhase = Math.random() * 6;
     this.panic = false;
     this.panicDir = Math.random() * Math.PI * 2;
     this.panicTimer = 0;
@@ -22,6 +24,7 @@ export class Civilian {
     if (this.dead) return;
     this.dead = true;
     this.deathAnim = 0.001;
+    deathPose(this.mesh);
   }
 
   update(dt, world) {
@@ -48,6 +51,8 @@ export class Civilian {
       p.z += Math.cos(this.panicDir) * s * dt;
       resolveXZ(world.solids, p, 0.3, p.y + 0.2, p.y + 1.6);
       this.mesh.rotation.y = this.panicDir;
+      this.walkPhase += s * dt * 5.5;
+      animateRig(this.mesh, this.walkPhase, true);
       const g = groundHeight(world.solids, p.x, p.z, 0.25, p.y + 0.6);
       p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     }
