@@ -60,10 +60,23 @@ export class Weapons {
       this.meshes[k].visible = false;
       this.holder.add(this.meshes[k]);
     }
-    // muzzle flash
-    this.flash = new THREE.PointLight(0xffcc66, 0, 8);
-    this.flash.position.set(0, 0, -0.7);
+    // muzzle flash: point light + visible star billboard
+    this.flash = new THREE.PointLight(0xffcc66, 0, 14);
+    this.flash.position.set(0, 0, -0.55);
     this.holder.add(this.flash);
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xffe0a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    this.flashMesh = new THREE.Group();
+    for (const rot of [0, Math.PI / 3, -Math.PI / 3]) {
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.1), flashMat);
+      plane.rotation.z = rot;
+      this.flashMesh.add(plane);
+    }
+    this.flashMesh.position.set(0, 0.02, -0.55);
+    this.flashMat = flashMat;
+    this.holder.add(this.flashMesh);
     this.loadout = ['pistol'];
     this.current = 'pistol';
     this.state = {};
@@ -111,7 +124,8 @@ export class Weapons {
   update(dt, fireHeld, firePressed, ads) {
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.recoilKick = Math.max(0, this.recoilKick - dt * 3);
-    this.flash.intensity = Math.max(0, this.flash.intensity - dt * 60);
+    this.flash.intensity = Math.max(0, this.flash.intensity - dt * 90);
+    this.flashMat.opacity = Math.max(0, this.flashMat.opacity - dt * 14);
 
     if (this.reloading > 0) {
       this.reloading -= dt;
@@ -133,7 +147,10 @@ export class Weapons {
         st.mag--;
         this.cooldown = 60 / sp.rpm;
         this.recoilKick = Math.min(1, this.recoilKick + 0.5);
-        this.flash.intensity = 3;
+        this.flash.intensity = 9;
+        this.flashMat.opacity = 1;
+        this.flashMesh.rotation.z = Math.random() * Math.PI;
+        this.flashMesh.scale.setScalar(0.8 + Math.random() * 0.6);
         sfx[sp.sound]();
         const spread = ads ? sp.adsSpread : sp.spread;
         if (this.onFire) this.onFire(spread);

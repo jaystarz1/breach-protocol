@@ -125,8 +125,12 @@ function startLevel(id) {
     const sun = new THREE.DirectionalLight(0xdfe8ff, L.sun);
     sun.position.set(30, 60, 20);
     scene.add(sun);
+    // fill from the opposite side so faces away from the sun still separate
+    const fill = new THREE.DirectionalLight(0xa8c0d8, L.sun * 0.35);
+    fill.position.set(-25, 30, -35);
+    scene.add(fill);
   }
-  const hemi = new THREE.HemisphereLight(0x8aa0b8, 0x1a2028, 0.35);
+  const hemi = new THREE.HemisphereLight(0x9db4c8, 0x2a323a, L.flashlight ? 0.15 : 0.65);
   scene.add(hemi);
 
   const geo = [...L.geo(), ...(L.extraGeo ? L.extraGeo() : [])];
@@ -240,6 +244,11 @@ function startLevel(id) {
 
   hud.screen(null);
   hud.show(true);
+  // control hints: show on the first mission of each session, fade on first touch
+  const hinted = sessionStorage.getItem('bp-hinted');
+  $('move-hint').classList.toggle('off', !!hinted);
+  $('aim-hint').classList.toggle('off', !!hinted);
+  sessionStorage.setItem('bp-hinted', '1');
   hud.nadeBtn((L.grenades ?? 0) > 0);
   hud.swapBtn(L.weapons.length > 1);
   hud.breathBtn(!!L.sniper);
@@ -259,6 +268,7 @@ let swayPhase = 0;
 function onPlayerShot(spread) {
   world.stats.shotsFired++;
   world.combatHeat = Math.max(world.combatHeat, 5);
+  player.pitch += weapons.spec.recoil * (0.4 + Math.random() * 0.3); // camera kick
 
   const dir = player.forward();
   // sniper sway

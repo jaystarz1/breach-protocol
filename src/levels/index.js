@@ -59,7 +59,7 @@ export const LEVELS = [
     id: 1, name: 'FIRST DOOR',
     brief: 'Kill-house shakedown. Clear three rooms. Armed targets only — anyone with their hands up walks out alive. Pistol discipline: controlled pairs.',
     weapons: ['pistol'], grenades: 0,
-    sky: 0x11161c, fog: [0x11161c, 30, 90], ambient: 0.55, sun: 0.7,
+    sky: 0x27313d, fog: [0x27313d, 40, 130], ambient: 0.95, sun: 1.25,
     start: [0, 0, 18, 0],
     geo: () => {
       const g = [];
@@ -104,7 +104,7 @@ export const LEVELS = [
     id: 2, name: 'STREET SWEEP',
     brief: 'Night sweep through an occupied block. Hostiles hold the storefronts and the street. M4 authorized. Civilians are still on the block — check your targets.',
     weapons: ['pistol', 'm4'], grenades: 0,
-    sky: 0x0b1018, fog: [0x0b1018, 25, 110], ambient: 0.4, sun: 0.5,
+    sky: 0x1b2634, fog: [0x1b2634, 40, 160], ambient: 0.85, sun: 1.1,
     start: [0, 0, 40, 0],
     geo: () => {
       const g = [];
@@ -150,7 +150,7 @@ export const LEVELS = [
     id: 3, name: 'STACK UP',
     brief: 'Apartment block, three floors, hostiles holding hostages on each. Breach every door like it is your last. A dead hostage ends the op.',
     weapons: ['pistol', 'm4'], grenades: 0,
-    sky: 0x10151b, fog: [0x10151b, 20, 80], ambient: 0.5, sun: 0.55,
+    sky: 0x232e3a, fog: [0x232e3a, 35, 120], ambient: 0.9, sun: 1.15,
     start: [0, 0, 16, 0],
     geo: () => {
       const g = [];
@@ -192,7 +192,7 @@ export const LEVELS = [
     id: 4, name: 'THE CHASE',
     brief: 'The cell leader is running. Pursue through the alleys and the parking structure. His guards will try to slow you down. Frags authorized — watch for runners who are not armed.',
     weapons: ['pistol', 'm4'], grenades: 3,
-    sky: 0x0d131a, fog: [0x0d131a, 22, 100], ambient: 0.45, sun: 0.5,
+    sky: 0x1e2836, fog: [0x1e2836, 38, 150], ambient: 0.85, sun: 1.1,
     start: [0, 0, 45, 0],
     geo: () => {
       const g = [];
@@ -241,7 +241,7 @@ export const LEVELS = [
     id: 5, name: 'MARKET PANIC',
     brief: 'Shooters embedded in a crowded night market. The crowd will bolt when the first shot lands. Weapons tight: a single civilian casualty at this range is a career, at Veteran it is the mission.',
     weapons: ['pistol', 'm4'], grenades: 0,
-    sky: 0x141017, fog: [0x141017, 25, 95], ambient: 0.5, sun: 0.55,
+    sky: 0x2a2230, fog: [0x2a2230, 40, 140], ambient: 0.9, sun: 1.1,
     start: [0, 0, 34, 0],
     geo: () => {
       const g = [];
@@ -290,7 +290,7 @@ export const LEVELS = [
     id: 6, name: 'OVERWATCH',
     brief: 'Barrett M82 on the rooftop. Your assault team is pinned at the fountain while hostiles advance across the plaza. Hold breath to steady. Civilians are still fleeing the square — a .50 does not give second chances.',
     weapons: ['barrett'], grenades: 0, sniper: true, lockPlayer: true,
-    sky: 0x0a0f16, fog: [0x0a0f16, 80, 400], ambient: 0.5, sun: 0.6,
+    sky: 0x1a2432, fog: [0x1a2432, 120, 500], ambient: 0.9, sun: 1.2,
     start: [0, 24, 66, 0],
     team: { pos: [0, 0, -10], health: 300 },
     geo: () => {
@@ -337,7 +337,7 @@ export const LEVELS = [
     id: 7, name: 'VERTICAL ASSAULT',
     brief: 'Helicopter drops you on the roof of their safehouse tower. Fight DOWN four floors to the street. They know you are coming — expect stacked resistance in every stairwell.',
     weapons: ['pistol', 'm4'], grenades: 3,
-    sky: 0x0c1219, fog: [0x0c1219, 25, 110], ambient: 0.45, sun: 0.5,
+    sky: 0x1d2734, fog: [0x1d2734, 40, 160], ambient: 0.85, sun: 1.1,
     start: [3, 12.3, -2, 180],
     geo: () => {
       const g = [];
@@ -377,7 +377,7 @@ export const LEVELS = [
     id: 8, name: 'BLACKOUT',
     brief: 'They cut the power to the records office. Your weapon light is the only light. Clear the floor and reach the server room. Muzzle flashes will give them away — and you.',
     weapons: ['pistol', 'm4'], grenades: 2, flashlight: true,
-    sky: 0x03050a, fog: [0x03050a, 6, 45], ambient: 0.06, sun: 0.0,
+    sky: 0x04060b, fog: [0x04060b, 7, 50], ambient: 0.1, sun: 0.0,
     start: [0, 0, 24, 0],
     geo: () => {
       const g = [];
@@ -429,7 +429,7 @@ export const LEVELS = [
     id: 9, name: 'UNDERGROUND',
     brief: 'They pulled the hostages into the metro. Platform level, then the tunnels. Frags will bounce far down here — mind the overpressure and mind the hostages taped to the columns.',
     weapons: ['pistol', 'm4'], grenades: 4,
-    sky: 0x05070a, fog: [0x05070a, 15, 70], ambient: 0.28, sun: 0.1,
+    sky: 0x0d1116, fog: [0x0d1116, 22, 90], ambient: 0.55, sun: 0.25,
     start: [0, 6, 40, 0],
     geo: () => {
       const g = [];
@@ -485,7 +485,7 @@ export const LEVELS = [
     id: 10, name: 'THE CELL',
     brief: 'Endgame. Breach the compound gate, take the tower, cross the roof, and go down into the bunker where the cell leader is holed up with human shields. Everything you have learned. Every layer of the city.',
     weapons: ['pistol', 'm4'], grenades: 4,
-    sky: 0x0a0e14, fog: [0x0a0e14, 25, 130], ambient: 0.42, sun: 0.5,
+    sky: 0x1e2835, fog: [0x1e2835, 40, 170], ambient: 0.85, sun: 1.15,
     start: [0, 0, 42, 0],
     geo: () => {
       const g = [];

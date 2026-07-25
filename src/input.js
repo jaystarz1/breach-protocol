@@ -30,6 +30,7 @@ export function initInput() {
 
   stickZone.addEventListener('touchstart', e => {
     e.preventDefault();
+    el('move-hint').classList.add('off');
     const t = e.changedTouches[0];
     stickTouch = t.identifier;
     stickOrigin = { x: t.clientX, y: t.clientY };
@@ -69,6 +70,7 @@ export function initInput() {
 
   lookZone.addEventListener('touchstart', e => {
     e.preventDefault();
+    el('aim-hint').classList.add('off');
     if (lookTouch !== null) return;
     const t = e.changedTouches[0];
     lookTouch = t.identifier;
@@ -111,6 +113,10 @@ export function initInput() {
   hold('btn-breach', () => { input.breachPressed = true; });
   hold('btn-breath', () => { input.breath = true; }, () => { input.breath = false; });
   hold('btn-pause', () => { input.pausePressed = true; });
+  el('btn-refresh').addEventListener('touchstart', e => { e.preventDefault(); location.reload(); }, { passive: false });
+  el('btn-refresh').addEventListener('click', () => location.reload());
+  const mr = el('menu-refresh');
+  if (mr) mr.addEventListener('click', () => location.reload());
 
   // --- Desktop fallback ---
   const keys = {};

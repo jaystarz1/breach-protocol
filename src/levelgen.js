@@ -53,6 +53,8 @@ export function makeCharacter({ hostile, hostage, skin = 0xc8a888 }) {
   // head
   g.add(limb(0.26, 0.26, 0.26, hostile ? 0x15181b : skin, 0, 1.53, 0)); // enemies wear balaclava
   if (hostile) {
+    // red chest rig — readable threat cue at range (backs up the rifle silhouette)
+    g.add(limb(0.52, 0.2, 0.3, 0x9c2b2b, 0, 1.18, 0));
     // rifle held across chest — THE visual tell
     const rifle = limb(0.08, 0.1, 0.85, 0x0a0a0a, 0.18, 1.1, 0.28);
     rifle.rotation.x = -0.25;
@@ -87,10 +89,10 @@ export function makeDoor(w = 1.4, h = 2.4) {
 
 // ---------- Level authoring helpers (produce geo arrays) ----------
 export const C = {
-  street: 0x23272b, sidewalk: 0x3a4045, building: 0x4a5560, buildingB: 0x5d6a75,
-  interiorFloor: 0x424a50, interiorWall: 0x5b666e, roof: 0x333a40, crate: 0x6d5b44,
-  concrete: 0x757f87, metal: 0x37474f, tunnel: 0x2e3438, platform: 0x49525a,
-  accent: 0x8d6e63, glassWall: 0x4f6472,
+  street: 0x2e3338, sidewalk: 0x565f66, building: 0x77848f, buildingB: 0x93a1ad,
+  interiorFloor: 0x59636b, interiorWall: 0x8a959e, roof: 0x454e55, crate: 0x9a7f5a,
+  concrete: 0x9aa4ad, metal: 0x4d5a64, tunnel: 0x3f474d, platform: 0x6a747d,
+  accent: 0xb08a68, glassWall: 0x6e8496,
 };
 
 export function floorSlab(x, z, w, d, y = 0, t = 0.4, color = C.interiorFloor) {

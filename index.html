@@ -58,6 +58,16 @@
   #btn-breach { left:50%; transform:translateX(-50%); bottom:calc(120px + env(safe-area-inset-bottom)); width:120px; height:52px; border-radius:26px; background:rgba(255,193,7,.25); border-color:rgba(255,193,7,.7); font-size:14px; display:none; }
   #btn-breath { right:calc(190px + env(safe-area-inset-right)); bottom:calc(90px + env(safe-area-inset-bottom)); width:56px; height:56px; font-size:10px; display:none; }
   #btn-pause { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:max(14px, env(safe-area-inset-left)); width:40px; height:40px; font-size:15px; }
+  #btn-refresh { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:calc(64px + env(safe-area-inset-left)); width:40px; height:40px; font-size:17px; }
+  #menu-refresh { position:absolute; top:calc(12px + env(safe-area-inset-top)); left:max(14px, env(safe-area-inset-left)); width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.2); color:#eceff1; font-size:17px; pointer-events:auto; }
+
+  /* ---------- Control hints ---------- */
+  .ctl-hint { position:absolute; pointer-events:none; transition:opacity .6s; color:#cfd8dc; text-align:center; }
+  .ctl-hint.off { opacity:0; }
+  #move-hint { left:9%; bottom:calc(60px + env(safe-area-inset-bottom)); width:120px; }
+  #move-hint .ring { width:96px; height:96px; margin:0 auto 8px; border-radius:50%; border:2px dashed rgba(255,255,255,.45); display:flex; align-items:center; justify-content:center; font-size:22px; color:rgba(255,255,255,.6); }
+  #aim-hint { right:22%; top:38%; }
+  .ctl-hint .lbl { font-size:12px; font-weight:700; letter-spacing:2px; text-shadow:0 1px 3px #000; background:rgba(0,0,0,.4); padding:4px 10px; border-radius:10px; }
 
   /* ---------- Scope overlay ---------- */
   #scope { position:absolute; inset:0; display:none; pointer-events:none; }
@@ -123,9 +133,13 @@
   <div class="btn" id="btn-breach">BREACH</div>
   <div class="btn" id="btn-breath">HOLD<br>BREATH</div>
   <div class="btn" id="btn-pause">II</div>
+  <div class="btn" id="btn-refresh">⟳</div>
+  <div class="ctl-hint" id="move-hint"><div class="ring">✛</div><div class="lbl">LEFT THUMB — MOVE</div></div>
+  <div class="ctl-hint" id="aim-hint"><div class="lbl">DRAG RIGHT SIDE — AIM · FIRE BUTTON — SHOOT</div></div>
 </div>
 
 <div class="screen active" id="screen-menu">
+  <button id="menu-refresh" title="Reload game">⟳</button>
   <h1 class="logo">BREACH <span>PROTOCOL</span></h1>
   <div class="tagline">URBAN COUNTER-TERROR OPERATIONS</div>
   <button class="menu-btn primary" id="menu-continue">CONTINUE CAMPAIGN</button>
