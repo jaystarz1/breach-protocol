@@ -436,6 +436,12 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
   }, won ? 800 : 1200);
 }
 
+// ---------- Audio unlock: first touch anywhere + resume on return from background ----------
+const unlockOnce = () => audioUnlock();
+document.addEventListener('touchstart', unlockOnce, { once: true, passive: true });
+document.addEventListener('mousedown', unlockOnce, { once: true });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) audioUnlock(); });
+
 // ---------- Main loop ----------
 initInput();
 

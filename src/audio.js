@@ -2,12 +2,24 @@
 let ctx = null;
 
 function ac() {
-  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // iOS 16.4+: play through even when the ringer switch is on silent
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+  }
   if (ctx.state === 'suspended') ctx.resume();
   return ctx;
 }
 
-export function unlock() { ac(); }
+export function unlock() {
+  const a = ac();
+  // one silent buffer inside a user gesture fully unlocks audio on iOS
+  try {
+    const b = a.createBuffer(1, 1, 22050);
+    const s = a.createBufferSource();
+    s.buffer = b; s.connect(a.destination); s.start(0);
+  } catch {}
+}
 
 function noiseBuffer(dur) {
   const a = ac();
