@@ -9,18 +9,26 @@ function tower(x, z, w, d, floors, opts = {}) {
   const fh = 3;
   const x1 = x - w / 2, x2 = x + w / 2, z1 = z - d / 2, z2 = z + d / 2;
   const sx = x1 + 1.1; // stair lane center
-  geo.push(...floorSlab(x, z, w, d, 0, 0.4, C.interiorFloor));
+  // Top face at 0.04, NOT 0: the street/ground slab under every tower also tops out at y=0,
+  // and two coplanar upward faces in the same merged mesh z-fight into a per-frame strobe.
+  // 4cm is invisible, is well under the 0.6m step allowance, and matches what shop() does.
+  geo.push(...floorSlab(x, z, w, d, 0.04, 0.4, C.interiorFloor));
 
   const slabWithWindow = (oy, color, parityBelow) => {
-    geo.push(...floorSlab(x + 1.1, z, w - 2.2, d, oy, 0.3, color)); // east portion, full length
+    // +0.02: the walls of the floor BELOW are exactly `fh` tall, so their top faces land on
+    // oy too, and the slab overlaps them by half the wall thickness along every wall run.
+    // That is a coplanar 1.8m2 band around the whole room perimeter, and it strobes. Lifting
+    // the walking surface 2cm above the wall caps also clears the top stair tread at oy.
+    const sy = oy + 0.02;
+    geo.push(...floorSlab(x + 1.1, z, w - 2.2, d, sy, 0.3, color)); // east portion, full length
     if (parityBelow === 0) {
       // NW flight below: hole over z1+1.1..z1+4.5; cover the rest + top landing at z1..z1+1.1
-      geo.push(...floorSlab(sx, z1 + 4.5 + (d - 4.5) / 2, 2.2, d - 4.5, oy, 0.3, color));
-      geo.push(...floorSlab(sx, z1 + 0.55, 2.2, 1.1, oy, 0.3, color));
+      geo.push(...floorSlab(sx, z1 + 4.5 + (d - 4.5) / 2, 2.2, d - 4.5, sy, 0.3, color));
+      geo.push(...floorSlab(sx, z1 + 0.55, 2.2, 1.1, sy, 0.3, color));
     } else {
       // SW flight below: hole over z2-4.5..z2-1.1; cover the rest + top landing at z2-1.1..z2
-      geo.push(...floorSlab(sx, z1 + (d - 4.5) / 2, 2.2, d - 4.5, oy, 0.3, color));
-      geo.push(...floorSlab(sx, z2 - 0.55, 2.2, 1.1, oy, 0.3, color));
+      geo.push(...floorSlab(sx, z1 + (d - 4.5) / 2, 2.2, d - 4.5, sy, 0.3, color));
+      geo.push(...floorSlab(sx, z2 - 0.55, 2.2, 1.1, sy, 0.3, color));
     }
   };
 
@@ -219,7 +227,10 @@ export const LEVELS = [
       g.push(...wall(25, -10, -25, -10, 7, C.buildingB, [{ off: 20, w: 3, h: 2.8 }]));
       // parking structure: big slab on pillars
       g.push(...floorSlab(-5, -25, 44, 28, 3.5, 0.5, C.concrete));
-      for (const px of [-24, -14, -4, 6, 14]) for (const pz of [-16, -25, -34]) g.push([px, 1.75, pz, 0.7, 3.5, 0.7, C.concrete]);
+      // 3.4 tall, not 3.5: at 3.5 each pillar cap is coplanar with the top of the slab it
+      // holds up, putting 15 strobing 0.49m2 squares on that roof. 3.4 buries the cap inside
+      // the slab (which spans y 3.0..3.5) where it is never rasterized.
+      for (const px of [-24, -14, -4, 6, 14]) for (const pz of [-16, -25, -34]) g.push([px, 1.7, pz, 0.7, 3.4, 0.7, C.concrete]);
       g.push(...car(-18, -20)); g.push(...car(-8, -25, true)); g.push(...car(2, -31)); g.push(...car(10, -22));
       g.push(...crate(21, 10), ...crate(21.8, 11));
       // exit gate south end of garage
@@ -449,7 +460,9 @@ export const LEVELS = [
     geo: () => {
       const g = [];
       // street stub + stairs down into station (top step meets the stub edge at z=36)
-      g.push(...floorSlab(0, 44, 20, 16, 6, 0.5, C.sidewalk));
+      // 6.02, not 6: the top stair tread also tops out at exactly 6 and the stub overlaps it
+      // by the tread depth, so the head of the stairs strobed. 2cm lip onto the street.
+      g.push(...floorSlab(0, 44, 20, 16, 6.02, 0.5, C.sidewalk));
       g.push(...stairs(0, 28.2, 's', 8, 6, 4, C.concrete, 0));
       // mezzanine/platform hall
       g.push(...floorSlab(0, 0, 44, 60, 0, 1, C.platform));
@@ -461,7 +474,9 @@ export const LEVELS = [
       for (const cz of [18, 8, -2, -12, -22]) { g.push([-8, 2.5, cz, 1, 5, 1, C.concrete]); g.push([8, 2.5, cz, 1, 5, 1, C.concrete]); }
       // track trench along west side
       g.push(...floorSlab(-17, 0, 8, 60, -1.2, 0.3, C.tunnel));
-      g.push(...wall(-13, 28, -13, -30, 1.2, C.metal, [], -1.2, 0.2));
+      // yBase -1.22, not -1.2: at -1.2 this 58m rail caps out at exactly y=0, coplanar with
+      // the platform slab it runs alongside, which strobes as a line down the whole platform.
+      g.push(...wall(-13, 28, -13, -30, 1.2, C.metal, [], -1.22, 0.2));
       // tunnel south continues
       g.push(...wall(-22, -30, 22, -30, 5, C.tunnel, [{ off: 16, w: 6, h: 4 }]));
       g.push(...floorSlab(0, -45, 14, 30, 0, 1, C.tunnel));
@@ -523,14 +538,17 @@ export const LEVELS = [
       g.push(...tower(0, -10, 16, 14, 2));
       // stair trench down: from courtyard level at z=-16 descending south to bunker door at z=-24
       g.push(...stairs(22, -24, 's', 8, 5, 4, C.concrete, -5));
-      g.push(...wall(20, -24, 20, -16, 5, C.concrete, [], -5));   // trench west side
-      g.push(...wall(24, -24, 24, -16, 5, C.concrete, [], -5));   // trench east side
+      // Height 4.98, not 5: a 5m wall on a -5 base caps out at exactly y=0, which is the
+      // street slab's top face, and they overlap by half the wall thickness. Coplanar strobe
+      // along every rim of the trench and bunker. 2cm shy tucks the caps under the street.
+      g.push(...wall(20, -24, 20, -16, 4.98, C.concrete, [], -5));   // trench west side
+      g.push(...wall(24, -24, 24, -16, 4.98, C.concrete, [], -5));   // trench east side
       // bunker room (x 14..30, z -44..-24), floor -5, ceiling at courtyard level
       g.push(...floorSlab(22, -34, 16, 20, -5, 1, C.tunnel));
-      g.push(...wall(14, -24, 14, -44, 5, C.tunnel, [], -5));
-      g.push(...wall(30, -24, 30, -44, 5, C.tunnel, [], -5));
-      g.push(...wall(14, -44, 30, -44, 5, C.tunnel, [], -5));
-      g.push(...wall(14, -24, 30, -24, 5, C.tunnel, [{ off: 7, w: 2.4, h: 2.6 }], -5));
+      g.push(...wall(14, -24, 14, -44, 4.98, C.tunnel, [], -5));
+      g.push(...wall(30, -24, 30, -44, 4.98, C.tunnel, [], -5));
+      g.push(...wall(14, -44, 30, -44, 4.98, C.tunnel, [], -5));
+      g.push(...wall(14, -24, 30, -24, 4.98, C.tunnel, [{ off: 7, w: 2.4, h: 2.6 }], -5));
       g.push(...floorSlab(22, -34, 16, 20, 0.2, 0.4, C.concrete)); // bunker ceiling / courtyard surface
       g.push(...crate(20, -30, -5), ...crate(26, -36, -5));
       return g;
