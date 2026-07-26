@@ -1,0 +1,190 @@
+// Autoplay QA bot. Loads only with ?qa=1. Drives the REAL input/collision/weapon
+// systems along authored waypoint paths and reports per-level completability.
+// Usage from console/eval:  QA.run(1, 10, {difficulty: 1, god: true})
+import { input } from './input.js';
+import { hasLOS, raySphere } from './physics.js';
+
+// Waypoints per level: [x, z] or [x, z, y]. The bot walks them in order,
+// fights anything it sees along the way, auto-breaches doors, then relies on
+// the objective system to finish the mission.
+const PATHS = {
+  1: [[0, 14], [7, 11], [0, 9], [0, 3], [7, -1], [7, -3], [0, -5], [0, -9], [7, -13], [9, -15], [0, -17], [0, -18]],
+  2: [[0, 30], [0, 22], [8, 20], [11, 20], [8, 20], [0, 12], [-4, 2], [8, -4.5], [11, -5], [8, -4.5], [0, -14], [-6, -25], [-11, -25], [-6, -25], [0, -34], [0, -44], [0, -51]],
+  3: [[0, 10], [0, 3], [0, -1], [3, -6], [-4, -8], [-5.9, -4.8, 0], [-5.9, -9.5, 3], [-4, -8, 3], [1, -4, 3], [4.5, -6, 3], [5, -8, 3],
+      [-4, -8, 3], [-5.9, -4.8, 3], [-5.9, -9.5, 6], [-4, -8, 6], [1, -4, 6], [4.5, -6, 6], [-4, -8, 6],
+      [-5.9, -4.8, 6], [-5.9, -9.5, 9], [-5.9, -6, 9]],
+  4: [[0, 45], [0, 30], [2, 26], [5, 22], [5, 18.5], [13.5, 17.5], [5, 18.5], [8, 10], [2.5, -2], [2.5, -7], [-6, -7.5],
+      [-6, -18], [-16, -28], [4, -28], [-14, -34], [-6.5, -37], [-6.5, -41]],
+  5: [[0, 26], [-22, 15], [-8, 12], [8, 18], [22, 10], [22, 4], [-8, 4], [-24, 0], [-15, -8], [8, -20], [26, -30], [-26, -30], [0, -34], [0, -39.5]],
+  6: [],  // sniper: locked position, combat only
+  7: [[-6.9, -5, 12], [-6.9, -10.4, 12], [-4, -8, 9], [1, -4, 9], [5, -7, 9], [-4, -8, 9], [-6.9, -5, 9], [-6.9, -10.4, 9],
+      [-4, -8, 6], [4, -7, 6], [-4, -8, 6], [-6.9, -5, 6], [-6.9, -10.4, 6], [-4, -8, 3], [1, -4, 3], [5, -8, 3], [-4, -8, 3],
+      [-6.9, -5, 3], [-6.9, -10.4, 3], [0, -6, 0], [5, -3, 0], [-5, -9, 0], [0, 2, 0], [0, 10], [0, 14]],
+  8: [[0, 24], [0, 17], [-2, 12], [-8, 5], [-11, 2], [0, 5], [3, 0], [3, -4], [12, -0.5], [10, 4], [10, -6], [10, -10], [3, -10],
+      [-10, -12], [-10, -17], [-8, -17], [1, -11], [1, -16], [0, -18]],
+  9: [[0, 44, 6], [0, 37, 6], [0, 30, 0], [0, 24], [0, 20], [-10, 10], [4, 4], [10, -4], [-4, -8], [6, -18], [0, -26], [-3, -31],
+      [0, -36], [-2, -38], [3, -50], [0, -56]],
+  10: [[0, 38], [0, 30], [0, 24], [-8, 16], [10, 12], [-12, 6], [0, 4], [0, -2], [0, -6], [4, -12], [-4, -14], [-6.9, -11.6, 0],
+       [-6.9, -16.4, 3], [-4, -14, 3], [4, -13, 3], [-5, -8, 3], [-6.9, -11.6, 3], [-6.9, -16.4, 6], [4, -12, 6], [-4, -12, 6],
+       [-6.9, -16.4, 6], [-6.9, -11.6, 3], [-6.9, -11.6, 0], [0, -2, 0], [10, -2], [17, -14], [22, -15], [22, -19, -2], [22, -23, -5],
+       [22, -28, -5], [18, -34, -5], [26, -36, -5], [22, -39, -5]],
+};
+
+export const RESULTS = [];
+window.QA_RESULTS = RESULTS;
+
+let timer = null;
+
+export function stop() { if (timer) clearInterval(timer); timer = null; input.move.x = 0; input.move.y = 0; input.fire = false; }
+
+export function run(from = 1, to = 10, opts = {}) {
+  stop();
+  const god = opts.god !== false;
+  if (opts.difficulty !== undefined) BP.setDifficulty(opts.difficulty);
+  let level = from;
+  let wpIdx = 0;
+  let levelStart = performance.now();
+  let lastPos = null, stuckSince = 0, jiggleUntil = 0, jiggleDir = 1, bestWd = null;
+  let lastObjIdx = -1, objSince = 0;
+  let notes = [];
+  let fireTick = 0;
+
+  function beginLevel() {
+    BP.startLevel(level);
+    wpIdx = 0; levelStart = performance.now();
+    lastPos = null; stuckSince = 0; jiggleUntil = 0; bestWd = null;
+    lastObjIdx = -1; objSince = performance.now();
+    notes = [];
+  }
+
+  function report(result) {
+    const w = BP.world;
+    RESULTS.push({
+      level, name: w.level.name, result,
+      time: Math.round((performance.now() - levelStart) / 1000),
+      kills: w.stats.kills, civKills: w.stats.civKills, score: w.stats.score,
+      notes: [...notes],
+    });
+    console.log(`[QA] L${level} ${w.level.name}: ${result}`, notes.join(' | '));
+  }
+
+  beginLevel();
+
+  window.QA_STATE = {
+    get wpIdx() { return wpIdx; }, get stuck() { return stuckSince; }, get notes() { return notes; },
+    get target() { const w = BP.world; if (!w) return null; const t = w.enemies.find(e => !e.dead); return t ? [t.pos.x.toFixed(1), t.pos.z.toFixed(1)] : null; },
+  };
+
+  timer = setInterval(() => {
+    const w = BP.world, p = BP.player, weap = BP.weapons;
+    if (!w || !p) return;
+
+    // debrief showing → record and advance
+    if (BP.mode === 'debrief') {
+      if (!w.won) notes.push(`endpos=${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)} wp=${wpIdx} obj=${w.objectiveIdx}`);
+      report(w.won ? 'PASS' : 'FAIL(' + (w.stats.civKills ? 'civ' : 'kia') + ')');
+      if (level >= to) { stop(); console.log('[QA] DONE', RESULTS); return; }
+      level++;
+      beginLevel();
+      return;
+    }
+    if (BP.mode !== 'playing') return;
+
+    if (god) { p.health = p.maxHealth; if (w.sniperTeam) w.sniperTeam.health = w.sniperTeam.maxHealth; }
+
+    // level time cap
+    const cap = w.level.sniper ? 300 : 240;
+    if ((performance.now() - levelStart) / 1000 > cap) {
+      notes.push(`TIMEOUT obj=${w.objectiveIdx} pos=${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)} live=${w.enemies.filter(e => !e.dead).map(e => `(${e.pos.x.toFixed(0)},${e.pos.y.toFixed(0)},${e.pos.z.toFixed(0)})`).join('')}`);
+      report('FAIL(timeout)');
+      if (level >= to) { stop(); console.log('[QA] DONE', RESULTS); return; }
+      level++; beginLevel(); return;
+    }
+
+    // objective hang tracking
+    if (w.objectiveIdx !== lastObjIdx) { lastObjIdx = w.objectiveIdx; objSince = performance.now(); }
+
+    // --- combat: nearest live visible enemy ---
+    const eye = { x: p.pos.x, y: p.pos.y + 1.6, z: p.pos.z };
+    let target = null, tDist = Infinity;
+    for (const e of w.enemies) {
+      if (e.dead) continue;
+      const d = Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y, e.pos.z - p.pos.z);
+      if (d < tDist && hasLOS(w.solids, eye.x, eye.y, eye.z, e.pos.x, e.pos.y + 1.1, e.pos.z)) { target = e; tDist = d; }
+    }
+    // hold fire if any civilian sits near the exact firing line (generous 0.9m sphere,
+    // covers weapon spread) at any range up to the target
+    let civRisk = false;
+    if (target) {
+      const dx = target.pos.x - eye.x, dyy = (target.pos.y + 1.15) - eye.y, dz = target.pos.z - eye.z;
+      const dl = Math.hypot(dx, dyy, dz);
+      const ux = dx / dl, uy = dyy / dl, uz = dz / dl;
+      for (const c of w.civilians) {
+        if (c.dead) continue;
+        const t = raySphere(eye.x, eye.y, eye.z, ux, uy, uz, c.pos.x, c.pos.y + 0.9, c.pos.z, 1.3);
+        if (t < dl + 1) { civRisk = true; break; }
+      }
+    }
+
+    input.move.x = 0; input.move.y = 0;
+    input.fire = false; input.breath = false;
+
+    if (target && !civRisk) {
+      // aim exactly at the hitbox center
+      const dx = target.pos.x - eye.x, dz = target.pos.z - eye.z;
+      const dy = (target.pos.y + 1.0) - eye.y;
+      p.yaw = Math.atan2(-dx, -dz);
+      p.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+      input.ads = w.level.sniper ? true : tDist > 30;
+      input.breath = !!w.level.sniper;
+      if (weap.ammo.mag <= 0) input.reloadPressed = true;
+      else if (weap.spec.auto) input.fire = true;
+      else { fireTick++; if (fireTick % 12 === 0) { input.fire = true; input.firePressed = true; } }
+      return; // stand and fight
+    }
+    if (target && civRisk) {
+      // sidestep to open a clean line
+      input.move.x = jiggleDir;
+      return;
+    }
+
+    if (w.level.lockPlayer) return; // sniper: nothing to walk
+
+    // --- navigate waypoints ---
+    const path = PATHS[level] || [];
+    if (wpIdx >= path.length) return; // path done; objectives (reach zone) should have fired
+    const wp = path[wpIdx];
+    const wdx = wp[0] - p.pos.x, wdz = wp[1] - p.pos.z;
+    const wd = Math.hypot(wdx, wdz);
+    const yOk = wp[2] === undefined || Math.abs(p.pos.y - wp[2]) < 2;
+    if (wd < 1.2 && yOk) { wpIdx++; stuckSince = 0; bestWd = null; return; }
+
+    p.yaw = Math.atan2(-wdx, -wdz);
+    p.pitch = 0;
+    input.ads = false;
+    input.move.y = -1;
+    if (performance.now() < jiggleUntil) input.move.x = jiggleDir;
+
+    // auto-breach any door in reach
+    const near = w.doors.nearBreachable(p.pos, p.yaw);
+    if (near) input.breachPressed = true;
+
+    // stuck detection: measured by progress TOWARD the waypoint, so wall-sliding
+    // sideways doesn't mask being blocked
+    if (bestWd === null || wd < bestWd - 0.4) { bestWd = wd; stuckSince = 0; }
+    else {
+      stuckSince += 0.1;
+      if (stuckSince > 4 && performance.now() > jiggleUntil) {
+        jiggleDir *= -1;
+        jiggleUntil = performance.now() + 1500;
+      }
+      if (stuckSince > 12) {
+        notes.push(`STUCK wp${wpIdx}(${wp[0]},${wp[1]}${wp[2] !== undefined ? ',' + wp[2] : ''}) at ${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)}`);
+        // teleport past the blockage so the rest of the level still gets tested
+        p.pos.set(wp[0], (wp[2] ?? p.pos.y) + 0.1, wp[1]);
+        wpIdx++; stuckSince = 0; bestWd = null;
+      }
+    }
+    lastPos = { x: p.pos.x, z: p.pos.z };
+  }, 100);
+}

@@ -38,15 +38,16 @@ function tower(x, z, w, d, floors, opts = {}) {
   return geo;
 }
 
-// A simple one-room shop: 3 walls + open storefront on south with pillars.
-function shop(x, z, w, d) {
+// A simple one-room shop: 3 walls + an open storefront on the given face ('n','s','e','w').
+function shop(x, z, w, d, face = 's') {
   const geo = [];
   const x1 = x - w / 2, x2 = x + w / 2, z1 = z - d / 2, z2 = z + d / 2;
   geo.push(...floorSlab(x, z, w, d, 0.05, 0.1, C.interiorFloor));
-  geo.push(...wall(x1, z1, x2, z1, 3, C.buildingB));
-  geo.push(...wall(x1, z1, x1, z2, 3, C.buildingB));
-  geo.push(...wall(x2, z1, x2, z2, 3, C.buildingB));
-  geo.push(...wall(x1, z2, x2, z2, 3, C.buildingB, [{ off: 1, w: w - 2, h: 2.6 }]));
+  const gap = { off: 1, w: (face === 'e' || face === 'w' ? d : w) - 2, h: 2.6 };
+  geo.push(...wall(x1, z1, x2, z1, 3, C.buildingB, face === 'n' ? [gap] : []));
+  geo.push(...wall(x1, z1, x1, z2, 3, C.buildingB, face === 'w' ? [gap] : []));
+  geo.push(...wall(x2, z1, x2, z2, 3, C.buildingB, face === 'e' ? [gap] : []));
+  geo.push(...wall(x1, z2, x2, z2, 3, C.buildingB, face === 's' ? [gap] : []));
   geo.push(...floorSlab(x, z, w + 0.6, d + 0.6, 3.1, 0.3, C.roof));
   return geo;
 }
@@ -70,7 +71,7 @@ export const LEVELS = [
         { off: 8, w: 1.5, h: 2.4 }, { off: 20, w: 1.5, h: 2.4 }, { off: 32, w: 1.5, h: 2.4 },
       ]));
       g.push(...wall(-3, 22, 3, 22, 3.2, C.interiorWall));
-      g.push(...wall(-3, -20, 3, -20, 3.2, C.interiorWall));
+      g.push(...wall(-3, -20, 3, -20, 3.2, C.interiorWall, [{ off: 2, w: 2, h: 2.6 }]));
       // rooms east of corridor at z = 14…8, 2…-4, -10…-16
       for (const rz of [11, -1, -13]) {
         g.push(...wall(3, rz + 3.5, 11, rz + 3.5, 3.2, C.interiorWall));
@@ -95,7 +96,7 @@ export const LEVELS = [
     ],
     objectives: [
       { type: 'clear', zone: null, text: 'CLEAR ALL THREE ROOMS — HOSTILES ONLY' },
-      { type: 'reach', zone: [0, -18, 2.5], text: 'EXIT THE KILL-HOUSE' },
+      { type: 'reach', zone: [0, -19, 3.5], text: 'EXIT THE KILL-HOUSE' },
     ],
   },
 
@@ -115,10 +116,10 @@ export const LEVELS = [
       // building faces (solid) lining the street
       g.push(...wall(-16, 55, -16, -55, 9, C.building));
       g.push(...wall(16, 55, 16, -55, 9, C.building, []));
-      // shops carved into east side
-      g.push(...shop(11, 20, 9, 7));
-      g.push(...shop(11, -5, 9, 7));
-      g.push(...shop(-11, -25, 9, 7));
+      // shops open toward the street
+      g.push(...shop(11, 20, 9, 7, 'w'));
+      g.push(...shop(11, -5, 9, 7, 'w'));
+      g.push(...shop(-11, -25, 9, 7, 'e'));
       // street clutter
       g.push(...car(-4, 25)); g.push(...car(3, 5, true)); g.push(...car(-2, -18)); g.push(...car(5, -35, true));
       g.push(...crate(0, 12), ...crate(1.2, 12.8), ...crate(-6, -8));
@@ -291,7 +292,7 @@ export const LEVELS = [
     brief: 'Barrett M82 on the rooftop. Your assault team is pinned at the fountain while hostiles advance across the plaza. Hold breath to steady. Civilians are still fleeing the square — a .50 does not give second chances.',
     weapons: ['barrett'], grenades: 0, sniper: true, lockPlayer: true,
     sky: 0x1a2432, fog: [0x1a2432, 120, 500], ambient: 0.9, sun: 1.2,
-    start: [0, 24, 66, 0],
+    start: [0, 24, 61.2, 0],
     team: { pos: [0, 0, -10], health: 300 },
     geo: () => {
       const g = [];
@@ -315,14 +316,16 @@ export const LEVELS = [
     },
     doors: [],
     enemies: [
-      { pos: [-38, 0, -80], patrol: [[-20, -40], [-8, -25]], aggro: true, range: 200 },
-      { pos: [-30, 0, -85], patrol: [[-30, -60], [-15, -30]], aggro: true, range: 200 },
-      { pos: [38, 0, -80], patrol: [[20, -45], [10, -28]], aggro: true, range: 200 },
-      { pos: [30, 0, -85], patrol: [[30, -55], [12, -35]], aggro: true, range: 200 },
-      { pos: [0, 0, -100], patrol: [[0, -60], [-5, -30]], aggro: true, range: 200 },
-      { pos: [-10, 0, -100], patrol: [[-12, -55], [-3, -32]], aggro: true, range: 200 },
-      { pos: [10, 0, -100], patrol: [[14, -60], [6, -30]], aggro: true, range: 200 },
-      { pos: [22, 0, -95], patrol: [[26, -68], [18, -40]], aggro: true, range: 200 },
+      // spawns clear of the far buildings (their footprints start at z=-80/-100);
+      // patrol points offset from every crate/car so nobody orbits cover with a bouncing hitbox
+      { pos: [-36, 0, -76], patrol: [[-24, -37], [-8, -28]], aggro: true, range: 200 },
+      { pos: [-30, 0, -77], patrol: [[-27, -60], [-18, -32]], aggro: true, range: 200 },
+      { pos: [36, 0, -76], patrol: [[20, -42], [10, -28]], aggro: true, range: 200 },
+      { pos: [30, 0, -77], patrol: [[30, -55], [12, -38]], aggro: true, range: 200 },
+      { pos: [0, 0, -96], patrol: [[0, -55], [-4, -30]], aggro: true, range: 200 },
+      { pos: [-10, 0, -96], patrol: [[-14, -50], [-3, -32]], aggro: true, range: 200 },
+      { pos: [10, 0, -96], patrol: [[18, -60], [8, -30]], aggro: true, range: 200 },
+      { pos: [22, 0, -93], patrol: [[28, -64], [20, -42]], aggro: true, range: 200 },
     ],
     civilians: [
       { pos: [-25, 0, -35] }, { pos: [18, 0, -58] }, { pos: [-5, 0, -48] }, { pos: [30, 0, -62] }, { pos: [-35, 0, -70] },
@@ -433,9 +436,9 @@ export const LEVELS = [
     start: [0, 6, 40, 0],
     geo: () => {
       const g = [];
-      // street stub + stairs down into station
+      // street stub + stairs down into station (top step meets the stub edge at z=36)
       g.push(...floorSlab(0, 44, 20, 16, 6, 0.5, C.sidewalk));
-      g.push(...stairs(0, 36.2, 'n', 8, 6, 4, C.concrete, 0));
+      g.push(...stairs(0, 28.2, 's', 8, 6, 4, C.concrete, 0));
       // mezzanine/platform hall
       g.push(...floorSlab(0, 0, 44, 60, 0, 1, C.platform));
       g.push(...wall(-22, 28, 22, 28, 5, C.tunnel, [{ off: 18, w: 8, h: 5 }]));

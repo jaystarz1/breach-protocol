@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v4';
+const CACHE = 'breach-protocol-v5';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js',
@@ -21,7 +21,7 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   e.respondWith(
-    fetch(e.request).then(res => {
+    fetch(e.request, { cache: 'no-store' }).then(res => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(e.request, copy));
       return res;

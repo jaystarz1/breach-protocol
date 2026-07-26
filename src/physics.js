@@ -17,23 +17,30 @@ export function groundHeight(solids, x, z, r, yMax) {
 }
 
 // Resolve horizontal overlap for a capsule (point + radius) spanning [yLow, yHigh].
-export function resolveXZ(solids, pos, r, yLow, yHigh) {
-  for (const s of solids) {
-    if (yHigh <= s.min.y + 0.01 || yLow >= s.max.y - 0.01) continue;
-    const cx = Math.max(s.min.x, Math.min(pos.x, s.max.x));
-    const cz = Math.max(s.min.z, Math.min(pos.z, s.max.z));
-    const dx = pos.x - cx, dz = pos.z - cz;
-    const d2 = dx * dx + dz * dz;
-    if (d2 >= r * r) continue;
-    if (d2 > 1e-9) {
-      const d = Math.sqrt(d2), push = (r - d) / d;
-      pos.x += dx * push; pos.z += dz * push;
-    } else {
-      // Center inside the box: push out along smallest penetration axis.
-      const px = Math.min(pos.x - s.min.x + r, s.max.x - pos.x + r);
-      const pz = Math.min(pos.z - s.min.z + r, s.max.z - pos.z + r);
-      if (px < pz) pos.x += (pos.x - (s.min.x + s.max.x) / 2 > 0 ? px : -px);
-      else pos.z += (pos.z - (s.min.z + s.max.z) / 2 > 0 ? pz : -pz);
+// prev (optional) = position before this frame's movement; when the center ends up
+// inside a box, eject toward the side the actor came from — otherwise pushing at a
+// thin wall can pop you out the far side.
+export function resolveXZ(solids, pos, r, yLow, yHigh, prev) {
+  for (let pass = 0; pass < 2; pass++) {
+    for (const s of solids) {
+      if (yHigh <= s.min.y + 0.01 || yLow >= s.max.y - 0.01) continue;
+      const cx = Math.max(s.min.x, Math.min(pos.x, s.max.x));
+      const cz = Math.max(s.min.z, Math.min(pos.z, s.max.z));
+      const dx = pos.x - cx, dz = pos.z - cz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= r * r) continue;
+      if (d2 > 1e-9) {
+        const d = Math.sqrt(d2), push = (r - d) / d;
+        pos.x += dx * push; pos.z += dz * push;
+      } else {
+        const refX = prev ? prev.x : pos.x, refZ = prev ? prev.z : pos.z;
+        const sideX = refX >= (s.min.x + s.max.x) / 2 ? 1 : -1;
+        const sideZ = refZ >= (s.min.z + s.max.z) / 2 ? 1 : -1;
+        const px = sideX > 0 ? s.max.x - pos.x + r : pos.x - s.min.x + r;
+        const pz = sideZ > 0 ? s.max.z - pos.z + r : pos.z - s.min.z + r;
+        if (px < pz) pos.x += sideX * px;
+        else pos.z += sideZ * pz;
+      }
     }
   }
 }

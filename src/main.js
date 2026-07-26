@@ -204,7 +204,8 @@ function startLevel(id) {
     const extra = Math.round(defs.length * (mul - 1));
     for (let i = 0; i < extra; i++) {
       const src = defs[Math.floor(Math.random() * defs.length)];
-      defs.push({ ...src, pos: [src.pos[0] + (Math.random() * 2 - 1), src.pos[1], src.pos[2] + (Math.random() * 2 - 1)] });
+      // spawn at the source's exact position — collision separates them; an offset can clip into walls
+      defs.push({ ...src, pos: [...src.pos] });
     }
   }
   world.enemies = defs.map(d => new Enemy(scene, d, diff));
@@ -261,6 +262,58 @@ function startLevel(id) {
 function setObjective() {
   const obj = world.level.objectives[world.objectiveIdx];
   hud.objective(obj ? obj.text : 'MISSION COMPLETE');
+  world.objStuckTime = 0;
+  if (world.markers) { for (const { m } of world.markers) scene.remove(m); world.markers = null; }
+  // beacon at reach zones: glowing column visible through walls
+  if (world.beacon) { scene.remove(world.beacon); world.beacon = null; }
+  if (obj && obj.type === 'reach') {
+    const [zx, zz, , zy] = obj.zone;
+    const col = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.7, 40, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xffc107, transparent: true, opacity: 0.3, depthTest: false, side: THREE.DoubleSide })
+    );
+    col.position.set(zx, (zy ?? 0) + 20, zz);
+    col.renderOrder = 999;
+    scene.add(col);
+    world.beacon = col;
+  }
+}
+
+// Deadlock failsafe: an enemy that hasn't moved or fired for 90s while a clear
+// objective is stuck gets neutralized by "command" rather than soft-locking the mission.
+function objectiveWatchdog(dt) {
+  const obj = world.level.objectives[world.objectiveIdx];
+  if (!obj) return;
+  world.objStuckTime = (world.objStuckTime || 0) + dt;
+  if (obj.type !== 'clear') return;
+  const live = world.enemies.filter(e => !e.dead);
+  // after 60s stuck: mark remaining hostiles with red diamonds
+  if (world.objStuckTime > 60 && !world.markers) {
+    world.markers = live.map(e => {
+      const m = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.22),
+        new THREE.MeshBasicMaterial({ color: 0xff3d3d, depthTest: false })
+      );
+      m.renderOrder = 999;
+      scene.add(m);
+      return { m, e };
+    });
+  }
+  if (world.markers) {
+    for (const { m, e } of world.markers) {
+      m.visible = !e.dead;
+      m.position.set(e.pos.x, e.pos.y + 2.2, e.pos.z);
+      m.rotation.y += dt * 3;
+    }
+  }
+  if (world.objStuckTime > 90) {
+    for (const e of live) {
+      if ((e.inactiveTime || 0) > 90) {
+        e.damage(99999, world);
+        hud.feed('TARGET NEUTRALIZED BY OVERWATCH', '#ffd54f');
+      }
+    }
+  }
 }
 
 // ---------- Shooting ----------
@@ -268,9 +321,8 @@ let swayPhase = 0;
 function onPlayerShot(spread) {
   world.stats.shotsFired++;
   world.combatHeat = Math.max(world.combatHeat, 5);
-  player.pitch += weapons.spec.recoil * (0.4 + Math.random() * 0.3); // camera kick
 
-  const dir = player.forward();
+  const dir = player.forward(); // compute the ray BEFORE the recoil kick — kick affects the NEXT shot, not this one
   // sniper sway
   if (world.level.sniper && !input.breath) {
     dir.x += Math.sin(swayPhase * 1.7) * weapons.spec.sway;
@@ -316,6 +368,15 @@ function onPlayerShot(spread) {
     if (t < hitDist) { hitDist = t; hitCiv = c; hitEnemy = null; }
   }
 
+  if (window.QA_SHOT !== undefined) {
+    window.QA_SHOT = {
+      dir: [dir.x.toFixed(3), dir.y.toFixed(3), dir.z.toFixed(3)],
+      o: [o.x.toFixed(1), o.y.toFixed(1), o.z.toFixed(1)],
+      wallDist: wallDist.toFixed(1), hitDist: hitDist.toFixed(1),
+      hitEnemy: hitEnemy ? [hitEnemy.pos.x.toFixed(0), hitEnemy.pos.z.toFixed(0)] : null,
+    };
+  }
+  player.pitch += weapons.spec.recoil * (0.4 + Math.random() * 0.3); // camera kick
   if (hitEnemy) {
     world.stats.shotsHit++;
     hud.hitmarker();
@@ -530,7 +591,16 @@ function frame() {
   for (let i = world.effects.length - 1; i >= 0; i--) if (world.effects[i](dt)) world.effects.splice(i, 1);
 
   // objectives + HUD
-  if (!world.over) checkObjectives();
+  if (!world.over) { checkObjectives(); objectiveWatchdog(dt); }
+  // beacon pulse + live distance readout on reach objectives
+  if (world.beacon) {
+    world.beacon.material.opacity = 0.22 + Math.sin(performance.now() / 300) * 0.12;
+    const obj = world.level.objectives[world.objectiveIdx];
+    if (obj && obj.type === 'reach') {
+      const d = Math.round(Math.hypot(player.pos.x - obj.zone[0], player.pos.z - obj.zone[1]));
+      hud.objective(`${obj.text} — ${d}m`);
+    }
+  }
   hud.health(player.health, player.maxHealth);
   hud.ammo(weapons.ammo.mag, weapons.ammo.reserve, weapons.grenades);
   hud.weapon(weapons.spec.name + (weapons.reloading > 0 ? ' — RELOADING' : ''));
@@ -544,5 +614,22 @@ function frame() {
 }
 frame();
 
-// expose for debugging
-window.BP = { get world() { return world; }, startLevel, LEVELS };
+// Touch hardening: menu buttons fire on touchend directly (no 300ms ambiguity, no lost taps)
+for (const b of document.querySelectorAll('.menu-btn, #menu-refresh')) {
+  b.addEventListener('touchend', e => { e.preventDefault(); b.click(); }, { passive: false });
+}
+
+// expose for debugging + QA
+window.BP = {
+  get world() { return world; },
+  get player() { return player; },
+  get weapons() { return weapons; },
+  get mode() { return mode; },
+  startLevel, LEVELS, S, input,
+  setDifficulty(d) { S.difficulty = d; },
+};
+
+// QA autoplay bot: only with ?qa=1
+if (new URLSearchParams(location.search).has('qa')) {
+  import('./qa.js').then(m => { window.QA = m; });
+}

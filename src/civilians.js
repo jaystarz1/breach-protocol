@@ -47,9 +47,10 @@ export class Civilian {
       }
       const s = 3.2;
       const p = this.pos;
+      const prev = { x: p.x, z: p.z };
       p.x += Math.sin(this.panicDir) * s * dt;
       p.z += Math.cos(this.panicDir) * s * dt;
-      resolveXZ(world.solids, p, 0.3, p.y + 0.2, p.y + 1.6);
+      resolveXZ(world.solids, p, 0.3, p.y + 0.6, p.y + 1.6, prev);
       this.mesh.rotation.y = this.panicDir;
       this.walkPhase += s * dt * 5.5;
       animateRig(this.mesh, this.walkPhase, true);

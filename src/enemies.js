@@ -31,6 +31,7 @@ export class Enemy {
     this.range = def.range || 55;      // spotting range
     this.walkPhase = Math.random() * 6;
     this.moving = false;
+    this.inactiveTime = 0;
   }
 
   get pos() { return this.mesh.position; }
@@ -112,6 +113,7 @@ export class Enemy {
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.mesh.rotation.y = this.yaw;
     animateRig(this.mesh, this.walkPhase, this.moving);
+    this.inactiveTime = (this.moving || this.state === 'alert') ? 0 : this.inactiveTime + dt;
   }
 
   doPatrol(dt, world) {
@@ -136,8 +138,9 @@ export class Enemy {
     this.moving = true;
     this.walkPhase += Math.hypot(mx, mz) * 5.5;
     const p = this.pos;
+    const prev = { x: p.x, z: p.z };
     p.x += mx; p.z += mz;
-    resolveXZ(world.solids, p, 0.35, p.y + 0.2, p.y + 1.6);
+    resolveXZ(world.solids, p, 0.35, p.y + 0.6, p.y + 1.6, prev);
   }
 
   doShoot(dt, world, dist, target) {
