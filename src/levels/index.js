@@ -1,7 +1,9 @@
 import { C, floorSlab, wall, stairs, crate, car } from '../levelgen.js';
 import {
-  facade, lift, sandbags, waterTank, acUnit, ventStack, roofHutch,
+  facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
+  ceilingLight, hangingBulb, exitSign, baseboard, wainscot, doorFrame, desk, chair, table,
+  shelf, cabinet, mattress, rug, radiator, pipes, poster, debris,
 } from '../world.js';
 
 // A multi-storey tower with a west-side stairwell. Flights alternate corners per floor
@@ -47,6 +49,43 @@ function tower(x, z, w, d, floors, opts = {}) {
     if (f % 2 === 0) geo.push(...stairs(sx, z1 + 4.5, 'n', 3.4, fh, 2.0, C.concrete, y));
     else geo.push(...stairs(sx, z2 - 4.5, 's', 3.4, fh, 2.0, C.concrete, y));
     if (f < floors - 1) slabWithWindow(y + fh, C.interiorFloor, f % 2);
+
+    // ---- interior dressing, per floor ----
+    // Without this a floor is four flat walls and a flat slab lit by nothing but scene
+    // ambient, which is exactly why the insides looked worse than the outsides.
+    const R = rng(9001 + f * 131 + Math.round(x * 7 + z * 13));
+    const ex1 = x1 + 2.4, ex2 = x2 - 0.3;         // usable floor east of the stair lane
+    const cz1 = z1 + 0.3, cz2 = z2 - 0.3;
+    const ceil = y + fh - 0.05;
+    // two fixtures per floor, offset from centre so the light is uneven and has direction
+    geo.push(...ceilingLight((ex1 + ex2) / 2 - 1.2, ceil, cz1 + (cz2 - cz1) * 0.3, { intensity: 4.2 }));
+    geo.push(...(R() < 0.4
+      ? hangingBulb((ex1 + ex2) / 2 + 1.0, ceil, cz1 + (cz2 - cz1) * 0.72, 0.6)
+      : ceilingLight((ex1 + ex2) / 2 + 1.0, ceil, cz1 + (cz2 - cz1) * 0.72, { intensity: 3.6 })));
+    // trim: skirting round the room and a chair rail, which give the walls scale
+    geo.push(...lift(baseboard(ex1, cz1, ex2, cz1), y));
+    geo.push(...lift(baseboard(ex1, cz2, ex2, cz2), y));
+    geo.push(...lift(baseboard(ex2, cz1, ex2, cz2), y));
+    geo.push(...lift(wainscot(ex1, cz1 + 0.02, ex2, cz1 + 0.02, 1.05), y));
+    geo.push(...lift(wainscot(ex2 - 0.02, cz1, ex2 - 0.02, cz2, 1.05), y));
+    geo.push(...lift(pipes(ex1, cz2 - 0.5, ex2, cz2 - 0.5, fh - 0.35, 2), y));
+    // furniture against the walls so the middle of the room stays walkable for the AI
+    const wallZ = R() < 0.5 ? cz1 + 0.55 : cz2 - 0.55;
+    geo.push(...lift(desk(ex2 - 1.1, wallZ, false), y));
+    geo.push(...lift(chair(ex2 - 1.1, wallZ + (wallZ < z ? 1.0 : -1.0)), y));
+    geo.push(...lift(shelf(ex2 - 0.45, z + (R() - 0.5) * 3, true, 1.9), y));
+    geo.push(...lift(cabinet(ex1 + 0.5, cz1 + 0.9, true), y));
+    if (R() < 0.6) geo.push(...lift(table(x + 1.4, z + (R() - 0.5) * 4), y));
+    if (R() < 0.5) geo.push(...lift(mattress(ex1 + 1.2, cz2 - 1.1, R() < 0.5), y));
+    if (R() < 0.7) geo.push(...lift(rug(x + 1.6, z, 2.6, 1.8), y));
+    geo.push(...lift(radiator(ex2 - 0.22, z + (R() - 0.5) * 4, true), y));
+    geo.push(...lift(poster(ex2 - 0.16, z + (R() - 0.5) * 5, true, 1.75), y));
+    geo.push(...lift(debris(x + 2 + R() * 3, z + (R() - 0.5) * 5, 1.8, 6, 41 + f), y));
+    // doorway trim on the ground-floor entrance
+    if (f === 0 && opts.door !== false) {
+      geo.push(...doorFrame(x1 + w / 2 - 0.8 + 0.8, z2, false, 1.6, 2.4));
+    }
+    geo.push(...exitSign(sx + 1.2, y + 2.4, f % 2 === 0 ? z1 + 1.0 : z2 - 1.0, false));
   }
   if (opts.roof !== false) {
     const ry = floors * fh;
@@ -82,6 +121,8 @@ export const LEVELS = [
     brief: 'Kill-house shakedown. Clear three rooms. Armed targets only — anyone with their hands up walks out alive. Pistol discipline: controlled pairs.',
     weapons: ['pistol'], grenades: 0,
     sky: 0x27313d, fog: [0x27313d, 40, 130], ambient: 0.95, sun: 1.25,
+    // roofed kill-house: the sun never reaches the rooms, so let the ceiling strips light them
+    ambientScale: 0.42,
     start: [0, 0, 18, 0],
     geo: () => {
       const g = [];
@@ -94,12 +135,43 @@ export const LEVELS = [
       g.push(...wall(-3, 22, 3, 22, 3.2, C.interiorWall));
       g.push(...wall(-3, -20, 3, -20, 3.2, C.interiorWall, [{ off: 2, w: 2, h: 2.6 }]));
       // rooms east of corridor at z = 14…8, 2…-4, -10…-16
+      let seat = 0;
       for (const rz of [11, -1, -13]) {
         g.push(...wall(3, rz + 3.5, 11, rz + 3.5, 3.2, C.interiorWall));
         g.push(...wall(3, rz - 3.5, 11, rz - 3.5, 3.2, C.interiorWall));
         g.push(...wall(11, rz + 3.5, 11, rz - 3.5, 3.2, C.interiorWall));
         g.push(...crate(9.5, rz + 2));
+        // Each room gets its own fixture, trim and furniture. A kill-house with three
+        // identical empty boxes gives you nothing to read the room by on entry.
+        const R = rng(1100 + rz * 17);
+        g.push(...ceilingLight(7, 3.15, rz, { intensity: 11, distance: 9 }));
+        g.push(...baseboard(3.2, rz + 3.4, 10.9, rz + 3.4));
+        g.push(...baseboard(3.2, rz - 3.4, 10.9, rz - 3.4));
+        g.push(...baseboard(10.9, rz - 3.4, 10.9, rz + 3.4));
+        g.push(...wainscot(3.2, rz + 3.35, 10.9, rz + 3.35, 1.05));
+        g.push(...wainscot(10.85, rz - 3.4, 10.85, rz + 3.4, 1.05));
+        // +2.25: the corridor wall's gaps are at off 8/20/32 from z=22, which puts the actual
+        // doorway centres at 13.25/1.25/-10.75 — i.e. rz+2.25, not rz. Framing rz would trim
+        // a solid stretch of wall and leave the real opening bare.
+        g.push(...doorFrame(3.15, rz + 2.25, true, 1.5, 2.4));
+        g.push(...pipes(3.4, rz - 2.6, 10.8, rz - 2.6, 2.9, 2));
+        g.push(...desk(9.6, rz - 1.6, true));
+        g.push(...chair(8.3, rz - 1.6, true));
+        g.push(...cabinet(4.4, rz + 2.9, false, 1.4));
+        g.push(...shelf(10.6, rz + 1.2, true, 1.9));
+        if (seat === 0) g.push(...table(6.4, rz + 1.4, 1.3, 0.9), ...chair(6.4, rz + 0.2));
+        if (seat === 1) g.push(...mattress(5.2, rz - 2.4, false), ...rug(7.2, rz, 2.6, 1.8));
+        if (seat === 2) g.push(...rug(6.8, rz + 0.6, 3.0, 2.0), ...radiator(10.75, rz - 0.4, true));
+        g.push(...poster(10.78, rz + 2.4, true, 1.8, R() < 0.5 ? 0x6b5a3c : 0x4a5a6b));
+        g.push(...debris(6.0 + R() * 2, rz + (R() - 0.5) * 3, 1.6, 6, 200 + rz));
+        seat++;
       }
+      // corridor: strip lights, skirting and a run of conduit overhead
+      for (const cz of [18, 10, 2, -6, -14]) g.push(...ceilingLight(0, 3.15, cz, { intensity: 7, distance: 7.5, w: 0.9 }));
+      g.push(...baseboard(-2.8, 21.8, -2.8, -19.8));
+      g.push(...baseboard(2.8, 21.8, 2.8, -19.8));
+      g.push(...pipes(-1.4, 21, -1.4, -19, 2.95, 2));
+      g.push(...exitSign(0, 2.5, -19.4, false));
       // roof over the whole house
       g.push(...floorSlab(4, 1, 16, 44, 3.3, 0.3, C.roof));
       return g;

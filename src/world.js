@@ -434,6 +434,190 @@ export function awning(x, z, w, d, y = 3.0, color = 0x7a3b3b) {
   return [box(x, y, z, w, 0.14, d, color, false), box(x, y - 0.35, z, w, 0.06, 0.08, P.pole, false)];
 }
 
+// ---------- interiors ----------
+// A room lit only by scene ambient has no shape at all: every wall returns the same value
+// and the eye gets no cue about volume. Outdoors the sun does this work; indoors the roof
+// blocks it. So interiors need local sources, and that means geo builders have to be able
+// to emit lights as well as boxes.
+//
+// Collected here rather than returned, because every prop helper's contract is "returns a
+// geo array" and threading a second return value through dozens of call sites would be
+// worse. Drain with takeLights() immediately after building a level's geo.
+let pendingLights = [];
+export function takeLights() { const l = pendingLights; pendingLights = []; return l; }
+
+// Flush-mounted ceiling panel. y is the CEILING height, not the fixture height.
+export function ceilingLight(x, y, z, opts = {}) {
+  const warm = opts.color ?? 0xffe4b8;
+  const w = opts.w ?? 1.3, d = opts.d ?? 0.4;
+  pendingLights.push({
+    pos: [x, y - 0.3, z], color: warm,
+    intensity: opts.intensity ?? 4.5, distance: opts.distance ?? 8.5,
+  });
+  return [
+    box(x, y - 0.07, z, w, 0.12, d, P.dark, false),
+    box(x, y - 0.17, z, w - 0.16, 0.06, d - 0.1, warm, false, true),
+  ];
+}
+
+// Bare bulb on a cord: reads as derelict, and the cord gives a vertical the eye can read.
+export function hangingBulb(x, y, z, drop = 0.7, opts = {}) {
+  const by = y - drop;
+  pendingLights.push({
+    pos: [x, by - 0.1, z], color: opts.color ?? 0xffdca8,
+    intensity: opts.intensity ?? 3.2, distance: opts.distance ?? 7,
+  });
+  return [
+    box(x, y - drop / 2, z, 0.03, drop, 0.03, P.dark, false),
+    box(x, by - 0.08, z, 0.16, 0.16, 0.16, 0xffdca8, false, true),
+  ];
+}
+
+export function exitSign(x, y, z, rot = false) {
+  return [
+    box(x, y, z, rot ? 0.06 : 0.5, 0.22, rot ? 0.5 : 0.06, 0x1f4a2a, false),
+    box(x + (rot ? 0.04 : 0), y, z + (rot ? 0 : 0.04), rot ? 0.03 : 0.42, 0.15, rot ? 0.42 : 0.03, 0x6effa8, false, true),
+  ];
+}
+
+// Skirting along a wall run. Cheap, and it is what stops a floor/wall junction reading as
+// two flat planes butted together — the single highest value-per-box interior detail.
+export function baseboard(x1, z1, x2, z2, color = 0x3d444a, h = 0.14, out = 0.03) {
+  const alongX = Math.abs(x2 - x1) > Math.abs(z2 - z1);
+  const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2;
+  const len = Math.hypot(x2 - x1, z2 - z1);
+  return [box(cx, h / 2 + 0.005, cz, alongX ? len : 0.1 + out, h, alongX ? 0.1 + out : len, color, false)];
+}
+
+// Chair rail / wainscot band: breaks a 3m wall into two horizontal zones so it has scale.
+export function wainscot(x1, z1, x2, z2, y = 1.0, color = 0x4a525a) {
+  const alongX = Math.abs(x2 - x1) > Math.abs(z2 - z1);
+  const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2;
+  const len = Math.hypot(x2 - x1, z2 - z1);
+  return [box(cx, y, cz, alongX ? len : 0.13, 0.09, alongX ? 0.13 : len, color, false)];
+}
+
+// Frame around a doorway opening. wall() leaves a bare rectangular hole otherwise.
+export function doorFrame(x, z, rot = false, w = 1.6, h = 2.4, color = 0x5b4a3c) {
+  const t = 0.1, j = 0.13;
+  const out = [];
+  if (rot) {
+    out.push(box(x, h / 2, z - w / 2, j + 0.1, h, t, color, false));
+    out.push(box(x, h / 2, z + w / 2, j + 0.1, h, t, color, false));
+    out.push(box(x, h + 0.06, z, j + 0.1, t, w + t * 2, color, false));
+  } else {
+    out.push(box(x - w / 2, h / 2, z, t, h, j + 0.1, color, false));
+    out.push(box(x + w / 2, h / 2, z, t, h, j + 0.1, color, false));
+    out.push(box(x, h + 0.06, z, w + t * 2, t, j + 0.1, color, false));
+  }
+  return out;
+}
+
+// Furniture is NON-SOLID on purpose. Procedurally scattered solids sit exactly at capsule
+// height, so they swallow enemy and hostage spawn points and carve holes in the navgrid the
+// AI then refuses to path through. Walking through a desk looks wrong; being ejected six
+// metres through a wall, or a hostage stuck inside a filing cabinet, breaks the mission.
+// Cover is what crate() and barrier() are for, and those are placed by hand.
+export function desk(x, z, rot = false, color = 0x6b563d) {
+  const w = rot ? 0.75 : 1.6, d = rot ? 1.6 : 0.75;
+  return [
+    box(x, 0.74, z, w, 0.07, d, color, false),
+    box(x, 0.37, z, rot ? 0.6 : 0.12, 0.72, rot ? 0.12 : 0.6, 0x4a3c2c, false),
+    box(x + (rot ? 0 : w / 2 - 0.2), 0.5, z + (rot ? d / 2 - 0.2 : 0), rot ? 0.6 : 0.36, 0.4, rot ? 0.36 : 0.6, 0x5a4936, false),
+  ];
+}
+
+export function chair(x, z, rot = false, color = 0x45403a) {
+  return [
+    box(x, 0.44, z, 0.44, 0.06, 0.44, color, false),
+    box(x + (rot ? -0.19 : 0), 0.72, z + (rot ? 0 : -0.19), rot ? 0.06 : 0.44, 0.5, rot ? 0.44 : 0.06, color, false),
+    box(x, 0.21, z, 0.1, 0.42, 0.1, P.pole, false),
+  ];
+}
+
+export function table(x, z, w = 1.2, d = 0.8, color = 0x6b563d) {
+  const out = [box(x, 0.72, z, w, 0.08, d, color, false)];
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    out.push(box(x + sx * (w / 2 - 0.1), 0.34, z + sz * (d / 2 - 0.1), 0.08, 0.68, 0.08, 0x4a3c2c, false));
+  }
+  return out;
+}
+
+export function shelf(x, z, rot = false, h = 1.9, color = 0x574434) {
+  const w = rot ? 0.34 : 1.1, d = rot ? 1.1 : 0.34;
+  const out = [
+    box(x, h / 2, z, rot ? 0.06 : w, h, rot ? d : 0.06, color, false),
+  ];
+  for (let sy = 0.4; sy < h; sy += 0.45) out.push(box(x, sy, z, w, 0.05, d, color, false));
+  return out;
+}
+
+export function cabinet(x, z, rot = false, h = 1.4, color = 0x4d565d) {
+  const w = rot ? 0.5 : 0.9, d = rot ? 0.9 : 0.5;
+  const out = [box(x, h / 2, z, w, h, d, color, false)];
+  for (let dy = 0.28; dy < h - 0.1; dy += 0.34) {
+    out.push(box(x + (rot ? (d ? 0.26 : 0) : 0), dy, z + (rot ? 0 : 0.26), rot ? 0.02 : w - 0.12, 0.24, rot ? d - 0.12 : 0.02, 0x39424a, false));
+  }
+  return out;
+}
+
+export function mattress(x, z, rot = false) {
+  const w = rot ? 0.9 : 1.9, d = rot ? 1.9 : 0.9;
+  return [box(x, 0.11, z, w, 0.22, d, 0x8e8574, false), box(x, 0.26, z, w * 0.35, 0.1, d * 0.6, 0x6d6a60, false)];
+}
+
+export function rug(x, z, w = 2.4, d = 1.6, color = 0x5a3f3a) {
+  return [box(x, 0.02, z, w, 0.04, d, color, false)];
+}
+
+export function radiator(x, z, rot = false) {
+  const w = rot ? 0.16 : 1.0, d = rot ? 1.0 : 0.16;
+  const out = [box(x, 0.42, z, w, 0.6, d, 0x8d9299, false)];
+  for (let i = -3; i <= 3; i++) {
+    out.push(rot ? box(x + 0.1, 0.42, z + i * 0.13, 0.03, 0.56, 0.05, 0x767c83, false)
+                 : box(x + i * 0.13, 0.42, z + 0.1, 0.05, 0.56, 0.03, 0x767c83, false));
+  }
+  return out;
+}
+
+// Conduit / pipe run near the ceiling. Gives an interior an industrial read and, more
+// usefully, a strong horizontal line that catches the local lights.
+export function pipes(x1, z1, x2, z2, y, n = 2, color = 0x6a5f52) {
+  const alongX = Math.abs(x2 - x1) > Math.abs(z2 - z1);
+  const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2;
+  const len = Math.hypot(x2 - x1, z2 - z1);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const off = (i - (n - 1) / 2) * 0.22;
+    out.push(alongX
+      ? box(cx, y, cz + off, len, 0.11, 0.11, color, false)
+      : box(cx + off, y, cz, 0.11, 0.11, len, color, false));
+  }
+  for (let s = -len / 2 + 1.5; s < len / 2; s += 3.2) {
+    out.push(alongX
+      ? box(cx + s, y + 0.14, cz, 0.06, 0.18, 0.5, P.pole, false)
+      : box(cx, y + 0.14, cz + s, 0.5, 0.18, 0.06, P.pole, false));
+  }
+  return out;
+}
+
+export function poster(x, z, rot = false, y = 1.7, color = 0x7a6a4a) {
+  return [box(x, y, z, rot ? 0.03 : 0.8, 1.1, rot ? 0.8 : 0.03, color, false)];
+}
+
+// Scattered floor rubble. Non-solid so it never snags the character controller or the AI.
+export function debris(x, z, radius = 2.2, n = 7, seed = 3) {
+  const R = rng(seed);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = R() * Math.PI * 2, r = R() * radius;
+    const s = 0.1 + R() * 0.26;
+    const tone = new THREE.Color(0x6d7278).multiplyScalar(0.7 + R() * 0.5).getHex();
+    out.push(box(x + Math.cos(a) * r, s * 0.35, z + Math.sin(a) * r, s, s * 0.6, s * (0.6 + R() * 0.8), tone, false));
+  }
+  return out;
+}
+
 export function shopSign(x, z, w = 2.2, y = 3.4, rot = false) {
   return [
     box(x, y, z, rot ? 0.12 : w, 0.7, rot ? w : 0.12, P.dark, false),

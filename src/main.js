@@ -15,7 +15,7 @@ import * as save from './save.js';
 import { sfx, unlock as audioUnlock, updateListener, startAmbient, stopAmbient } from './audio.js';
 import { quality } from './quality.js';
 import { environment, environmentFrom } from './textures.js';
-import { skyDome, groundPlate, skyline } from './world.js';
+import { skyDome, groundPlate, skyline, takeLights } from './world.js';
 
 const $ = id => document.getElementById(id);
 
@@ -164,7 +164,9 @@ function startLevel(id) {
 
   scene = new THREE.Scene();
   // built before the lights because the sun's shadow frustum is fitted to these bounds
+  takeLights();   // drop anything a stray L.geo() call left behind
   const geo = [...L.geo(), ...(L.extraGeo ? L.extraGeo() : [])];
+  const roomLights = takeLights();
   scene.background = new THREE.Color(L.sky);
   scene.fog = new THREE.Fog(L.fog[0], L.fog[1], L.fog[2]);
 
@@ -195,7 +197,12 @@ function startLevel(id) {
   // responds differently, so scale here rather than rewriting all ten levels' art direction.
   // Key light gets the bigger boost and ambient the smaller one: strong key + darker fill is
   // what gives a scene shape instead of the uniform flat wash Lambert produced.
-  const AMB = quality.pbr ? 1.35 : 1;
+  // ambientScale lets a level that is mostly interior pull the global fill DOWN so its own
+  // ceiling fixtures actually shape the rooms. A fixture can only read as a pool of light if
+  // it is bright relative to the ambient; at full fill it just adds a flat offset and the
+  // room stays shapeless no matter how many you hang.
+  const AS = L.ambientScale ?? 1;
+  const AMB = (quality.pbr ? 1.35 : 1) * AS;
   const KEY = quality.pbr ? 2.1 : 1;
   scene.add(new THREE.AmbientLight(L.nvg ? 0x8dffb4 : 0xbfd4e6, L.ambient * AMB));
   if (L.nvg) scene.add(new THREE.HemisphereLight(0xa8ffc8, 0x0e2416, 0.9));
@@ -231,6 +238,21 @@ function startLevel(id) {
   }
   const hemi = new THREE.HemisphereLight(0x9db4c8, 0x2a323a, (L.flashlight ? 0.15 : 0.65) * AMB);
   scene.add(hemi);
+
+  // Interior fixtures. Every one of these is a per-fragment loop iteration on the big merged
+  // mesh, so the count is capped hard and the drop is REPORTED — a silently truncated light
+  // list looks like a lighting bug two weeks later. No shadows from these: a shadow-casting
+  // point light is six render passes, which no interior here is worth.
+  const LIGHT_CAP = quality.pbr ? 14 : 6;
+  const used = roomLights.slice(0, LIGHT_CAP);
+  for (const l of used) {
+    const pl = new THREE.PointLight(l.color, l.intensity * (L.nvg ? 0.35 : 1), l.distance, 2);
+    pl.position.set(l.pos[0], l.pos[1], l.pos[2]);
+    scene.add(pl);
+  }
+  if (roomLights.length > used.length) {
+    console.warn(`[bp] level ${L.id}: ${roomLights.length - used.length} of ${roomLights.length} fixtures dropped (cap ${LIGHT_CAP})`);
+  }
 
   const { solids } = buildStaticGeometry(scene, geo);
 
