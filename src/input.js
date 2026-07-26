@@ -23,7 +23,11 @@ export const input = {
 
 const el = id => document.getElementById(id);
 
+// Touch-capable hybrids keep the thumb UI; only mouse-and-keyboard machines lose it.
+export const isDesktop = !matchMedia('(pointer: coarse)').matches && !('ontouchstart' in window);
+
 export function initInput() {
+  if (isDesktop) document.body.classList.add('desktop');
   const stickZone = el('stick-zone');
   const lookZone = el('look-zone');
   const stickBase = el('stick-base');
@@ -170,8 +174,22 @@ export function initInput() {
   window.addEventListener('mouseup', e => { if (e.button === 0) input.fire = false; });
   window.addEventListener('mousemove', e => {
     if (document.pointerLockElement !== canvas) return;
-    input.lookDelta.x += e.movementX * 0.0022 * input.sensitivity;
-    input.lookDelta.y += e.movementY * 0.0022 * input.sensitivity * (input.invertY ? -1 : 1);
+    // sensScale must apply here too, or ADS/scoped aim is full-speed on mouse.
+    input.lookDelta.x += e.movementX * 0.0022 * input.sensitivity * input.sensScale;
+    input.lookDelta.y += e.movementY * 0.0022 * input.sensitivity * input.sensScale * (input.invertY ? -1 : 1);
+  });
+
+  // Focus loss strands held keys/buttons: you tab away mid-sprint and come back walking.
+  const releaseAll = () => {
+    for (const k in keys) keys[k] = false;
+    input.move.x = 0; input.move.y = 0;
+    input.fire = false;
+    input.breath = false;
+    input.leanLeft = false; input.leanRight = false;
+  };
+  window.addEventListener('blur', releaseAll);
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement !== canvas) releaseAll();
   });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
 }
