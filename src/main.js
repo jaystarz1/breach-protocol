@@ -61,12 +61,10 @@ function buildLevelList() {
   list.innerHTML = '';
   LEVELS.forEach(L => {
     const btn = document.createElement('button');
-    const locked = L.id > S.unlocked;
     btn.className = 'menu-btn';
-    btn.disabled = locked;
     const best = S.best[L.id];
     btn.innerHTML = `${String(L.id).padStart(2, '0')} — ${L.name}` +
-      `<span class="sub">${locked ? 'LOCKED' : best ? `BEST: ${best.grade} · ${best.score}` : 'NOT COMPLETED'}${L.sniper ? ' · SNIPER' : ''}</span>`;
+      `<span class="sub">${best ? `BEST: ${best.grade} · ${best.score}` : 'NOT COMPLETED'}${L.sniper ? ' · SNIPER' : ''}</span>`;
     btn.onclick = () => showBrief(L.id);
     list.appendChild(btn);
   });
@@ -81,7 +79,7 @@ function showBrief(id) {
   hud.screen('brief');
 }
 
-$('menu-continue').onclick = () => { audioUnlock(); showBrief(Math.min(S.unlocked, 10)); };
+$('menu-continue').onclick = () => { audioUnlock(); showBrief(Math.min(Math.max(1, currentLevel), 10)); };
 $('menu-levels').onclick = () => { audioUnlock(); buildDiffRow(); buildLevelList(); hud.screen('levels'); };
 $('menu-settings').onclick = () => hud.screen('settings');
 $('levels-back').onclick = () => hud.screen('menu');
@@ -90,6 +88,7 @@ $('brief-back').onclick = () => { buildDiffRow(); buildLevelList(); hud.screen('
 $('brief-go').onclick = () => { audioUnlock(); startLevel(currentLevel); };
 $('pause-resume').onclick = () => { mode = 'playing'; hud.screen(null); };
 $('pause-restart').onclick = () => startLevel(currentLevel);
+$('pause-skip').onclick = () => startLevel(currentLevel < 10 ? currentLevel + 1 : 1);
 $('pause-quit').onclick = () => toMenu();
 $('debrief-retry').onclick = () => startLevel(currentLevel);
 $('debrief-menu').onclick = () => toMenu();
@@ -353,12 +352,14 @@ function onPlayerShot(spread) {
   const o = camera.position;
   const wallDist = raycastSolids(world.solids, o.x, o.y, o.z, dir.x, dir.y, dir.z, weapons.spec.range);
 
-  // nearest actor hit
-  let hitEnemy = null, hitCiv = null, hitDist = wallDist;
+  // nearest actor hit — head sphere is a one-shot kill on any weapon
+  let hitEnemy = null, hitCiv = null, hitDist = wallDist, headshot = false;
   for (const e of world.enemies) {
     if (e.dead) continue;
-    const t = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, e.pos.x, e.pos.y + 1.0, e.pos.z, 0.55);
-    if (t < hitDist) { hitDist = t; hitEnemy = e; hitCiv = null; }
+    const tHead = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, e.pos.x, e.pos.y + 1.66, e.pos.z, 0.34);
+    const tBody = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, e.pos.x, e.pos.y + 1.0, e.pos.z, 0.55);
+    const t = Math.min(tHead, tBody);
+    if (t < hitDist) { hitDist = t; hitEnemy = e; hitCiv = null; headshot = tHead <= tBody; }
   }
   for (const c of world.civilians) {
     if (c.dead) continue;
@@ -380,7 +381,13 @@ function onPlayerShot(spread) {
   if (hitEnemy) {
     world.stats.shotsHit++;
     hud.hitmarker();
-    hitEnemy.damage(weapons.spec.damage, world);
+    if (headshot) {
+      world.stats.score += 50;
+      hud.feed('HEADSHOT +50', '#ffd54f');
+      hitEnemy.damage(99999, world);
+    } else {
+      hitEnemy.damage(weapons.spec.damage, world);
+    }
   } else if (hitCiv) {
     civilianKilled(hitCiv);
   }

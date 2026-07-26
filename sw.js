@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v5';
+const CACHE = 'breach-protocol-v6';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js',

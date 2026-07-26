@@ -1,7 +1,7 @@
 const KEY = 'breach-protocol-save-v1';
 
 const defaults = {
-  unlocked: 1,           // highest mission index unlocked (1-based)
+  unlocked: 10,          // all missions playable from the start — no earning your way up
   difficulty: 1,
   sensitivity: 1.0,
   invertY: false,
