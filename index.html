@@ -58,6 +58,20 @@
   #btn-breach { left:50%; transform:translateX(-50%); bottom:calc(120px + env(safe-area-inset-bottom)); width:120px; height:52px; border-radius:26px; background:rgba(255,193,7,.25); border-color:rgba(255,193,7,.7); font-size:14px; display:none; }
   #btn-breath { right:calc(190px + env(safe-area-inset-right)); bottom:calc(90px + env(safe-area-inset-bottom)); width:56px; height:56px; font-size:10px; display:none; }
   #btn-pause { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:max(14px, env(safe-area-inset-left)); width:40px; height:40px; font-size:15px; }
+  #btn-crouch { left:max(18px, env(safe-area-inset-left)); bottom:calc(16px + env(safe-area-inset-bottom)); width:54px; height:54px; font-size:10px; }
+  #btn-crouch.latched { background:rgba(255,193,7,.3); border-color:rgba(255,193,7,.75); color:#ffd54f; }
+  #btn-lean-l { left:max(16px, env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:16px; }
+  #btn-lean-r { left:calc(68px + env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:16px; }
+  #btn-flash { right:max(30px, env(safe-area-inset-right)); bottom:calc(212px + env(safe-area-inset-bottom)); width:52px; height:52px; font-size:10px; display:none; }
+
+  /* ---------- Directional damage ---------- */
+  #dmg-ring { position:absolute; inset:0; pointer-events:none; }
+  .dmg-arc { position:absolute; left:50%; top:50%; width:230px; height:230px; margin:-115px 0 0 -115px;
+    border-radius:50%; border:5px solid transparent; border-top-color:rgba(255,42,42,.92);
+    opacity:0; transition:opacity .5s; }
+
+  /* ---------- Flashbang ---------- */
+  #flash-white { position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; }
   #btn-refresh { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:calc(64px + env(safe-area-inset-left)); width:40px; height:40px; font-size:17px; }
   #menu-refresh { position:absolute; top:calc(12px + env(safe-area-inset-top)); left:max(14px, env(safe-area-inset-left)); width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.2); color:#eceff1; font-size:17px; pointer-events:auto; }
 
@@ -117,6 +131,7 @@
 
 <div id="hud">
   <div id="damage-vignette"></div>
+  <div id="dmg-ring"></div>
   <div id="crosshair"></div>
   <div id="hitmarker"></div>
   <div id="objective">OBJECTIVE</div>
@@ -129,6 +144,7 @@
 </div>
 
 <div id="nvg"></div>
+<div id="flash-white"></div>
 <div id="scope"><div id="scope-mask"></div><div id="scope-cross"></div></div>
 
 <div id="controls">
@@ -145,6 +161,10 @@
   <div class="btn" id="btn-breath">HOLD<br>BREATH</div>
   <div class="btn" id="btn-pause">II</div>
   <div class="btn" id="btn-refresh">⟳</div>
+  <div class="btn" id="btn-crouch">CROUCH</div>
+  <div class="btn" id="btn-lean-l">◐</div>
+  <div class="btn" id="btn-lean-r">◑</div>
+  <div class="btn" id="btn-flash">FLASH</div>
   <div class="ctl-hint" id="move-hint"><div class="ring">✛</div><div class="lbl">LEFT THUMB — MOVE</div></div>
   <div class="ctl-hint" id="aim-hint"><div class="lbl">DRAG RIGHT SIDE — AIM · FIRE BUTTON — SHOOT</div></div>
 </div>

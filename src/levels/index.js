@@ -158,8 +158,8 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 3
   {
     id: 3, name: 'STACK UP',
-    brief: 'Apartment block, three floors, hostiles holding hostages on each. Breach every door like it is your last. A dead hostage ends the op.',
-    weapons: ['pistol', 'm4'], grenades: 0,
+    brief: 'Apartment block, three floors, hostiles holding hostages on each. Flashbangs are the tool here: bang the room, then enter. Walk up to a bound hostage to cut them loose. A dead hostage ends the op.',
+    weapons: ['pistol', 'm4'], grenades: 0, flashes: 3,
     sky: 0x232e3a, fog: [0x232e3a, 35, 120], ambient: 0.9, sun: 1.15,
     start: [0, 0, 16, 0],
     geo: () => {
@@ -193,6 +193,7 @@ export const LEVELS = [
     ],
     objectives: [
       { type: 'clear', zone: null, text: 'CLEAR ALL THREE FLOORS — PROTECT THE HOSTAGES' },
+      { type: 'rescue', text: 'CUT THE HOSTAGES LOOSE — WALK UP TO EACH ONE' },
       { type: 'reach', zone: [-2, -6, 3, 9], text: 'GET TO THE ROOF' },
     ],
   },
@@ -200,8 +201,8 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 4
   {
     id: 4, name: 'THE CHASE',
-    brief: 'The cell leader is running. Pursue through the alleys and the parking structure. His guards will try to slow you down. Frags authorized — watch for runners who are not armed.',
-    weapons: ['pistol', 'm4'], grenades: 3,
+    brief: 'The cell leader is running and he does not stop. Chase him through the alleys and the parking structure and put him down before he reaches the far gate. His guards will try to buy him time.',
+    weapons: ['pistol', 'm4'], grenades: 3, flashes: 2,
     sky: 0x1e2836, fog: [0x1e2836, 38, 150], ambient: 0.85, sun: 1.1,
     start: [0, 0, 45, 0],
     geo: () => {
@@ -227,6 +228,9 @@ export const LEVELS = [
     },
     doors: [],
     enemies: [
+      // the runner: never fights, sprints the escape route, marked in the world
+      { pos: [0, 0, 27], flee: true, hvt: true, escapes: true, hold: false,
+        patrol: [[0, 22], [13.5, 17.5], [21, 10], [21, -2], [10, -7.5], [-6, -9], [-6, -20], [-14, -30], [-6.5, -37], [-6.5, -44]] },
       { pos: [2, 0, 30], hold: true, yaw: 180 },
       { pos: [21, 0, 15], patrol: [[21, 15], [21, 2]], aggro: true },
       { pos: [10, 0, -7.5], hold: true, yaw: 90 },
@@ -239,10 +243,9 @@ export const LEVELS = [
       { pos: [-2, 0, 35] }, { pos: [20, 0, 5] }, { pos: [-10, 0, -22] }, { pos: [6, 0, -33] },
     ],
     objectives: [
-      { type: 'reach', zone: [13.5, 17.5, 3], text: 'PURSUE — THROUGH THE ALLEY DOOR' },
-      { type: 'reach', zone: [-6, -7.5, 3.5], text: 'HE CUT THROUGH THE WALL — KEEP ON HIM' },
-      { type: 'clear', zone: [-5, -25, 30], text: 'GUARDS IN THE GARAGE — DROP THEM' },
-      { type: 'reach', zone: [-6.5, -41, 3.5], text: 'EXIT GATE — CUT HIM OFF' },
+      { type: 'target', text: 'RUN HIM DOWN — DO NOT LET HIM REACH THE GATE' },
+      { type: 'clear', zone: [-5, -25, 30], text: 'CLEAR THE GARAGE' },
+      { type: 'reach', zone: [-6.5, -41, 3.5], text: 'EXFIL THROUGH THE GATE' },
     ],
   },
 
@@ -347,8 +350,8 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 7
   {
     id: 7, name: 'VERTICAL ASSAULT',
-    brief: 'Helicopter drops you on the roof of their safehouse tower. Fight DOWN four floors to the street. They know you are coming — expect stacked resistance in every stairwell.',
-    weapons: ['pistol', 'm4'], grenades: 3,
+    brief: 'Helicopter drops you on the roof of their safehouse tower. Fight DOWN four floors to the street. They know you are coming, so bang the stairwells before you take them.',
+    weapons: ['pistol', 'm4'], grenades: 3, flashes: 3,
     sky: 0x1d2734, fog: [0x1d2734, 40, 160], ambient: 0.85, sun: 1.1,
     start: [3, 12.3, -2, 180],
     geo: () => {
@@ -388,7 +391,7 @@ export const LEVELS = [
   {
     id: 8, name: 'BLACKOUT',
     brief: 'They cut the power to the records office. Night vision goggles on. Clear the floor and reach the server room. They are blind in the dark — you are not.',
-    weapons: ['pistol', 'm4'], grenades: 2, nvg: true,
+    weapons: ['pistol', 'm4'], grenades: 2, flashes: 3, nvg: true,
     sky: 0x030a05, fog: [0x061510, 14, 60], ambient: 0.6, sun: 0.0,
     start: [0, 0, 24, 0],
     geo: () => {
@@ -439,8 +442,8 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 9
   {
     id: 9, name: 'UNDERGROUND',
-    brief: 'They pulled the hostages into the metro. Platform level, then the tunnels. Frags will bounce far down here — mind the overpressure and mind the hostages taped to the columns.',
-    weapons: ['pistol', 'm4'], grenades: 4,
+    brief: 'They pulled the hostages into the metro. Platform level, then the tunnels. Frags bounce far down here, so mind the overpressure. Every hostage taped to a column comes home: walk up to each one and cut them free.',
+    weapons: ['pistol', 'm4'], grenades: 4, flashes: 2,
     sky: 0x0d1116, fog: [0x0d1116, 22, 90], ambient: 0.55, sun: 0.25,
     start: [0, 6, 40, 0],
     geo: () => {
@@ -488,15 +491,15 @@ export const LEVELS = [
     objectives: [
       { type: 'clear', zone: [0, 0, 40], text: 'CLEAR THE PLATFORM — HOSTAGES ON THE COLUMNS' },
       { type: 'clear', zone: null, text: 'PUSH THE SOUTH TUNNEL' },
-      { type: 'reach', zone: [0, -56, 3], text: 'REACH THE LAST HOSTAGE' },
+      { type: 'rescue', text: 'CUT EVERY HOSTAGE LOOSE' },
     ],
   },
 
   // ---------------------------------------------------------------- 10
   {
     id: 10, name: 'THE CELL',
-    brief: 'Endgame. Breach the compound gate, take the tower, cross the roof, and go down into the bunker where the cell leader is holed up with human shields. Everything you have learned. Every layer of the city.',
-    weapons: ['pistol', 'm4'], grenades: 4,
+    brief: 'Endgame. Breach the compound, take the tower, then go down into the bunker where the cell leader is holed up behind human shields. Bang the room, drop him, cut them loose. Everything you have learned, every layer of the city.',
+    weapons: ['pistol', 'm4'], grenades: 4, flashes: 4,
     sky: 0x1e2835, fog: [0x1e2835, 40, 170], ambient: 0.85, sun: 1.15,
     start: [0, 0, 42, 0],
     geo: () => {
@@ -547,6 +550,9 @@ export const LEVELS = [
       { pos: [4, 6, -12], hold: true, yaw: 120 },
       // bunker
       { pos: [22, -5, -30], hold: true, yaw: 0 }, { pos: [18, -5, -38], hold: true, yaw: 0 }, { pos: [27, -5, -36], hold: true, yaw: 30 },
+      // the cell leader, cornered: bolts around the bunker rather than standing and fighting
+      { pos: [24, -5, -41], flee: true, hvt: true,
+        patrol: [[17, -41], [28, -41], [28, -28], [17, -30], [17, -41]] },
     ],
     civilians: [
       { pos: [-16, 0, 14] },
@@ -556,8 +562,9 @@ export const LEVELS = [
     objectives: [
       { type: 'clear', zone: [0, 10, 34], text: 'TAKE THE COURTYARD' },
       { type: 'clear', zone: [0, -10, 14, 8], text: 'CLEAR THE TOWER' },
-      { type: 'clear', zone: null, text: 'THE BUNKER — HVT HAS HUMAN SHIELDS. SURGICAL.' },
-      { type: 'reach', zone: [22, -39, 3, -5], text: 'SECURE THE HOSTAGES' },
+      { type: 'clear', zone: null, text: 'THE BUNKER — HUMAN SHIELDS. SURGICAL.' },
+      { type: 'target', text: 'THE CELL LEADER — TAKE HIM' },
+      { type: 'rescue', zone: [22, -34, 16, -5], text: 'CUT THE SHIELDS LOOSE AND GET THEM OUT' },
     ],
   },
 ];

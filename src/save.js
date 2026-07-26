@@ -22,10 +22,14 @@ export function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
 }
 
-export function recordResult(levelId, score, grade) {
+export function recordResult(levelId, score, grade, difficulty = '') {
   const s = load();
   const prev = s.best[levelId];
-  if (!prev || score > prev.score) s.best[levelId] = { score, grade };
+  // a Recruit clear should never overwrite an Elite clear, so rank by difficulty first
+  const rank = d => ['RECRUIT', 'REGULAR', 'HARDENED', 'VETERAN', 'ELITE'].indexOf(d);
+  const better = !prev || rank(difficulty) > rank(prev.difficulty || '')
+    || (rank(difficulty) === rank(prev.difficulty || '') && score > prev.score);
+  if (better) s.best[levelId] = { score, grade, difficulty };
   if (levelId >= s.unlocked && levelId < 10) s.unlocked = levelId + 1;
   save();
 }

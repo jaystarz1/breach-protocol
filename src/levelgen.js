@@ -144,12 +144,13 @@ export function makeCharacter({ hostile, hostage }) {
     rArm.rotation.x = Math.PI - 0.15; rArm.rotation.z = -0.18;
   }
 
-  g.userData.rig = { headG, lLeg, rLeg, lArm, rArm, rifle, hostile, hostage };
+  g.userData.rig = { headG, lLeg, rLeg, lArm, rArm, rifle, hostile, hostage, torsoTilt: 0 };
   return g;
 }
 
-// Walk cycle: swing legs (and arms for civilians). phase advances with distance moved.
-export function animateRig(g, phase, moving) {
+// Walk cycle plus hit reaction. phase advances with distance moved; flinch is 0..~0.32s
+// remaining, which jerks the upper body back so bullets visibly land.
+export function animateRig(g, phase, moving, flinch = 0) {
   const r = g.userData.rig;
   if (!r) return;
   const swing = moving ? Math.sin(phase) * 0.55 : 0;
@@ -158,11 +159,15 @@ export function animateRig(g, phase, moving) {
   r.lLeg.userData.shin.rotation.x = moving ? Math.max(0, -Math.sin(phase)) * 0.7 : 0;
   r.rLeg.userData.shin.rotation.x = moving ? Math.max(0, Math.sin(phase)) * 0.7 : 0;
   if (!r.hostile && !r.hostage) {
-    // panicked civilians pump raised arms slightly
     r.lArm.rotation.z = 0.18 + (moving ? Math.sin(phase * 2) * 0.08 : 0);
     r.rArm.rotation.z = -0.18 - (moving ? Math.sin(phase * 2) * 0.08 : 0);
   }
-  // subtle bob
+  if (r.headG) {
+    const f = flinch * 3.2;                       // 0..~1
+    r.headG.rotation.x = -f * 0.5 + (moving ? Math.sin(phase * 2) * 0.02 : 0);
+    r.headG.position.x = f * (Math.random() - 0.5) * 0.06;
+    if (r.torsoTilt !== undefined) g.rotation.x = -f * 0.16;
+  }
   g.userData.bob = moving ? Math.abs(Math.sin(phase)) * 0.05 : 0;
 }
 

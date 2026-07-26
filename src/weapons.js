@@ -84,12 +84,14 @@ export class Weapons {
     this.reloading = 0;
     this.recoilKick = 0;
     this.grenades = 0;
+    this.flashes = 0;
     this.onFire = null; // (spread) => void, set by main
   }
 
-  setLoadout(list, grenades) {
+  setLoadout(list, grenades, flashes = 0) {
     this.loadout = list;
     this.grenades = grenades;
+    this.flashes = flashes;
     this.state = {};
     for (const k of list) {
       const s = WEAPON_SPECS[k];
@@ -169,15 +171,19 @@ export class Weapons {
   }
 }
 
-// ---------- Grenades ----------
+// ---------- Throwables ----------
 export class Grenade {
-  constructor(scene, pos, dir) {
-    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshLambertMaterial({ color: 0x33421f }));
+  constructor(scene, pos, dir, kind = 'frag') {
+    this.kind = kind;
+    this.mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.09, 8, 6),
+      new THREE.MeshLambertMaterial({ color: kind === 'flash' ? 0xb0bec5 : 0x33421f })
+    );
     this.mesh.position.copy(pos);
     scene.add(this.mesh);
     this.vel = dir.clone().multiplyScalar(14);
     this.vel.y += 3.5;
-    this.fuse = 2.2;
+    this.fuse = kind === 'flash' ? 1.5 : 2.2;
     this.dead = false;
   }
   // solids for bounce; returns true when exploded

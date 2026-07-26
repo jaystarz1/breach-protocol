@@ -8,11 +8,16 @@ export const input = {
   ads: false,
   reloadPressed: false,
   nadePressed: false,
+  flashPressed: false,
   swapPressed: false,
   breachPressed: false,
   breath: false,
   pausePressed: false,
+  crouch: false,
+  leanLeft: false,
+  leanRight: false,
   sensitivity: 1.0,
+  sensScale: 1.0,        // set by main: lower while ADS, much lower while scoped
   invertY: false,
 };
 
@@ -81,8 +86,8 @@ export function initInput() {
     e.preventDefault();
     for (const t of e.changedTouches) {
       if (t.identifier !== lookTouch) continue;
-      input.lookDelta.x += (t.clientX - lookLast.x) * 0.0045 * input.sensitivity;
-      input.lookDelta.y += (t.clientY - lookLast.y) * 0.0045 * input.sensitivity * (input.invertY ? -1 : 1);
+      input.lookDelta.x += (t.clientX - lookLast.x) * 0.0045 * input.sensitivity * input.sensScale;
+      input.lookDelta.y += (t.clientY - lookLast.y) * 0.0045 * input.sensitivity * input.sensScale * (input.invertY ? -1 : 1);
       lookLast = { x: t.clientX, y: t.clientY };
     }
   }, { passive: false });
@@ -109,10 +114,14 @@ export function initInput() {
   hold('btn-ads', () => { input.ads = !input.ads; });
   hold('btn-reload', () => { input.reloadPressed = true; });
   hold('btn-nade', () => { input.nadePressed = true; });
+  hold('btn-flash', () => { input.flashPressed = true; });
   hold('btn-swap', () => { input.swapPressed = true; });
   hold('btn-breach', () => { input.breachPressed = true; });
   hold('btn-breath', () => { input.breath = true; }, () => { input.breath = false; });
   hold('btn-pause', () => { input.pausePressed = true; });
+  hold('btn-crouch', () => { input.crouch = !input.crouch; el('btn-crouch').classList.toggle('latched', input.crouch); });
+  hold('btn-lean-l', () => { input.leanLeft = true; }, () => { input.leanLeft = false; });
+  hold('btn-lean-r', () => { input.leanRight = true; }, () => { input.leanRight = false; });
   el('btn-refresh').addEventListener('touchstart', e => { e.preventDefault(); location.reload(); }, { passive: false });
   el('btn-refresh').addEventListener('click', () => location.reload());
   const mr = el('menu-refresh');
@@ -125,15 +134,21 @@ export function initInput() {
     keys[e.code] = true;
     if (e.code === 'KeyR') input.reloadPressed = true;
     if (e.code === 'KeyG') input.nadePressed = true;
-    if (e.code === 'KeyQ') input.swapPressed = true;
-    if (e.code === 'KeyE' || e.code === 'KeyF') input.breachPressed = true;
+    if (e.code === 'KeyX') input.swapPressed = true;
+    if (e.code === 'KeyF') input.breachPressed = true;
+    if (e.code === 'KeyB') input.flashPressed = true;
     if (e.code === 'Escape' || e.code === 'KeyP') input.pausePressed = true;
     if (e.code === 'ShiftLeft') input.breath = true;
+    if (e.code === 'ControlLeft' || e.code === 'KeyC') input.crouch = !input.crouch;
+    if (e.code === 'KeyQ') input.leanLeft = true;
+    if (e.code === 'KeyE') input.leanRight = true;
     updateKeyMove();
   });
   window.addEventListener('keyup', e => {
     keys[e.code] = false;
     if (e.code === 'ShiftLeft') input.breath = false;
+    if (e.code === 'KeyQ') input.leanLeft = false;
+    if (e.code === 'KeyE') input.leanRight = false;
     updateKeyMove();
   });
   function updateKeyMove() {
@@ -166,6 +181,7 @@ export function clearEdges() {
   input.firePressed = false;
   input.reloadPressed = false;
   input.nadePressed = false;
+  input.flashPressed = false;
   input.swapPressed = false;
   input.breachPressed = false;
   input.pausePressed = false;
