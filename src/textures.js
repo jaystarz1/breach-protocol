@@ -46,22 +46,63 @@ function speckle(x, { base, spread, density = 1, dot = 1 }) {
   x.globalAlpha = 1;
 }
 
-function concreteMap() {
+// Sobel the luminance of a height image into a tangent-space normal map. Without this,
+// colour and roughness maps still leave a wall perfectly flat under any light — the grain
+// is painted on rather than standing up. SIZE is a power of two so the wrap mask works and
+// the derived map tiles seamlessly with the colour map it came from.
+function heightToNormal(srcCanvas, strength = 2.0) {
+  const { c, x } = canvas2d();
+  const src = srcCanvas.getContext('2d').getImageData(0, 0, SIZE, SIZE).data;
+  const out = x.createImageData(SIZE, SIZE);
+  const M = SIZE - 1;
+  const h = (i, j) => src[(((j & M) * SIZE) + (i & M)) * 4] / 255;
+  for (let j = 0; j < SIZE; j++) {
+    for (let i = 0; i < SIZE; i++) {
+      const dx = (h(i + 1, j - 1) + 2 * h(i + 1, j) + h(i + 1, j + 1))
+               - (h(i - 1, j - 1) + 2 * h(i - 1, j) + h(i - 1, j + 1));
+      const dy = (h(i - 1, j + 1) + 2 * h(i, j + 1) + h(i + 1, j + 1))
+               - (h(i - 1, j - 1) + 2 * h(i, j - 1) + h(i + 1, j - 1));
+      const nx = -dx * strength, ny = -dy * strength, nz = 1;
+      const l = Math.hypot(nx, ny, nz);
+      const o = (j * SIZE + i) * 4;
+      out.data[o] = (nx / l * 0.5 + 0.5) * 255;
+      out.data[o + 1] = (ny / l * 0.5 + 0.5) * 255;
+      out.data[o + 2] = (nz / l * 0.5 + 0.5) * 255;
+      out.data[o + 3] = 255;
+    }
+  }
+  x.putImageData(out, 0, 0);
+  const t = finish(c, 1);
+  t.colorSpace = THREE.NoColorSpace;   // normal data is not colour; sRGB decode would skew it
+  return t;
+}
+
+function concreteCanvas() {
   const { c, x } = canvas2d();
   x.fillStyle = '#b8b8b8';
   x.fillRect(0, 0, SIZE, SIZE);
   speckle(x, { base: 184, spread: 46, density: 1 });
-  return finish(c, 1);
+  // shallow pits and a few hairline cracks, which is what the normal pass turns into relief
+  x.strokeStyle = 'rgba(120,120,120,0.5)';
+  for (let i = 0; i < 14; i++) {
+    x.lineWidth = 0.6 + Math.random();
+    x.beginPath();
+    let px = Math.random() * SIZE, py = Math.random() * SIZE;
+    x.moveTo(px, py);
+    for (let s = 0; s < 6; s++) { px += (Math.random() - 0.5) * 40; py += (Math.random() - 0.5) * 40; x.lineTo(px, py); }
+    x.stroke();
+  }
+  return c;
 }
 
 // Roughness map: brighter = rougher. Concrete is rough everywhere, slightly polished in
 // patches so light rakes across it unevenly instead of reading as one flat sheet.
-function concreteRough() {
+function concreteRoughCanvas() {
   const { c, x } = canvas2d();
   x.fillStyle = '#d8d8d8';
   x.fillRect(0, 0, SIZE, SIZE);
   speckle(x, { base: 216, spread: 60, density: 1, dot: 0.4 });
-  return finish(c, 1);
+  return c;
 }
 
 function metalMap() {
@@ -86,7 +127,7 @@ function metalMap() {
     x.lineTo(Math.random() * SIZE + 60, y);
     x.stroke();
   }
-  return finish(c, 1);
+  return c;
 }
 
 function metalRough() {
@@ -139,14 +180,32 @@ export function environment(renderer, skyHex, fogHex) {
   return env;
 }
 
+// The sky dome canvas doubles as the IBL source, so reflections agree with what is actually
+// overhead instead of a separate invented gradient. Falls back to the old gradient path when
+// no dome exists (the indoor levels).
+export function environmentFrom(renderer, canvas, key) {
+  if (envCache.has(key)) return envCache.get(key);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromEquirectangular(tex).texture;
+  pmrem.dispose();
+  tex.dispose();
+  envCache.set(key, env);
+  return env;
+}
+
 let cache = null;
 
 // Built once, shared by every material. Safe to call repeatedly.
 export function surfaces() {
   if (cache) return cache;
+  const cc = concreteCanvas(), cr = concreteRoughCanvas();
+  const mc = metalMap(), mr = metalRough();
   cache = {
-    concrete: { map: concreteMap(), roughnessMap: concreteRough() },
-    metal: { map: metalMap(), roughnessMap: metalRough() },
+    // The colour canvas is reused as the height field: its luminance variation IS the relief.
+    concrete: { map: finish(cc), roughnessMap: finish(cr), normalMap: heightToNormal(cc, 1.4) },
+    metal: { map: finish(mc), roughnessMap: finish(mr), normalMap: heightToNormal(mc, 1.1) },
   };
   return cache;
 }

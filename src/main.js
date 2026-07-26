@@ -14,7 +14,8 @@ import { hud } from './hud.js';
 import * as save from './save.js';
 import { sfx, unlock as audioUnlock, updateListener, startAmbient, stopAmbient } from './audio.js';
 import { quality } from './quality.js';
-import { environment } from './textures.js';
+import { environment, environmentFrom } from './textures.js';
+import { skyDome, groundPlate, skyline } from './world.js';
 
 const $ = id => document.getElementById(id);
 
@@ -32,6 +33,9 @@ renderer.shadowMap.enabled = quality.shadows;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 500);
 let scene = null;
+// Re-centred on the camera every frame: a 460m dome that stays at the origin would clip
+// through the far plane the moment you walk away from spawn on the bigger maps.
+let skyMesh = null;
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -163,9 +167,30 @@ function startLevel(id) {
   const geo = [...L.geo(), ...(L.extraGeo ? L.extraGeo() : [])];
   scene.background = new THREE.Color(L.sky);
   scene.fog = new THREE.Fog(L.fog[0], L.fog[1], L.fog[2]);
+
+  // ---------- world backdrop ----------
+  // Derived from the level's own footprint rather than authored per level: every outdoor
+  // level gets a sky, a ground plane that reaches the horizon, and a city ringing the play
+  // area inside its fog. Interiors (blackout, underground) see none of it and skip the cost.
+  const indoor = !!L.nvg || L.id === 9;
+  const bounds = levelBounds(geo);
+  skyMesh = null;
+  if (!indoor) {
+    skyMesh = skyDome(L.sky, L.fog[0], L.id * 7919);
+    scene.add(skyMesh);
+    geo.push(...groundPlate(bounds.cx, bounds.cz, L.fog[0]));
+    // Skyline is decorative and non-solid, so it is appended AFTER bounds/shadow fitting:
+    // a 300m ring of scenery must not blow out the shadow frustum it has no business in.
+    geo.push(...skyline(bounds, L.fog[2], L.id * 104729, { body: L.skylineTint }));
+  }
+
   // PBR metals need something to reflect or they render black. Also supplies soft ambient
   // bounce, which is why the ambient light below can be dialled back once this is on.
-  if (quality.pbr) scene.environment = environment(renderer, L.sky, L.fog[0]);
+  if (quality.pbr) {
+    scene.environment = skyMesh
+      ? environmentFrom(renderer, skyMesh.userData.skyCanvas, `sky${L.id}`)
+      : environment(renderer, L.sky, L.fog[0]);
+  }
   // The per-level ambient/sun values were authored against MeshLambertMaterial. Standard
   // responds differently, so scale here rather than rewriting all ten levels' art direction.
   // Key light gets the bigger boost and ambient the smaller one: strong key + darker fill is
@@ -183,7 +208,9 @@ function startLevel(id) {
       sun.shadow.mapSize.set(quality.shadowMapSize, quality.shadowMapSize);
       // Fit the ortho shadow frustum to the level's actual footprint. Guessing a fixed
       // radius wastes most of the shadow map on empty space and gives blocky edges.
-      const b = levelBounds(geo);
+      // MUST be the playable bounds captured before the backdrop was appended — the ground
+      // plate is 2400m across and would stretch every shadow texel into uselessness.
+      const b = bounds;
       const r = Math.max(b.r, 12);
       const cam = sun.shadow.camera;
       cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r;
@@ -681,6 +708,7 @@ function frame() {
   let dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
 
+  if (skyMesh) skyMesh.position.copy(camera.position);
   if (mode !== 'playing' || !world) { if (scene) renderer.render(scene, camera); clearEdges(); return; }
 
   if (input.pausePressed) { mode = 'paused'; hud.screen('pause'); clearEdges(); return; }

@@ -7,15 +7,22 @@ import { surfaces } from './textures.js';
 // so a 20m wall and a 0.5m crate share the same grain and nothing stretches.
 const TEXELS_PER_M = 0.5;
 
-// geo entries: [x, y, z, w, h, d, color, solid=true]
+// geo entries: [x, y, z, w, h, d, color, solid=true, emissive=false]
 // Merges all static boxes into one mesh with vertex colors for a single draw call.
+//
+// Emissive entries go into a SECOND merged mesh drawn with MeshBasicMaterial. Lighting a
+// window pane the same way as the wall around it makes it a pale grey rectangle; drawing it
+// unlit is what makes it read as a lamp or a lit room. Two draw calls total, not two hundred.
 export function buildStaticGeometry(scene, geo) {
   const solids = [];
+  const lit = [];
   const positions = [], normals = [], colors = [], uvs = [], indices = [];
   let vtx = 0;
   const c = new THREE.Color();
-  for (const [x, y, z, w, h, d, color, solid] of geo) {
+  for (const entry of geo) {
+    const [x, y, z, w, h, d, color, solid, emissive] = entry;
     if (solid !== false) solids.push(makeBox(x, y, z, w, h, d));
+    if (emissive) { lit.push(entry); continue; }
     const g = new THREE.BoxGeometry(w, h, d);
     g.translate(x, y, z);
     const pos = g.attributes.position, norm = g.attributes.normal, idx = g.index;
@@ -54,6 +61,12 @@ export function buildStaticGeometry(scene, geo) {
       vertexColors: true, roughness: 0.92, metalness: 0.04,
       map: quality.textures ? s.concrete.map : null,
       roughnessMap: quality.textures ? s.concrete.roughnessMap : null,
+      // Colour and roughness alone leave every surface geometrically dead flat no matter how
+      // it is lit. The normal map is what puts relief in the grain.
+      normalMap: quality.textures ? s.concrete.normalMap : null,
+      // 0.35, not 0.7: at 0.7 the speckle and crack relief turns close-range walls into
+      // popcorn stucco. Surface relief should be felt at a glance, not itemised.
+      normalScale: quality.textures ? new THREE.Vector2(0.35, 0.35) : undefined,
     });
   } else {
     mat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -61,7 +74,38 @@ export function buildStaticGeometry(scene, geo) {
   const mesh = new THREE.Mesh(merged, mat);
   mesh.castShadow = mesh.receiveShadow = quality.shadows;
   scene.add(mesh);
-  return { solids, mesh };
+
+  let litMesh = null;
+  if (lit.length) litMesh = buildEmissive(scene, lit);
+  return { solids, mesh, litMesh };
+}
+
+// Unlit pass for window panes, lamp heads and signal lenses.
+function buildEmissive(scene, geo) {
+  const positions = [], colors = [], indices = [];
+  let vtx = 0;
+  const c = new THREE.Color();
+  for (const [x, y, z, w, h, d, color] of geo) {
+    const g = new THREE.BoxGeometry(w, h, d);
+    g.translate(x, y, z);
+    const pos = g.attributes.position, idx = g.index;
+    c.setHex(color);
+    for (let i = 0; i < pos.count; i++) {
+      positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+      colors.push(c.r, c.g, c.b);
+    }
+    for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + vtx);
+    vtx += pos.count;
+    g.dispose();
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  merged.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  merged.setIndex(indices);
+  // fog stays ON: a lit window 300m out must haze over like everything else at that range.
+  const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ vertexColors: true, fog: true }));
+  scene.add(mesh);
+  return mesh;
 }
 
 // Character/prop surfaces. Cloth and skin want no texture but do want PBR falloff;
@@ -240,11 +284,16 @@ export function makeDoor(w = 1.4, h = 2.4) {
 }
 
 // ---------- Level authoring helpers (produce geo arrays) ----------
+// Darkened from the original set. These albedos were picked against flat Lambert with no
+// environment light; under PBR plus a sky IBL the pale greys blow out and read as moulded
+// plastic, which is most of what "looks like Roblox" actually means. Real concrete at night
+// is dark. Interior surfaces are pulled down less, because levels 1/3/7 are lit only by
+// ambient and crushing them would make rooms unplayable.
 export const C = {
-  street: 0x2e3338, sidewalk: 0x565f66, building: 0x77848f, buildingB: 0x93a1ad,
-  interiorFloor: 0x59636b, interiorWall: 0x8a959e, roof: 0x454e55, crate: 0x9a7f5a,
-  concrete: 0x9aa4ad, metal: 0x4d5a64, tunnel: 0x3f474d, platform: 0x6a747d,
-  accent: 0xb08a68, glassWall: 0x6e8496,
+  street: 0x24282c, sidewalk: 0x474f55, building: 0x59636d, buildingB: 0x6b7784,
+  interiorFloor: 0x4b545b, interiorWall: 0x76818a, roof: 0x373f45, crate: 0x8a7150,
+  concrete: 0x7c858d, metal: 0x424e57, tunnel: 0x353c41, platform: 0x5c656d,
+  accent: 0x9c7a5c, glassWall: 0x5e7484,
 };
 
 export function floorSlab(x, z, w, d, y = 0, t = 0.4, color = C.interiorFloor) {

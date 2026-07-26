@@ -185,6 +185,9 @@ export function initInput() {
     if (e.code === 'KeyB') input.flashPressed = true;
     if (e.code === 'Escape' || e.code === 'KeyP') input.pausePressed = true;
     if (e.code === 'ShiftLeft') input.breath = true;
+    // Keyboard aim, held like the mouse button. Right-click was the ONLY way to scope,
+    // which is no use to anyone whose pointer lock is refusing to engage.
+    if (e.code === 'KeyZ') input.ads = true;
     if (e.code === 'ControlLeft' || e.code === 'KeyC') input.crouch = !input.crouch;
     if (e.code === 'KeyQ') input.leanLeft = true;
     if (e.code === 'KeyE') input.leanRight = true;
@@ -195,6 +198,7 @@ export function initInput() {
     keys[e.code] = false;
     if (e.code === 'Space') input.fire = false;
     if (e.code === 'ShiftLeft') input.breath = false;
+    if (e.code === 'KeyZ') input.ads = false;
     if (e.code === 'KeyQ') input.leanLeft = false;
     if (e.code === 'KeyE') input.leanRight = false;
     updateKeyMove();
@@ -216,9 +220,15 @@ export function initInput() {
   canvas.addEventListener('mousedown', e => {
     if (document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
     if (e.button === 0) { input.fire = true; input.firePressed = true; }
-    if (e.button === 2) input.ads = !input.ads;
+    // Hold to aim, not toggle. A toggle strands you in the scope with nothing saying so,
+    // and on the sniper mission the player is locked in place, so a stuck scope IS the
+    // whole level. Touch keeps its toggle — there is no hold gesture on a thumb button.
+    if (e.button === 2) input.ads = true;
   });
-  window.addEventListener('mouseup', e => { if (e.button === 0) input.fire = false; });
+  window.addEventListener('mouseup', e => {
+    if (e.button === 0) input.fire = false;
+    if (e.button === 2) input.ads = false;
+  });
   window.addEventListener('mousemove', e => {
     if (document.pointerLockElement !== canvas) return;
     // sensScale must apply here too, or ADS/scoped aim is full-speed on mouse.
@@ -232,6 +242,8 @@ export function initInput() {
     input.move.x = 0; input.move.y = 0;
     input.fire = false;
     input.breath = false;
+    // ads is held now, so losing focus mid-aim must drop it or you come back stuck scoped
+    if (isDesktop) input.ads = false;
     input.leanLeft = false; input.leanRight = false;
   };
   window.addEventListener('blur', releaseAll);

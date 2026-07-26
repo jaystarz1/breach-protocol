@@ -1,4 +1,8 @@
 import { C, floorSlab, wall, stairs, crate, car } from '../levelgen.js';
+import {
+  facade, lift, sandbags, waterTank, acUnit, ventStack, roofHutch,
+  lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
+} from '../world.js';
 
 // A multi-storey tower with a west-side stairwell. Flights alternate corners per floor
 // (even floors: NW flight ascending north; odd floors: SW flight ascending south) so no
@@ -130,13 +134,36 @@ export const LEVELS = [
       // sidewalks
       g.push(...floorSlab(-12, 0, 8, 120, 0.15, 0.3, C.sidewalk));
       g.push(...floorSlab(12, 0, 8, 120, 0.15, 0.3, C.sidewalk));
-      // building faces (solid) lining the street
+      // building faces (solid) lining the street, now with windows and sills so the block
+      // reads as occupied instead of as two long grey fences
       g.push(...wall(-16, 55, -16, -55, 9, C.building));
       g.push(...wall(16, 55, 16, -55, 9, C.building, []));
+      g.push(...facade(-16, -55, -16, 55, 0, 9, 201, { away: [-30, 0], step: 3.2 }));
+      g.push(...facade(16, -55, 16, 55, 0, 9, 202, { away: [30, 0], step: 3.2 }));
+      // roofline clutter along both sides
+      for (const [ax, az] of [[-18.5, 34], [-18.5, 6], [-18.5, -30], [18.5, 22], [18.5, -8], [18.5, -42]]) {
+        g.push(...lift(acUnit(ax, 9, az, 1.1), 0));
+      }
+      g.push(...lift(waterTank(-19.5, 9, -12), 0), ...lift(waterTank(19.5, 9, 40), 0));
       // shops open toward the street
       g.push(...shop(11, 20, 9, 7, 'w'));
       g.push(...shop(11, -5, 9, 7, 'w'));
       g.push(...shop(-11, -25, 9, 7, 'e'));
+      g.push(...awning(6.2, 20, 0.9, 7, 3.1), ...awning(6.2, -5, 0.9, 7, 3.1, 0x3b4d6a));
+      g.push(...awning(-6.2, -25, 0.9, 7, 3.1, 0x4a5a3b));
+      g.push(...shopSign(6.6, 20, 3.4, 3.6, true), ...shopSign(6.6, -5, 3.4, 3.6, true));
+      g.push(...shopSign(-6.6, -25, 3.4, 3.6, true));
+      // street furniture: lamps down both sidewalks, signals at the barricade end
+      for (const lz of [46, 32, 18, 4, -10, -24, -38]) {
+        g.push(...lamp(-13.4, lz, 6.8, 1.9, 1));
+        g.push(...lamp(13.4, lz - 7, 6.8, 1.9, -1));
+      }
+      g.push(...trafficLight(-13.0, -46, 4.6, 1), ...trafficLight(13.0, -46, 4.6, -1));
+      g.push(...roadLine(0, -48, 52));
+      g.push(...crosswalk(-42, -8, 8), ...crosswalk(28, -8, 8));
+      g.push(...dumpster(-13.6, 38), ...dumpster(13.6, -30, true));
+      g.push(...hydrant(-13.8, 12), ...hydrant(13.8, -16));
+      g.push(...bench(-13.2, 26, true), ...bench(13.2, 8, true));
       // street clutter
       g.push(...car(-4, 25)); g.push(...car(3, 5, true)); g.push(...car(-2, -18)); g.push(...car(5, -35, true));
       g.push(...crate(0, 12), ...crate(1.2, 12.8), ...crate(-6, -8));
@@ -320,16 +347,48 @@ export const LEVELS = [
     geo: () => {
       const g = [];
       g.push(...GROUND(240, 300, C.street));
-      // your rooftop perch
+      // Your rooftop perch. This used to be one bare box and a 1m parapet, so with the scope
+      // up there was no visual evidence you were on a roof at all — the mission read as a
+      // floating scope. Everything below is non-solid dressing except the sandbag base.
       g.push([0, 12, 68, 20, 24, 16, C.building]);
       g.push(...wall(-10, 60, 10, 60, 1.0, C.concrete, [], 24));
+      const PERCH = [0, 68];   // building centre, so facade() can orient its own normals
+      g.push(...facade(-10, 60, -10, 76, 0, 24, 601, { out: 0.22, away: PERCH }));
+      g.push(...facade(10, 60, 10, 76, 0, 24, 602, { out: 0.22, away: PERCH }));
+      g.push(...facade(-10, 76, 10, 76, 0, 24, 603, { out: 0.22, away: PERCH }));
+      // firing position: sandbag rest at the parapet, with the barrel gap left clear
+      g.push(...lift(sandbags(-3.4, 61.0, 5, 3, false, 61), 24));
+      g.push(...lift(sandbags(3.4, 61.0, 5, 3, false, 62), 24));
+      g.push(...lift(sandbags(-6.2, 62.6, 3, 2, true, 63), 24));
+      // roof furniture: the actual difference between a roof and the top of a cube
+      g.push(...lift(waterTank(6.6, 0, 71.5), 24));
+      g.push(...lift(acUnit(-6.5, 0, 69.5, 1.2), 24));
+      g.push(...lift(acUnit(-4.0, 0, 72.4, 1.0), 24));
+      g.push(...lift(ventStack(2.2, 0, 73.6), 24));
+      g.push(...lift(roofHutch(-1.0, 0, 66.4, 's'), 24));
+      g.push(...lift(lamp(8.4, 64.0, 3.2, 1.0, -1), 24));
+      g.push([0, 24.3, 63.2, 5.0, 0.12, 1.6, C.metal, false]);          // duckboard by the rest
       // team cover: fountain
       g.push([0, 0.6, -10, 6, 1.2, 6, C.concrete]);
       g.push([0, 1.5, -10, 2, 3, 2, C.metal]);
-      // plaza far buildings hostiles emerge from
+      // plaza far buildings hostiles emerge from — windowed so they read as buildings at
+      // 150m rather than as three pale slabs, which is what a sniper is staring at all level
       g.push([-40, 7, -90, 30, 14, 20, C.building]);
       g.push([40, 7, -90, 30, 14, 20, C.buildingB]);
       g.push([0, 7, -110, 40, 14, 20, C.building]);
+      g.push(...facade(-55, -80, -25, -80, 0, 14, 611, { away: [-40, -90] }));
+      g.push(...facade(25, -80, 55, -80, 0, 14, 612, { away: [40, -90] }));
+      g.push(...facade(-20, -100, 20, -100, 0, 14, 613, { away: [0, -110] }));
+      g.push(...lift(acUnit(-34, 14, -92, 1.3), 0), ...lift(waterTank(44, 14, -93), 0));
+      g.push(...lift(ventStack(-6, 14, -112), 0));
+      // plaza furniture: scale cues so the distance to the fountain is legible through glass
+      for (const [lx, lz] of [[-22, -18], [22, -18], [-22, -52], [22, -52], [-34, -34], [34, -34]]) {
+        g.push(...lamp(lx, lz, 7.0, 1.7, lx < 0 ? 1 : -1));
+      }
+      g.push(...barrier(-14, -20), ...barrier(-11.5, -20), ...barrier(14, -20), ...barrier(11.5, -20));
+      g.push(...bench(-26, -30, true), ...bench(-26, -38, true), ...bench(26, -30, true));
+      g.push(...hydrant(-19, -12), ...hydrant(19, -46));
+      g.push(...crosswalk(-16, -12, 12));
       // scattered cover on the plaza
       for (const [cx, cz] of [[-20, -40], [15, -50], [-8, -62], [25, -70], [-30, -65], [5, -35], [35, -45], [-15, -25]]) {
         g.push(...crate(cx, cz, 0, 1.4));
