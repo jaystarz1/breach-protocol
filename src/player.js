@@ -13,6 +13,7 @@ export class Player {
     this.velY = 0;
     this.health = 100;
     this.maxHealth = 100;
+    this.grounded = true;
     this.regenTimer = 0;
     this.speed = 4.6;
     this.moveSpeed = 0;   // actual horizontal speed (for AI accuracy)
@@ -65,10 +66,13 @@ export class Player {
       const prev = { x: this.pos.x, z: this.pos.z };
       this.pos.x += stepX;
       this.pos.z += stepZ;
-      resolveXZ(solids, this.pos, RADIUS, this.pos.y + STEP, this.pos.y + HEIGHT, prev);
+      // step-up assist only while grounded — airborne, ledges are walls and holes are holes,
+      // otherwise crossing a stair opening glues you to the far edge instead of dropping in
+      const climb = this.grounded ? STEP : 0.12;
+      resolveXZ(solids, this.pos, RADIUS, this.pos.y + climb, this.pos.y + HEIGHT, prev);
 
-      // gravity + ground with step-up
-      const g = groundHeight(solids, this.pos.x, this.pos.z, RADIUS * 0.8, this.pos.y + STEP);
+      // gravity + ground
+      const g = groundHeight(solids, this.pos.x, this.pos.z, RADIUS * 0.8, this.pos.y + climb);
       this.velY -= 22 * dt * timeScale;
       this.pos.y += this.velY * dt * timeScale;
       if (g > -Infinity && this.pos.y <= g) {
@@ -76,6 +80,9 @@ export class Player {
         // next step starts colliding as a wall
         this.pos.y = g;
         this.velY = 0;
+        this.grounded = true;
+      } else {
+        this.grounded = false;
       }
       if (this.pos.y < -25) { this.damage(9999, diff); } // fell out of world
     } else {

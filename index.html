@@ -69,6 +69,16 @@
   #aim-hint { right:22%; top:38%; }
   .ctl-hint .lbl { font-size:12px; font-weight:700; letter-spacing:2px; text-shadow:0 1px 3px #000; background:rgba(0,0,0,.4); padding:4px 10px; border-radius:10px; }
 
+  /* ---------- NVG overlay ---------- */
+  #nvg { position:absolute; inset:0; pointer-events:none; display:none;
+    background: radial-gradient(circle at 50% 50%,
+      rgba(70,255,150,.10) 0%, rgba(70,255,150,.13) 42%,
+      rgba(3,16,8,.6) 60%, rgba(0,5,2,.98) 71%);
+  }
+  #nvg::before { content:''; position:absolute; inset:0; background:rgba(60,255,140,.12); mix-blend-mode:screen; }
+  #nvg::after { content:''; position:absolute; inset:0;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.06) 0 1px, transparent 1px 3px); }
+
   /* ---------- Scope overlay ---------- */
   #scope { position:absolute; inset:0; display:none; pointer-events:none; }
   #scope-mask { position:absolute; inset:0; background:radial-gradient(circle at 50% 50%, transparent 34%, rgba(0,0,0,.97) 35.5%); }
@@ -118,6 +128,7 @@
   <div id="weapon-name">M9 SIDEARM</div>
 </div>
 
+<div id="nvg"></div>
 <div id="scope"><div id="scope-mask"></div><div id="scope-cross"></div></div>
 
 <div id="controls">

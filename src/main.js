@@ -107,6 +107,7 @@ function toMenu() {
   mode = 'menu';
   hud.show(false);
   hud.scope(false);
+  $('nvg').style.display = 'none';
   hud.screen('menu');
 }
 
@@ -119,7 +120,9 @@ function startLevel(id) {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(L.sky);
   scene.fog = new THREE.Fog(L.fog[0], L.fog[1], L.fog[2]);
-  scene.add(new THREE.AmbientLight(0xbfd4e6, L.ambient));
+  scene.add(new THREE.AmbientLight(L.nvg ? 0x8dffb4 : 0xbfd4e6, L.ambient));
+  if (L.nvg) scene.add(new THREE.HemisphereLight(0xa8ffc8, 0x0e2416, 0.9));
+  $('nvg').style.display = L.nvg ? 'block' : 'none';
   if (L.sun > 0) {
     const sun = new THREE.DirectionalLight(0xdfe8ff, L.sun);
     sun.position.set(30, 60, 20);
@@ -487,6 +490,7 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     mode = 'debrief';
     hud.show(false);
     hud.scope(false);
+    $('nvg').style.display = 'none';
     $('debrief-status').textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED' + (reason ? ' — ' + reason : '');
     $('debrief-grade').textContent = g;
     $('debrief-grade').style.color = won ? '#ffc107' : '#ef5350';

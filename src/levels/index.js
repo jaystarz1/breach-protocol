@@ -1,35 +1,44 @@
 import { C, floorSlab, wall, stairs, crate, car } from '../levelgen.js';
 
-// A 4-storey tower with zigzag stairs on the west side. Returns geo. Interior w×d, floors of height 3.
+// A multi-storey tower with a west-side stairwell. Flights alternate corners per floor
+// (even floors: NW flight ascending north; odd floors: SW flight ascending south) so no
+// flight ever stacks over another — every floor is walkable UP and DOWN. Each flight
+// tops out on a 1.1m landing connected to the main slab.
 function tower(x, z, w, d, floors, opts = {}) {
   const geo = [];
   const fh = 3;
   const x1 = x - w / 2, x2 = x + w / 2, z1 = z - d / 2, z2 = z + d / 2;
+  const sx = x1 + 1.1; // stair lane center
   geo.push(...floorSlab(x, z, w, d, 0, 0.4, C.interiorFloor));
+
+  const slabWithWindow = (oy, color, parityBelow) => {
+    geo.push(...floorSlab(x + 1.1, z, w - 2.2, d, oy, 0.3, color)); // east portion, full length
+    if (parityBelow === 0) {
+      // NW flight below: hole over z1+1.1..z1+4.5; cover the rest + top landing at z1..z1+1.1
+      geo.push(...floorSlab(sx, z1 + 4.5 + (d - 4.5) / 2, 2.2, d - 4.5, oy, 0.3, color));
+      geo.push(...floorSlab(sx, z1 + 0.55, 2.2, 1.1, oy, 0.3, color));
+    } else {
+      // SW flight below: hole over z2-4.5..z2-1.1; cover the rest + top landing at z2-1.1..z2
+      geo.push(...floorSlab(sx, z1 + (d - 4.5) / 2, 2.2, d - 4.5, oy, 0.3, color));
+      geo.push(...floorSlab(sx, z2 - 0.55, 2.2, 1.1, oy, 0.3, color));
+    }
+  };
+
   for (let f = 0; f < floors; f++) {
     const y = f * fh;
     const doorGap = (f === 0 && opts.door !== false) ? [{ off: w / 2 - 0.8, w: 1.6, h: 2.4 }] : [];
-    // south wall (entry), north, east, west
-    geo.push(...wall(x1, z2, x2, z2, fh, C.building, doorGap, y));
+    geo.push(...wall(x1, z2, x2, z2, fh, C.building, doorGap, y)); // south (entry)
     geo.push(...wall(x1, z1, x2, z1, fh, C.building, [], y));
     geo.push(...wall(x2, z1, x2, z2, fh, C.building, [], y));
     geo.push(...wall(x1, z1, x1, z2, fh, C.building, [], y));
-    if (f < floors - 1) {
-      // upper floor slab with a 2.2 x 4.5 stair opening at the north-west corner
-      const oy = y + fh;
-      geo.push(...floorSlab(x + 1.1, z, w - 2.2, d, oy, 0.3));                       // east portion
-      geo.push(...floorSlab(x1 + 1.1, z + 4.5 / 2, 2.2, d - 4.5, oy, 0.3));         // west portion south of opening
-      // stairs up along west wall heading north into the opening
-      geo.push(...stairs(x1 + 1.1, z1 + 4.5, 'n', 4.4, fh, 2.0, C.concrete, y));
-    }
+    // flight f climbs from floor f to floor f+1 (the top one reaches the roof)
+    if (f % 2 === 0) geo.push(...stairs(sx, z1 + 4.5, 'n', 3.4, fh, 2.0, C.concrete, y));
+    else geo.push(...stairs(sx, z2 - 4.5, 's', 3.4, fh, 2.0, C.concrete, y));
+    if (f < floors - 1) slabWithWindow(y + fh, C.interiorFloor, f % 2);
   }
   if (opts.roof !== false) {
-    // roof slab with stair opening access
     const ry = floors * fh;
-    geo.push(...floorSlab(x + 1.1, z, w - 2.2, d, ry, 0.3, C.roof));
-    geo.push(...floorSlab(x1 + 1.1, z + 4.5 / 2, 2.2, d - 4.5, ry, 0.3, C.roof));
-    geo.push(...stairs(x1 + 1.1, z1 + 4.4, 'n', 4.4, fh, 2.0, C.concrete, (floors - 1) * fh));
-    // parapet
+    slabWithWindow(ry, C.roof, (floors - 1) % 2);
     geo.push(...wall(x1, z1, x2, z1, 0.9, C.concrete, [], ry));
     geo.push(...wall(x1, z2, x2, z2, 0.9, C.concrete, [], ry));
     geo.push(...wall(x2, z1, x2, z2, 0.9, C.concrete, [], ry));
@@ -184,7 +193,7 @@ export const LEVELS = [
     ],
     objectives: [
       { type: 'clear', zone: null, text: 'CLEAR ALL THREE FLOORS — PROTECT THE HOSTAGES' },
-      { type: 'reach', zone: [-5.9, -6, 2.2, 9], text: 'GET TO THE ROOF' },
+      { type: 'reach', zone: [-2, -6, 3, 9], text: 'GET TO THE ROOF' },
     ],
   },
 
@@ -378,9 +387,9 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 8
   {
     id: 8, name: 'BLACKOUT',
-    brief: 'They cut the power to the records office. Your weapon light is the only light. Clear the floor and reach the server room. Muzzle flashes will give them away — and you.',
-    weapons: ['pistol', 'm4'], grenades: 2, flashlight: true,
-    sky: 0x04060b, fog: [0x04060b, 7, 50], ambient: 0.1, sun: 0.0,
+    brief: 'They cut the power to the records office. Night vision goggles on. Clear the floor and reach the server room. They are blind in the dark — you are not.',
+    weapons: ['pistol', 'm4'], grenades: 2, nvg: true,
+    sky: 0x030a05, fog: [0x061510, 14, 60], ambient: 0.6, sun: 0.0,
     start: [0, 0, 24, 0],
     geo: () => {
       const g = [];
@@ -422,7 +431,7 @@ export const LEVELS = [
       { pos: [-12, 0, 2], hostage: true }, { pos: [12, 0, -16], hostage: true },
     ],
     objectives: [
-      { type: 'clear', zone: null, text: 'CLEAR THE DARK FLOOR — WATCH YOUR LIGHT' },
+      { type: 'clear', zone: null, text: 'NVGs ON — CLEAR THE DARK FLOOR' },
       { type: 'reach', zone: [0, -18, 2.5], text: 'SECURE THE SERVER ROOM' },
     ],
   },
