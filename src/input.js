@@ -26,9 +26,19 @@ const el = id => document.getElementById(id);
 // Populated by initInput; read by applyKeyLook each frame.
 let keyLookHeld = null;
 
-// Radians/sec at sensitivity 1. Turn is snappier than pitch, same as most keyboard-look schemes.
-const KEY_LOOK_YAW = 2.2;
-const KEY_LOOK_PITCH = 1.6;
+// Radians/sec at sensitivity 1. A key is binary, so a flat rate makes the smallest
+// possible tap a big fixed chunk you can't aim with. Start slow enough to nudge a
+// few degrees, then ramp to a fast turn so crossing the room stays quick.
+const KEY_YAW_TAP = 0.55, KEY_YAW_MAX = 2.6;
+const KEY_PITCH_TAP = 0.40, KEY_PITCH_MAX = 1.7;
+const KEY_RAMP = 0.5;   // seconds of holding to reach full speed
+
+// Hold time per axis, reset on release or direction reversal so a flick back is
+// fine-grained again instead of inheriting the previous swing's momentum.
+let yawHeld = 0, pitchHeld = 0, yawDir = 0, pitchDir = 0;
+
+// Quadratic ease: the first fraction of a second stays genuinely slow.
+const ramp = (held, tap, max) => tap + (max - tap) * Math.min(1, held / KEY_RAMP) ** 2;
 
 // Arrow-key aiming. Called once per frame from main with the frame delta so the
 // turn rate is framerate-independent (a mousemove delta is not).
@@ -40,10 +50,15 @@ export function applyKeyLook(dt) {
   if (k['ArrowRight']) yaw += 1;
   if (k['ArrowUp']) pitch -= 1;
   if (k['ArrowDown']) pitch += 1;
+
+  yawHeld = (yaw && yaw === yawDir) ? yawHeld + dt : 0;
+  pitchHeld = (pitch && pitch === pitchDir) ? pitchHeld + dt : 0;
+  yawDir = yaw; pitchDir = pitch;
   if (!yaw && !pitch) return;
+
   const s = dt * input.sensitivity * input.sensScale;
-  input.lookDelta.x += yaw * KEY_LOOK_YAW * s;
-  input.lookDelta.y += pitch * KEY_LOOK_PITCH * s * (input.invertY ? -1 : 1);
+  input.lookDelta.x += yaw * ramp(yawHeld, KEY_YAW_TAP, KEY_YAW_MAX) * s;
+  input.lookDelta.y += pitch * ramp(pitchHeld, KEY_PITCH_TAP, KEY_PITCH_MAX) * s * (input.invertY ? -1 : 1);
 }
 
 // Touch-capable hybrids keep the thumb UI; only mouse-and-keyboard machines lose it.
