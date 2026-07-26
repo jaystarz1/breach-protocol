@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { initInput, input, clearEdges } from './input.js';
+import { initInput, input, clearEdges, applyKeyLook } from './input.js';
 import { Player } from './player.js';
 import { Weapons, Grenade, explosionEffect } from './weapons.js';
 import { Enemy, resetPathBudget } from './enemies.js';
@@ -617,6 +617,10 @@ function frame() {
   if (mode !== 'playing' || !world) { if (scene) renderer.render(scene, camera); clearEdges(); return; }
 
   if (input.pausePressed) { mode = 'paused'; hud.screen('pause'); clearEdges(); return; }
+
+  // Arrow-key aim feeds lookDelta before the player consumes it. Real dt, not sdt:
+  // slow-mo shouldn't make you turn slower.
+  applyKeyLook(dt);
 
   // slow-mo
   let timeScale = 1;

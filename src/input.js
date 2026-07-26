@@ -23,6 +23,29 @@ export const input = {
 
 const el = id => document.getElementById(id);
 
+// Populated by initInput; read by applyKeyLook each frame.
+let keyLookHeld = null;
+
+// Radians/sec at sensitivity 1. Turn is snappier than pitch, same as most keyboard-look schemes.
+const KEY_LOOK_YAW = 2.2;
+const KEY_LOOK_PITCH = 1.6;
+
+// Arrow-key aiming. Called once per frame from main with the frame delta so the
+// turn rate is framerate-independent (a mousemove delta is not).
+export function applyKeyLook(dt) {
+  if (!keyLookHeld) return;
+  const k = keyLookHeld;
+  let yaw = 0, pitch = 0;
+  if (k['ArrowLeft']) yaw -= 1;
+  if (k['ArrowRight']) yaw += 1;
+  if (k['ArrowUp']) pitch -= 1;
+  if (k['ArrowDown']) pitch += 1;
+  if (!yaw && !pitch) return;
+  const s = dt * input.sensitivity * input.sensScale;
+  input.lookDelta.x += yaw * KEY_LOOK_YAW * s;
+  input.lookDelta.y += pitch * KEY_LOOK_PITCH * s * (input.invertY ? -1 : 1);
+}
+
 // Touch-capable hybrids keep the thumb UI; only mouse-and-keyboard machines lose it.
 export const isDesktop = !matchMedia('(pointer: coarse)').matches && !('ontouchstart' in window);
 
@@ -133,9 +156,13 @@ export function initInput() {
 
   // --- Desktop fallback ---
   const keys = {};
+  // Space and the arrows are gameplay keys here; stop the page from scrolling/activating on them.
+  const SWALLOW = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
   window.addEventListener('keydown', e => {
+    if (SWALLOW.has(e.code)) e.preventDefault();
     if (keys[e.code]) return;
     keys[e.code] = true;
+    if (e.code === 'Space') { input.fire = true; input.firePressed = true; }
     if (e.code === 'KeyR') input.reloadPressed = true;
     if (e.code === 'KeyG') input.nadePressed = true;
     if (e.code === 'KeyX') input.swapPressed = true;
@@ -149,7 +176,9 @@ export function initInput() {
     updateKeyMove();
   });
   window.addEventListener('keyup', e => {
+    if (SWALLOW.has(e.code)) e.preventDefault();
     keys[e.code] = false;
+    if (e.code === 'Space') input.fire = false;
     if (e.code === 'ShiftLeft') input.breath = false;
     if (e.code === 'KeyQ') input.leanLeft = false;
     if (e.code === 'KeyE') input.leanRight = false;
@@ -157,13 +186,16 @@ export function initInput() {
   });
   function updateKeyMove() {
     let x = 0, y = 0;
-    if (keys['KeyW'] || keys['ArrowUp']) y -= 1;
-    if (keys['KeyS'] || keys['ArrowDown']) y += 1;
-    if (keys['KeyA'] || keys['ArrowLeft']) x -= 1;
-    if (keys['KeyD'] || keys['ArrowRight']) x += 1;
+    if (keys['KeyW']) y -= 1;
+    if (keys['KeyS']) y += 1;
+    if (keys['KeyA']) x -= 1;
+    if (keys['KeyD']) x += 1;
     // don't clobber an active touch stick
     if (stickTouch === null) { input.move.x = x; input.move.y = y; }
   }
+
+  // Arrow keys aim. Held, not edge-triggered, so main calls applyKeyLook(dt) each frame.
+  keyLookHeld = keys;
 
   const canvas = el('game-canvas');
   canvas.addEventListener('mousedown', e => {
