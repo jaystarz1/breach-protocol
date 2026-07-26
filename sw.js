@@ -1,10 +1,11 @@
-const CACHE = 'breach-protocol-v8';
+const CACHE = 'breach-protocol-v9';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js',
   'src/main.js', 'src/input.js', 'src/player.js', 'src/weapons.js', 'src/enemies.js',
   'src/civilians.js', 'src/breach.js', 'src/hud.js', 'src/audio.js', 'src/physics.js',
   'src/levelgen.js', 'src/difficulty.js', 'src/save.js', 'src/levels/index.js', 'src/navgrid.js',
+  'src/quality.js', 'src/textures.js',
   'icons/icon-192.png', 'icons/icon-512.png',
 ];
 
