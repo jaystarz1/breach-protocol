@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { quality } from './quality.js';
+import { surfaces } from './textures.js';
 import { sfx } from './audio.js';
 
 export const WEAPON_SPECS = {
@@ -22,8 +24,15 @@ export const WEAPON_SPECS = {
 function gunMesh(kind) {
   const g = new THREE.Group();
   g.scale.setScalar(0.62);
-  const mat = new THREE.MeshLambertMaterial({ color: 0x3a4148 });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x23282d });
+  // Gunmetal: low roughness + real metalness so the view model catches highlights as you
+  // turn. This is the surface on screen 100% of the time, so it carries the most weight.
+  const s = quality.textures ? surfaces() : null;
+  const mat = quality.pbr
+    ? new THREE.MeshStandardMaterial({ color: 0x3a4148, roughness: 0.42, metalness: 0.85, map: s?.metal.map || null, roughnessMap: s?.metal.roughnessMap || null })
+    : new THREE.MeshLambertMaterial({ color: 0x3a4148 });
+  const dark = quality.pbr
+    ? new THREE.MeshStandardMaterial({ color: 0x23282d, roughness: 0.55, metalness: 0.7 })
+    : new THREE.MeshLambertMaterial({ color: 0x23282d });
   if (kind === 'pistol') {
     g.add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.09, 0.26), mat));
     const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.14, 0.07), dark);
@@ -177,7 +186,9 @@ export class Grenade {
     this.kind = kind;
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.09, 8, 6),
-      new THREE.MeshLambertMaterial({ color: kind === 'flash' ? 0xb0bec5 : 0x33421f })
+      quality.pbr
+        ? new THREE.MeshStandardMaterial({ color: kind === 'flash' ? 0xb0bec5 : 0x33421f, roughness: 0.5, metalness: 0.6 })
+        : new THREE.MeshLambertMaterial({ color: kind === 'flash' ? 0xb0bec5 : 0x33421f })
     );
     this.mesh.position.copy(pos);
     scene.add(this.mesh);

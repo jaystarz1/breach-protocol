@@ -13,13 +13,23 @@ import { DIFFICULTIES } from './difficulty.js';
 import { hud } from './hud.js';
 import * as save from './save.js';
 import { sfx, unlock as audioUnlock, updateListener, startAmbient, stopAmbient } from './audio.js';
+import { quality } from './quality.js';
+import { environment } from './textures.js';
 
 const $ = id => document.getElementById(id);
 
 // ---------- Renderer ----------
 const canvas = $('game-canvas');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// antialias is fixed at construction, so quality.js resolves the tier from localStorage
+// directly rather than waiting for save.load() further down this module.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: quality.antialias, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatioCap));
+// Filmic curve instead of raw linear clipping. Cheap enough to run on every tier and it is
+// most of what separates "flat toy colours" from "lit scene".
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+renderer.shadowMap.enabled = quality.shadows;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 500);
 let scene = null;
 
@@ -104,6 +114,23 @@ sens.oninput = () => { S.sensitivity = parseFloat(sens.value); input.sensitivity
 $('invert-btn').textContent = S.invertY ? 'ON' : 'OFF';
 $('invert-btn').onclick = () => { S.invertY = !S.invertY; input.invertY = S.invertY; $('invert-btn').textContent = S.invertY ? 'ON' : 'OFF'; save.save(); };
 
+// Graphics tier. Cycles AUTO -> LOW -> HIGH. Needs a reload because WebGLRenderer's
+// antialias flag can only be set at construction, so the label shows what's pending.
+const QUALITY_MODES = ['auto', 'low', 'high'];
+const qBtn = $('quality-btn');
+function paintQuality() {
+  const pending = S.quality !== quality.choice;
+  qBtn.textContent = (S.quality || 'auto').toUpperCase() + (pending ? ' *' : '');
+  qBtn.title = pending ? 'Reload to apply' : `Running: ${quality.tier.toUpperCase()}`;
+}
+S.quality = S.quality || 'auto';
+paintQuality();
+qBtn.onclick = () => {
+  S.quality = QUALITY_MODES[(QUALITY_MODES.indexOf(S.quality) + 1) % QUALITY_MODES.length];
+  save.save();
+  paintQuality();
+};
+
 function toMenu() {
   mode = 'menu';
   stopAmbient();
@@ -114,30 +141,70 @@ function toMenu() {
 }
 
 // ---------- Level lifecycle ----------
+// Axis-aligned footprint of a level's box list, used to size the shadow frustum.
+function levelBounds(geo) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const [x, , z, w, , d] of geo) {
+    minX = Math.min(minX, x - w / 2); maxX = Math.max(maxX, x + w / 2);
+    minZ = Math.min(minZ, z - d / 2); maxZ = Math.max(maxZ, z + d / 2);
+  }
+  if (!isFinite(minX)) return { cx: 0, cz: 0, r: 40 };
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+  return { cx, cz, r: Math.max(maxX - minX, maxZ - minZ) / 2 + 4 };
+}
+
 function startLevel(id) {
   currentLevel = id;
   const L = LEVELS[id - 1];
   const diff = DIFFICULTIES[S.difficulty];
 
   scene = new THREE.Scene();
+  // built before the lights because the sun's shadow frustum is fitted to these bounds
+  const geo = [...L.geo(), ...(L.extraGeo ? L.extraGeo() : [])];
   scene.background = new THREE.Color(L.sky);
   scene.fog = new THREE.Fog(L.fog[0], L.fog[1], L.fog[2]);
-  scene.add(new THREE.AmbientLight(L.nvg ? 0x8dffb4 : 0xbfd4e6, L.ambient));
+  // PBR metals need something to reflect or they render black. Also supplies soft ambient
+  // bounce, which is why the ambient light below can be dialled back once this is on.
+  if (quality.pbr) scene.environment = environment(renderer, L.sky, L.fog[0]);
+  // The per-level ambient/sun values were authored against MeshLambertMaterial. Standard
+  // responds differently, so scale here rather than rewriting all ten levels' art direction.
+  // Key light gets the bigger boost and ambient the smaller one: strong key + darker fill is
+  // what gives a scene shape instead of the uniform flat wash Lambert produced.
+  const AMB = quality.pbr ? 1.35 : 1;
+  const KEY = quality.pbr ? 2.1 : 1;
+  scene.add(new THREE.AmbientLight(L.nvg ? 0x8dffb4 : 0xbfd4e6, L.ambient * AMB));
   if (L.nvg) scene.add(new THREE.HemisphereLight(0xa8ffc8, 0x0e2416, 0.9));
   $('nvg').style.display = L.nvg ? 'block' : 'none';
   if (L.sun > 0) {
-    const sun = new THREE.DirectionalLight(0xdfe8ff, L.sun);
+    const sun = new THREE.DirectionalLight(0xdfe8ff, L.sun * KEY);
     sun.position.set(30, 60, 20);
+    if (quality.shadows) {
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(quality.shadowMapSize, quality.shadowMapSize);
+      // Fit the ortho shadow frustum to the level's actual footprint. Guessing a fixed
+      // radius wastes most of the shadow map on empty space and gives blocky edges.
+      const b = levelBounds(geo);
+      const r = Math.max(b.r, 12);
+      const cam = sun.shadow.camera;
+      cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r;
+      cam.near = 1; cam.far = r * 4 + 80;
+      cam.updateProjectionMatrix();
+      sun.target.position.set(b.cx, 0, b.cz);
+      scene.add(sun.target);
+      sun.position.set(b.cx + 30, 60, b.cz + 20);
+      // acne on the big merged mesh: normalBias handles the flat faces, bias the rest
+      sun.shadow.bias = -0.0006;
+      sun.shadow.normalBias = 0.04;
+    }
     scene.add(sun);
     // fill from the opposite side so faces away from the sun still separate
-    const fill = new THREE.DirectionalLight(0xa8c0d8, L.sun * 0.35);
+    const fill = new THREE.DirectionalLight(0xa8c0d8, L.sun * 0.35 * AMB);
     fill.position.set(-25, 30, -35);
     scene.add(fill);
   }
-  const hemi = new THREE.HemisphereLight(0x9db4c8, 0x2a323a, L.flashlight ? 0.15 : 0.65);
+  const hemi = new THREE.HemisphereLight(0x9db4c8, 0x2a323a, (L.flashlight ? 0.15 : 0.65) * AMB);
   scene.add(hemi);
 
-  const geo = [...L.geo(), ...(L.extraGeo ? L.extraGeo() : [])];
   const { solids } = buildStaticGeometry(scene, geo);
 
   // navigation mesh: without this the AI can only walk in straight lines.

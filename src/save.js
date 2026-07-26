@@ -5,6 +5,7 @@ const defaults = {
   difficulty: 1,
   sensitivity: 1.0,
   invertY: false,
+  quality: 'auto',       // auto | low | high — read directly by quality.js before boot
   best: {},              // levelId -> { score, grade }
 };
 

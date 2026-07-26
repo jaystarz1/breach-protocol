@@ -1,11 +1,17 @@
 import * as THREE from 'three';
 import { makeBox } from './physics.js';
+import { quality } from './quality.js';
+import { surfaces } from './textures.js';
+
+// Texels per world metre. Every face is projected at this scale regardless of box size,
+// so a 20m wall and a 0.5m crate share the same grain and nothing stretches.
+const TEXELS_PER_M = 0.5;
 
 // geo entries: [x, y, z, w, h, d, color, solid=true]
 // Merges all static boxes into one mesh with vertex colors for a single draw call.
 export function buildStaticGeometry(scene, geo) {
   const solids = [];
-  const positions = [], normals = [], colors = [], indices = [];
+  const positions = [], normals = [], colors = [], uvs = [], indices = [];
   let vtx = 0;
   const c = new THREE.Color();
   for (const [x, y, z, w, h, d, color, solid] of geo) {
@@ -15,9 +21,20 @@ export function buildStaticGeometry(scene, geo) {
     const pos = g.attributes.position, norm = g.attributes.normal, idx = g.index;
     c.setHex(color);
     for (let i = 0; i < pos.count; i++) {
-      positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
-      normals.push(norm.getX(i), norm.getY(i), norm.getZ(i));
+      const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
+      const nx = norm.getX(i), ny = norm.getY(i), nz = norm.getZ(i);
+      positions.push(px, py, pz);
+      normals.push(nx, ny, nz);
       colors.push(c.r, c.g, c.b);
+      // Planar-project onto whichever axis this face points along. Boxes are all
+      // axis-aligned, so the dominant normal component picks the projection plane and
+      // world coordinates become UVs directly — uniform texel density, no seams to fix.
+      const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+      let u, v;
+      if (ay >= ax && ay >= az) { u = px; v = pz; }        // floors and ceilings
+      else if (ax >= az) { u = pz; v = py; }               // walls facing X
+      else { u = px; v = py; }                             // walls facing Z
+      uvs.push(u * TEXELS_PER_M, v * TEXELS_PER_M);
     }
     for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + vtx);
     vtx += pos.count;
@@ -27,16 +44,39 @@ export function buildStaticGeometry(scene, geo) {
   merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   merged.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  merged.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   merged.setIndex(indices);
-  const mesh = new THREE.Mesh(merged, new THREE.MeshLambertMaterial({ vertexColors: true }));
+
+  let mat;
+  if (quality.pbr) {
+    const s = surfaces();
+    mat = new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.92, metalness: 0.04,
+      map: quality.textures ? s.concrete.map : null,
+      roughnessMap: quality.textures ? s.concrete.roughnessMap : null,
+    });
+  } else {
+    mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  }
+  const mesh = new THREE.Mesh(merged, mat);
+  mesh.castShadow = mesh.receiveShadow = quality.shadows;
   scene.add(mesh);
   return { solids, mesh };
 }
 
+// Character/prop surfaces. Cloth and skin want no texture but do want PBR falloff;
+// flat Lambert is what made everything read as moulded plastic.
+export function bodyMaterial(color) {
+  return quality.pbr
+    ? new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0.0 })
+    : new THREE.MeshLambertMaterial({ color });
+}
+
 // ---------- Low-poly humanoid ----------
 function limb(w, h, d, color, x, y, z) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMaterial(color));
   m.position.set(x, y, z);
+  m.castShadow = m.receiveShadow = quality.shadows;
   return m;
 }
 
@@ -46,8 +86,9 @@ const SKINS = [0xd9b08c, 0xc68863, 0xa9714b, 0x8d5a3b, 0xe8c39e];
 
 function jointed(w, h, d, color) {
   // box whose origin is at its TOP so rotating the group bends at the joint
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMaterial(color));
   m.position.y = -h / 2;
+  m.castShadow = m.receiveShadow = quality.shadows;
   return m;
 }
 
@@ -188,11 +229,11 @@ export function makeDoor(w = 1.4, h = 2.4) {
   const g = new THREE.Group();
   const panel = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, 0.12),
-    new THREE.MeshLambertMaterial({ color: 0x6d4c41 })
+    bodyMaterial(0x6d4c41)
   );
   panel.position.y = h / 2;
   g.add(panel);
-  const knob = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.2), new THREE.MeshLambertMaterial({ color: 0xffc107 }));
+  const knob = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.2), bodyMaterial(0xffc107));
   knob.position.set(w / 2 - 0.18, h / 2, 0);
   g.add(knob);
   return g;
