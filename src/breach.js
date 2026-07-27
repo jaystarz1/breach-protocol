@@ -41,6 +41,21 @@ export class DoorSystem {
     return null;
   }
 
+  // Nearest un-breached door within `radius`, used to tell the squad to stack up. Separate
+  // from nearBreachable because that one is tuned for the "press to breach" prompt and only
+  // reaches 2.6m, by which point the player is already standing on the door.
+  nearStack(pos, radius = 5.5) {
+    let best = null, bestD = radius;
+    for (const d of this.doors) {
+      if (d.breached) continue;
+      const dy = Math.abs((d.mesh.position.y + 1.2) - pos.y);
+      if (dy > 2.4) continue;
+      const dist = Math.hypot(d.mesh.position.x - pos.x, d.mesh.position.z - pos.z);
+      if (dist < bestD) { bestD = dist; best = d; }
+    }
+    return best;
+  }
+
   breach(door, world) {
     door.breached = true;
     // remove its solid from world list

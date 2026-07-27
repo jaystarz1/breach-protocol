@@ -64,6 +64,7 @@ export class Enemy {
     this.flee = !!def.flee;          // HVT: runs its route instead of fighting
     this.hvt = !!def.hvt;
     this.escapes = !!def.escapes;   // only a runner with somewhere to go can get away
+    this.tag = def.tag || null;     // scripted-event grouping, e.g. which room this man holds
   }
 
   get pos() { return this.mesh.position; }

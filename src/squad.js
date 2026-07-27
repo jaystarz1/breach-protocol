@@ -11,20 +11,44 @@
 //   - They can die. They do not respawn and losing them never fails the mission — that would
 //     turn a squad from an asset into a babysitting objective.
 import * as THREE from 'three';
-import { makeCharacter, animateRig, deathPose } from './levelgen.js';
+import { makeCharacter, animateRig, deathPose, kneelRig } from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { claimPath, findPathFor } from './enemies.js';
 import { sfx } from './audio.js';
 
 const EYE = 1.5;
 
-// Formation slots in player-local metres: x is right, z is BEHIND. Staggered so two allies
-// never occupy the same doorway and neither one walks through the player's firing line.
-const SLOTS = [[-2.0, 2.6], [2.0, 2.6], [-3.4, 4.4], [3.4, 4.4]];
+// Formation slots in player-local metres: x is right, z is BEHIND. Tight on the shoulder and
+// staggered, so two men never occupy the same doorway and neither crosses the firing line.
+const SLOTS = [[-1.5, 1.5], [1.5, 1.5], [-2.6, 3.0], [2.6, 3.0]];
+
+// Stack file for a door entry: single column hard on the player's back, alternating sides so
+// the men are ready to peel left and right through the opening.
+const STACK = [[-0.75, 1.5], [0.75, 2.4], [-0.75, 3.3], [0.75, 4.2]];
 
 export const CALLSIGNS = ['BRAVO-2', 'BRAVO-3', 'BRAVO-4', 'BRAVO-5'];
 
 export const CT_CALLSIGNS = ['ALPHA-1', 'ALPHA-2', 'ALPHA-3', 'ALPHA-4'];
+
+// Slot offsets are [right, BEHIND] in the leader's frame. Turning them into world coordinates
+// has to use the same forward convention as Player.forward(), which is (-sin yaw, -cos yaw):
+//
+//   forward = (-sin y, -cos y)      behind = -forward = ( sin y,  cos y)
+//   right   = (-forward.z, forward.x) = ( cos y, -sin y)
+//
+// The original transform got this inverted and placed the whole formation IN FRONT of the
+// player. It was invisible for a long time because nothing else cared where the slot was —
+// the men simply walked to a point ahead of him and shot from there, which read as "wandering
+// off". It only became a hard bug once the no-overtake clamp started dragging them back to the
+// player's shoulder every frame: slot pulling forward, clamp pushing back, distance-to-slot
+// permanently stuck above tolerance, so the squad could never settle and never knelt.
+export function slotWorld(px, pz, yaw, off) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return {
+    x: px + c * off[0] + s * off[1],
+    z: pz - s * off[0] + c * off[1],
+  };
+}
 
 export class Ally {
   constructor(scene, pos, idx, opts = {}) {
@@ -64,6 +88,9 @@ export class Ally {
     this.blocked = 0;        // seconds spent trying to move and getting nowhere
     this.forcePath = 0;      // seconds during which A* is mandatory, not optional
     this.progress = 0;       // metres actually covered this frame, after collision
+    this.kneel = 0;          // 0..1 blend into the firing kneel
+    this.stillTimer = 0;     // how long the player has been stationary
+    this.formTimer = 0;      // how long we have been trying to reach a slot while he holds
   }
 
   get pos() { return this.mesh.position; }
@@ -233,6 +260,47 @@ export class Ally {
     const pp = world.playerPos;
     const leash = Math.hypot(p.x - pp.x, p.z - pp.z);
 
+    // The player's tempo drives the squad's. He stops, they go firm; he moves, they move.
+    // Debounced, because raw speed flickers around zero every time he brushes a wall and a
+    // squad that pops up and down on every stutter looks broken rather than disciplined.
+    if (!this.route) {
+      const walking = (world.playerSpeed || 0) > 1.2;
+      this.stillTimer = walking ? 0 : this.stillTimer + dt;
+      const holding = this.stillTimer > 0.35;
+      // Slot: hard on the shoulder normally, single-file stack when he is on a door.
+      const stacking = !!world.stackDoor;
+      const table = stacking ? STACK : SLOTS;
+      const off = table[this.idx % table.length];
+      const sl = slotWorld(pp.x, pp.z, world.playerYaw || 0, off);
+      const sx = sl.x, sz = sl.z;
+      const slotD = Math.hypot(sx - p.x, sz - p.z);
+      const stepOff = Math.abs(pp.y - p.y) > 1.6;
+      // Close up on the slot whenever he is walking, or whenever we have drifted off it.
+      // Stacking pulls the tolerance in tight: a stack with a metre of slop is not a stack.
+      const tol = stacking ? 0.55 : 1.5;
+      // A slot is a point in space and the world is full of walls, so sometimes the slot is
+      // inside one — stand with your back to a doorway and the rear stack positions land in
+      // the masonry. Rather than shuffle against it forever, a man who cannot make his slot
+      // while the leader is stopped simply goes firm where he stands. Good enough beats
+      // correct-but-unreachable, and it looks like a decision instead of a glitch.
+      //
+      // Timed, NOT based on the wedge counter: an unreachable slot does not read as "wedged".
+      // The man keeps taking a step toward it and keeps getting slid back by the no-overtake
+      // clamp, so per-frame progress stays healthy while net movement is zero. Only elapsed
+      // time spent failing to arrive catches that.
+      this.formTimer = holding ? this.formTimer + dt : 0;
+      const wedged = this.formTimer > 2.5;
+      this.formUp = (!holding || ((slotD > tol || stepOff) && !wedged));
+      if (this.formUp) {
+        this.kneel = Math.max(0, this.kneel - dt * 4);
+        if (slotD > tol * 0.6 || stepOff) this.goTo(dt, world, sx, pp.y, sz, this.speed);
+      } else {
+        // Firm. Down on a knee, weapon out, covering.
+        this.kneel = Math.min(1, this.kneel + dt * 3);
+        if (slotD <= tol) this.formTimer = 0;   // on station: nothing to give up on
+      }
+    }
+
     if (this.target) {
       const t = this.target;
       const dist = Math.hypot(t.pos.x - p.x, t.pos.y - p.y, t.pos.z - p.z);
@@ -251,14 +319,11 @@ export class Ally {
         if (dist > 26 && Math.hypot(tx - p.x, tz - p.z) > 2.4) this.goTo(dt, world, tx, p.y, tz, this.speed * 0.55);
         else if (this.strafeTimer <= 0) { this.strafeTimer = 1.4 + Math.random() * 1.8; this.strafeDir *= -1; }
       }
-      else if (leash > 16 || leashY > 1.6) this.goTo(dt, world, pp.x, pp.y, pp.z, this.speed);
-      else if (dist > 22) this.goTo(dt, world, t.pos.x, t.pos.y, t.pos.z, this.speed * 0.7);
-      else if (this.strafeTimer <= 0) { this.strafeTimer = 1.4 + Math.random() * 1.8; this.strafeDir *= -1; }
-      else if (dist > 8) {
-        const f = Math.atan2(t.pos.x - p.x, t.pos.z - p.z);
-        this.moveBy(Math.cos(f) * this.strafeDir * this.speed * 0.3 * dt,
-                    -Math.sin(f) * this.strafeDir * this.speed * 0.3 * dt, world);
-      }
+      // The player's squad does NOT manoeuvre on contact. It used to advance on targets and
+      // strafe, which is why they ended up wandering the map and getting in front of him.
+      // Their feet belong to the formation block above and nothing else; all that happens
+      // here is that they turn and shoot from where they already are.
+      //
       // Face the contact regardless of what the feet are doing.
       this.yaw = lerpAng(this.yaw, Math.atan2(t.pos.x - p.x, t.pos.z - p.z), Math.min(1, dt * 8));
       this.shoot(dt, world, t, dist);
@@ -284,21 +349,13 @@ export class Ally {
       } else {
         this.goTo(dt, world, tx, p.y, tz, this.speed * 0.8);
       }
-    } else {
-      // no contact: hold the formation slot, rotated into the player's frame
-      const c = Math.cos(world.playerYaw || 0), s = Math.sin(world.playerYaw || 0);
-      const ox = this.slot[0], oz = this.slot[1];
-      const sx = pp.x - (ox * c + oz * s);
-      const sz = pp.z - (oz * c - ox * s);
-      const d = Math.hypot(sx - p.x, sz - p.z);
-      if (d > 2.2 || Math.abs(pp.y - p.y) > 1.6) {
-        this.goTo(dt, world, sx, pp.y, sz, this.speed);
-      } else {
-        this.yaw = lerpAng(this.yaw, world.playerYaw || 0, Math.min(1, dt * 4));
-      }
+    } else if (!this.formUp) {
+      // Firm with no contact: face outward the way the player is facing, weapon up.
+      this.yaw = lerpAng(this.yaw, world.playerYaw || 0, Math.min(1, dt * 4));
     }
 
     this.yieldToPlayer(dt, world);
+    this.stayBehindPlayer(world);
     this.settle(dt, world);
   }
 
@@ -334,6 +391,27 @@ export class Ally {
     this.moveBy(fz * side * 3.4 * dt, -fx * side * 3.4 * dt, world);
   }
 
+  // Hard rule: nobody gets in front of the man leading. Enforced as a position clamp after
+  // all movement rather than as a steering preference, because a preference loses — one
+  // stuck-recovery sidestep or one pathing detour around a crate and a man is suddenly out
+  // ahead, walking into the player's line and taking the first round of every room.
+  //
+  // The clamp projects onto the player's forward axis and slides the man straight back onto
+  // the allowed side. Lateral position is untouched, so the spread survives.
+  stayBehindPlayer(world) {
+    if (this.route || this.dead) return;
+    const p = this.pos, pp = world.playerPos;
+    if (Math.abs(pp.y - p.y) > 2.0) return;         // different floor: not "in front" of anything
+    const yaw = world.playerYaw || 0;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw); // Player.forward() convention
+    const along = (p.x - pp.x) * fx + (p.z - pp.z) * fz;
+    const LIMIT = -0.35;                            // stay at least this far behind his shoulder
+    if (along <= LIMIT) return;
+    const back = along - LIMIT;
+    p.x -= fx * back;
+    p.z -= fz * back;
+  }
+
   shoot(dt, world, t, dist) {
     this.burstTimer -= dt;
     if (this.burstTimer > 0) return;
@@ -362,6 +440,8 @@ export class Ally {
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.mesh.rotation.y = this.yaw;
     animateRig(this.mesh, this.walkPhase, this.moving, this.flinch);
+    // Kneel last: it overrides the walk cycle's leg rotations rather than blending with them.
+    if (this.kneel > 0.001) kneelRig(this.mesh, this.kneel);
     if (this.moving) {
       this.stepAccum += dt;
       if (this.stepAccum > 0.4) {
@@ -398,11 +478,9 @@ function lerpAng(a, b, t) { return a + normAng(b - a) * t; }
 export function spawnSquad(scene, count, start, solids) {
   const out = [];
   const yaw = (start[3] || 0) * Math.PI / 180;
-  const c = Math.cos(yaw), s = Math.sin(yaw);
   for (let i = 0; i < count; i++) {
-    const [ox, oz] = SLOTS[i % SLOTS.length];
-    const x = start[0] - (ox * c + oz * s);
-    const z = start[2] - (oz * c - ox * s);
+    const sl = slotWorld(start[0], start[2], yaw, SLOTS[i % SLOTS.length]);
+    const x = sl.x, z = sl.z;
     const g = groundHeight(solids, x, z, 0.35, start[1] + 1.2);
     out.push(new Ally(scene, [x, g === -Infinity ? start[1] : g, z], i));
   }

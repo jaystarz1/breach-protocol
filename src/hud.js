@@ -49,7 +49,12 @@ export const hud = {
   breathBtn(on) { $('btn-breath').style.display = on ? 'flex' : 'none'; },
   nadeBtn(on) { $('btn-nade').style.display = on ? 'flex' : 'none'; },
   swapBtn(on) { $('btn-swap').style.display = on ? 'flex' : 'none'; },
-  scope(on) { $('scope').style.display = on ? 'block' : 'none'; $('crosshair').style.display = on ? 'none' : 'block'; },
+  scope(on) { $('scope').style.display = on ? 'block' : 'none'; },
+  // Exactly one aiming reference is visible at a time: hip crosshair, ADS reticle, or scope.
+  aimRef(mode) {
+    $('crosshair').style.display = mode === 'hip' ? 'block' : 'none';
+    $('ads-reticle').style.display = mode === 'ads' ? 'block' : 'none';
+  },
   screen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     if (name) $('screen-' + name).classList.add('active');

@@ -145,6 +145,7 @@ function toMenu() {
   stopAmbient();
   hud.show(false);
   hud.scope(false);
+  hud.aimRef('none');
   hud.nvg(false);
   hud.squad('');
   hud.reinf('');
@@ -179,6 +180,37 @@ function setNvg(on) {
   r.hemi.visible = !on;
   if (r.sun) r.sun.intensity = r.sunI * (on ? 0.22 : 1);
   if (r.fill) r.fill.intensity = r.fillI * (on ? 0.25 : 1);
+}
+
+// Kill the power. Every fixture out, the natural ambient crushed to almost nothing, and the
+// sun cut — but the NVG ambient left alone, so the goggles are the answer and the player has
+// to reach for them. Also drops the emissive pass (lit window panes, exit signs) to black,
+// because a "blacked out" building with its light fittings still glowing is not blacked out.
+function killPower() {
+  if (!nvgRig || world.blackedOut) return;
+  world.blackedOut = true;
+  const r = nvgRig;
+  if (r.fixtures) for (const f of r.fixtures) f.intensity = 0;
+  // The environment map lights every PBR surface on its own, completely independently of the
+  // light list. Zeroing every lamp in the building and leaving this set produced a "blackout"
+  // you could comfortably read a wall by. It is cached in textures.js, so dropping the scene's
+  // reference costs nothing and it comes back on the next level load.
+  r.savedEnv = scene.environment;
+  scene.environment = null;
+  r.ambBase.intensity *= 0.05;
+  r.hemi.intensity *= 0.05;
+  if (r.sun) { r.sunI = 0; r.sun.intensity = 0; }
+  if (r.fill) { r.fillI = 0; r.fill.intensity = 0; }
+  if (world.litMesh) world.litMesh.visible = false;
+  sfx.explosion(player.pos);
+  hud.flashWhite(0.5);
+  world.blind = Math.max(world.blind, 0.6);
+  hud.noShoot('POWER CUT');
+  hud.feed('LIGHTS ARE OUT — GOGGLES ON (N)', '#9dffc4');
+  // Blind men fight worse. They also cannot see you at range any more, which is the point of
+  // owning the dark: the goggles are an advantage, not just a different colour palette.
+  for (const e of world.enemies) e.range = Math.min(e.range, 12);
+  world.darkRange = 12;
 }
 
 function startLevel(id) {
@@ -271,7 +303,8 @@ function startLevel(id) {
   const hemi = new THREE.HemisphereLight(0x9db4c8, 0x2a323a, (L.flashlight ? 0.15 : 0.65) * AMB);
   scene.add(hemi);
   nvgRig = { ambBase, nvgAmb, nvgHemi, hemi, sun: sunLight, fill: fillLight,
-             sunI: sunLight ? sunLight.intensity : 0, fillI: fillLight ? fillLight.intensity : 0 };
+             sunI: sunLight ? sunLight.intensity : 0, fillI: fillLight ? fillLight.intensity : 0,
+             fixtures: null };
   setNvg(!!L.nvg);
 
   // Interior fixtures. Every one of these is a per-fragment loop iteration on the big merged
@@ -280,16 +313,19 @@ function startLevel(id) {
   // point light is six render passes, which no interior here is worth.
   const LIGHT_CAP = quality.pbr ? 14 : 6;
   const used = roomLights.slice(0, LIGHT_CAP);
+  const fixtures = [];
   for (const l of used) {
     const pl = new THREE.PointLight(l.color, l.intensity * (L.nvg ? 0.35 : 1), l.distance, 2);
     pl.position.set(l.pos[0], l.pos[1], l.pos[2]);
     scene.add(pl);
+    fixtures.push(pl);          // kept so a level can cut the power later
   }
+  nvgRig.fixtures = fixtures;
   if (roomLights.length > used.length) {
     console.warn(`[bp] level ${L.id}: ${roomLights.length - used.length} of ${roomLights.length} fixtures dropped (cap ${LIGHT_CAP})`);
   }
 
-  const { solids } = buildStaticGeometry(scene, geo);
+  const { solids, litMesh } = buildStaticGeometry(scene, geo);
 
   // navigation mesh: without this the AI can only walk in straight lines.
   // Built BEFORE doors are added as solids, so a doorway stays routable once breached —
@@ -321,7 +357,7 @@ function startLevel(id) {
   }
 
   world = {
-    level: L, diff, solids, doors, nav,
+    level: L, diff, solids, doors, nav, litMesh,
     enemies: [], civilians: [], allies: [], grenades: [], effects: [],
     playerPos: player.pos, playerYaw: player.yaw, playerSpeed: 0, playerAds: false, playerCrouched: false,
     combatHeat: 0, slowmo: 0, blind: 0,
@@ -506,6 +542,17 @@ function setObjective() {
   }
 }
 
+// Scripted lights-out. Fires once, when every hostile carrying the trigger tag is down.
+// Tag-based rather than "second objective complete" because level 1 clears all three rooms
+// under a single objective — the beat has to hang off the room, not the objective list.
+function blackoutTrigger() {
+  const cfg = world.level.blackoutOn;
+  if (!cfg || world.blackedOut) return;
+  const tagged = world.enemies.filter(e => e.tag === cfg.tag);
+  if (!tagged.length || !tagged.every(e => e.dead)) return;
+  killPower();
+}
+
 // Timed reinforcements. Spawns are refused on the LAST objective so the mission always
 // converges, and refused within 22m of the player so nobody materialises in front of him.
 function reinforcements(dt) {
@@ -527,7 +574,7 @@ function reinforcements(dt) {
     const s = pool[(r.sent + i) % pool.length];
     const e = new Enemy(scene, {
       pos: [s[0] + (Math.random() - 0.5) * 2, s[1], s[2] + (Math.random() - 0.5) * 2],
-      aggro: true, range: r.range ?? 70,
+      aggro: true, range: Math.min(r.range ?? 70, world.darkRange ?? 1e9),
       patrol: r.patrol || null, hold: !r.patrol,
     }, world.diff);
     // They arrive already looking for you — a reinforcement that stands around defeats
@@ -837,6 +884,7 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     hud.flashWhite(0);
     hud.show(false);
     hud.scope(false);
+    hud.aimRef('none');
     hud.nvg(false);
     hud.squad('');
     hud.reinf('');
@@ -915,6 +963,7 @@ function frame() {
   // ADS FOV + scope
   const scoped = weapons.spec.scoped && input.ads;
   hud.scope(!!scoped);
+  hud.aimRef(scoped ? 'scope' : input.ads ? 'ads' : 'hip');
   // a scoped Barrett at hipfire sensitivity is unusable; scale with magnification
   input.sensScale = scoped ? 0.28 : input.ads ? 0.62 : 1;
   const targetFov = input.ads ? weapons.spec.adsFov : 70;
@@ -1006,6 +1055,10 @@ function frame() {
   // doors / breach
   const near = world.doors.nearBreachable(player.pos, player.yaw);
   hud.breachBtn(!!near && !world.level.sniper);
+  // Stack cue for the squad. Deliberately a WIDER radius than the breach prompt: the men
+  // should already be forming the column as you walk up on the door, not snapping into it at
+  // the moment the button appears.
+  world.stackDoor = world.doors.nearStack(player.pos, 5.5);
   if (input.breachPressed && near) world.doors.breach(near, world);
   world.doors.update(dt);
 
@@ -1064,7 +1117,7 @@ function frame() {
   }
 
   // objectives + HUD
-  if (!world.over) { checkObjectives(); objectiveWatchdog(dt); reinforcements(dt); }
+  if (!world.over) { checkObjectives(); objectiveWatchdog(dt); reinforcements(dt); blackoutTrigger(); }
   // beacon pulse + live distance readout on reach objectives
   if (world.beacon) {
     world.beacon.material.opacity = 0.22 + Math.sin(performance.now() / 300) * 0.12;

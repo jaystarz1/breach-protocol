@@ -134,7 +134,7 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 1
   {
     id: 1, name: 'FIRST DOOR',
-    brief: 'Kill-house shakedown. Clear three rooms. Armed targets only — anyone with their hands up walks out alive. Pistol discipline: controlled pairs.',
+    brief: 'Kill-house shakedown. Clear three rooms. Armed targets only — anyone with their hands up walks out alive. Pistol discipline: controlled pairs. Instructors will cut the lights partway through: goggles are on your helmet, press N.',
     weapons: ['pistol'], grenades: 0, squad: 1,
     sky: 0x27313d, fog: [0x27313d, 40, 130], ambient: 0.95, sun: 1.25,
     // roofed kill-house: the sun never reaches the rooms, so let the ceiling strips light them
@@ -216,13 +216,17 @@ export const LEVELS = [
     },
     // Role players fed in from the north end of the corridor. Small and slow: this is the
     // shakedown mission and the clock is meant to be felt, not to punish.
+    // Clear room two and the breakers go. The third room is fought in the dark on goggles,
+    // which is what turns the shakedown mission into a tutorial for owning the night.
+    blackoutOn: { tag: 'r2' },
     reinforce: { every: 40, first: 45, max: 2, group: 1, range: 40, at: [[0, 0, 20]] },
     doors: [
       { pos: [3.15, 0, 13.25], rot: 90 }, { pos: [3.15, 0, 1.25], rot: 90 }, { pos: [3.15, 0, -10.75], rot: 90 },
     ],
     enemies: [
       { pos: [8, 0, 11], hold: true, yaw: 270 },
-      { pos: [9, 0, -1], hold: true, yaw: 270 }, { pos: [6, 0, -3], hold: true, yaw: 270 },
+      // room two. Putting these men down cuts the power — see blackoutOn below.
+      { pos: [9, 0, -1], hold: true, yaw: 270, tag: 'r2' }, { pos: [6, 0, -3], hold: true, yaw: 270, tag: 'r2' },
       { pos: [8, 0, -13], hold: true, yaw: 270 }, { pos: [9.4, 0, -15], hold: true, yaw: 270 },
     ],
     civilians: [

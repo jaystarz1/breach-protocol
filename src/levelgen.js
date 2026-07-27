@@ -306,6 +306,29 @@ export function animateRig(g, phase, moving, flinch = 0) {
   g.userData.bob = moving ? Math.abs(Math.sin(phase)) * 0.05 : 0;
 }
 
+// Drop to one knee in a firing position, blended 0..1. Call AFTER animateRig so it overrides
+// the walk cycle rather than fighting it.
+//
+// The whole figure has to sink as the legs fold, or the feet punch through the floor. The
+// group origin is the man's feet and is owned by the ground snap, so the sink is applied to
+// the children instead — their construction-time heights are cached on first use, because
+// re-reading them later would capture an already-sunk pose and the figure would creep into
+// the ground a little more every frame.
+export function kneelRig(g, k) {
+  const r = g.userData.rig;
+  if (!r) return;
+  if (!r.baseY) r.baseY = g.children.map(c => c.position.y);
+  const drop = 0.36 * k;
+  for (let i = 0; i < g.children.length; i++) g.children[i].position.y = r.baseY[i] - drop;
+  // rear leg tucked under the body, front leg planted forward: the classic supported kneel
+  r.rLeg.rotation.x = 0.62 * k;
+  r.rLeg.userData.shin.rotation.x = 1.62 * k;
+  r.lLeg.rotation.x = -0.52 * k;
+  r.lLeg.userData.shin.rotation.x = 0.78 * k;
+  // The rifle is itself a child of the group, so the loop above has already lowered it with
+  // the rest of the body. Nothing to do here, and adding a second offset would double it.
+}
+
 // Death sprawl: called once at kill time to splay the figure before it tips over.
 export function deathPose(g) {
   const r = g.userData.rig;

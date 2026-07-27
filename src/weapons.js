@@ -48,13 +48,42 @@ function gunMaterials() {
     black: std(0x1d2226, 0.55, 0.55, true),     // parkerised furniture
     poly: std(0x24292e, 0.88, 0.03, false),     // polymer grip / handguard / stock
     tan: std(0x6d5f45, 0.82, 0.04, false),      // sniper furniture
-    // Optic glass and the tritium dots are unlit on purpose: lit like plastic they vanish.
-    glass: new THREE.MeshBasicMaterial({ color: 0x14302a }),
-    dot: new THREE.MeshBasicMaterial({ color: 0xff4b3a }),
-    tritium: new THREE.MeshBasicMaterial({ color: 0x6effa8 }),
+    // Optic glass has to be SEE-THROUGH. An opaque lens disc is geometrically honest and
+    // completely unusable: aiming down the sight put a solid green coin exactly where the
+    // target was. Transparent, additive, and depthWrite off so it tints the view instead of
+    // replacing it and never occludes anything behind it.
+    glass: new THREE.MeshBasicMaterial({
+      color: 0x1d4a3c, transparent: true, opacity: 0.16,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    }),
+    // Illuminated elements. depthTest off so the reticle is never swallowed by the tube it
+    // sits inside, additive so it glows rather than paints.
+    dot: new THREE.MeshBasicMaterial({
+      color: 0xff5540, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false,
+    }),
+    tritium: new THREE.MeshBasicMaterial({
+      color: 0x7effb4, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false,
+    }),
   };
   return gmats;
 }
+
+// Hollow tube along Z: walls only, open at both ends. This is what makes an optic something
+// you look THROUGH rather than a solid cylinder with a lid on each end.
+const shell = (mat, r, len, x, y, z, seg = 14) => {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, seg, 1, true), mat);
+  m.rotation.x = Math.PI / 2;
+  m.position.set(x, y, z);
+  return m;
+};
+// Flat ring, for lens rims and objective bells that must not block the sight picture.
+const ring = (mat, ri, ro, x, y, z, seg = 16) => {
+  const m = new THREE.Mesh(new THREE.RingGeometry(ri, ro, seg), mat);
+  m.position.set(x, y, z);
+  return m;
+};
 
 const bx = (mat, w, h, d, x = 0, y = 0, z = 0) => {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -135,13 +164,23 @@ function gunMesh(kind) {
     g.add(bx(M.poly, 0.048, 0.026, 0.03, 0, -0.05, 0.44));         // toe
     g.add(bx(M.black, 0.052, 0.02, 0.036, 0, 0.032, 0.465));       // buttpad
     g.add(bx(M.black, 0.06, 0.012, 0.03, 0, 0.062, 0.28));         // charging handle
-    // optic: tube, objective bell, ocular, glass and a red dot floating in it
+    // Optic: an open tube you sight through. Walls only, rings for the lens rims, faint
+    // additive glass, and an illuminated dot suspended on the bore axis.
     g.add(bx(M.black, 0.036, 0.02, 0.09, 0, 0.07, 0.06));          // mount
-    g.add(tube(M.black, 0.024, 0.13, 0, 0.098, 0.055, 12));
-    g.add(tube(M.black, 0.03, 0.022, 0, 0.098, -0.012, 12));
-    g.add(tube(M.glass, 0.026, 0.004, 0, 0.098, -0.024, 12));
-    g.add(bx(M.dot, 0.005, 0.005, 0.004, 0, 0.098, -0.027));
+    g.add(shell(M.black, 0.026, 0.15, 0, 0.098, 0.04));            // body
+    g.add(ring(M.black, 0.026, 0.032, 0, 0.098, -0.036));          // objective rim
+    g.add(ring(M.black, 0.026, 0.032, 0, 0.098, 0.116));           // ocular rim
+    // Group.add() returns the group, not the child, so the lens is positioned before adding.
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.026, 16), M.glass);
+    lens.position.set(0, 0.098, -0.03);
+    g.add(lens);
     g.add(bx(M.black, 0.014, 0.026, 0.026, 0.032, 0.098, 0.055));  // windage turret
+    // The dot itself, plus a faint surrounding ring: a circle-dot reticle. Both are additive
+    // and depth-test-free, which is what makes them read as emitted light in a black room.
+    const rdot = bx(M.dot, 0.006, 0.006, 0.002, 0, 0.098, -0.03);
+    const rring = ring(M.dot, 0.019, 0.021, 0, 0.098, -0.03);
+    g.add(rdot, rring);
+    g.userData.reticle = [rdot, rring];
     g.userData.sight = [0, 0.098, 0];
     g.userData.muzzle = [0, 0.026, -0.53];
 
@@ -319,6 +358,10 @@ export class Weapons {
     const mesh = this.meshes[this.current];
     const throughScope = !!sp.scoped && ads;
     mesh.visible = !throughScope;
+    // The in-world reticle and the HUD reticle would land on the same pixels while aiming,
+    // so only one is ever shown: geometry off the hip, the crisp HUD element down the sight.
+    const ret = mesh.userData.reticle;
+    if (ret) for (const r of ret) r.visible = !ads;
     // Reload: cant the weapon inboard and drop it out of the sight line, which is the whole
     // reason a reload feels like a commitment rather than a number changing.
     const rl = this.reloading > 0 ? Math.min(1, Math.sin((1 - this.reloading / sp.reloadTime) * Math.PI) * 1.6) : 0;
