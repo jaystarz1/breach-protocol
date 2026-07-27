@@ -1,11 +1,15 @@
-const CACHE = 'breach-protocol-v17';
+const CACHE = 'breach-protocol-v18';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js',
   'src/main.js', 'src/input.js', 'src/player.js', 'src/weapons.js', 'src/enemies.js',
   'src/civilians.js', 'src/breach.js', 'src/hud.js', 'src/audio.js', 'src/physics.js',
   'src/levelgen.js', 'src/difficulty.js', 'src/save.js', 'src/levels/index.js', 'src/navgrid.js',
-  'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js',
+  'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js', 'src/street-sweep-art.js',
+  'assets/street-sweep/asphalt.jpg', 'assets/street-sweep/asphalt-height.jpg',
+  'assets/street-sweep/sidewalk.jpg', 'assets/street-sweep/sidewalk-height.jpg',
+  'assets/street-sweep/brick.jpg', 'assets/street-sweep/brick-height.jpg',
+  'assets/street-sweep/plaster.jpg', 'assets/street-sweep/plaster-height.jpg',
   'icons/icon-192.png', 'icons/icon-512.png',
 ];
 

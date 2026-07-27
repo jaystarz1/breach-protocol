@@ -17,6 +17,7 @@ import { quality } from './quality.js';
 import { environment, environmentFrom } from './textures.js';
 import { skyDome, groundPlate, skyline, takeLights } from './world.js';
 import { spawnSquad, spawnRouteTeam } from './squad.js';
+import { addStreetSweepArt } from './street-sweep-art.js';
 
 const $ = id => document.getElementById(id);
 
@@ -330,6 +331,7 @@ function startLevel(id) {
   }
 
   const { solids, litMesh } = buildStaticGeometry(scene, geo);
+  if (L.id === 2) addStreetSweepArt(scene);
 
   // Emergency beacons. These cannot ride in the merged static mesh — that whole design is one
   // draw call precisely because nothing in it animates — so each lens is its own tiny unlit
