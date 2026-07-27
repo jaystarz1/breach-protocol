@@ -16,6 +16,7 @@ import { sfx, unlock as audioUnlock, updateListener, startAmbient, stopAmbient }
 import { quality } from './quality.js';
 import { environment, environmentFrom } from './textures.js';
 import { skyDome, groundPlate, skyline, takeLights } from './world.js';
+import { spawnSquad } from './squad.js';
 
 const $ = id => document.getElementById(id);
 
@@ -57,6 +58,10 @@ let weapons = null;
 let currentLevel = 1;
 let flashlight = null;
 let lastTime = performance.now();
+// Goggles are player-controlled equipment now, not a level property, so the lights they swap
+// between are built for every level and toggled rather than chosen once at load.
+let nvgRig = null;
+let nvgOn = false;
 
 // ---------- Menus ----------
 function buildDiffRow() {
@@ -140,7 +145,8 @@ function toMenu() {
   stopAmbient();
   hud.show(false);
   hud.scope(false);
-  $('nvg').style.display = 'none';
+  hud.nvg(false);
+  hud.squad('');
   hud.screen('menu');
 }
 
@@ -155,6 +161,23 @@ function levelBounds(geo) {
   if (!isFinite(minX)) return { cx: 0, cz: 0, r: 40 };
   const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
   return { cx, cz, r: Math.max(maxX - minX, maxZ - minZ) / 2 + 4 };
+}
+
+// Goggles down / goggles up. Beyond swapping the green ambient in for the blue one, the sun
+// and fill are knocked back hard: an image intensifier does not make a moonlit street look
+// like a green moonlit street, it flattens contrast and blows out anything already bright.
+// Cutting the key light is what keeps NVGs from reading as a colour filter on a normal scene.
+function setNvg(on) {
+  nvgOn = on;
+  hud.nvg(on);
+  if (!nvgRig) return;
+  const r = nvgRig;
+  r.ambBase.visible = !on;
+  r.nvgAmb.visible = on;
+  r.nvgHemi.visible = on;
+  r.hemi.visible = !on;
+  if (r.sun) r.sun.intensity = r.sunI * (on ? 0.22 : 1);
+  if (r.fill) r.fill.intensity = r.fillI * (on ? 0.25 : 1);
 }
 
 function startLevel(id) {
@@ -204,9 +227,15 @@ function startLevel(id) {
   const AS = L.ambientScale ?? 1;
   const AMB = (quality.pbr ? 1.35 : 1) * AS;
   const KEY = quality.pbr ? 2.1 : 1;
-  scene.add(new THREE.AmbientLight(L.nvg ? 0x8dffb4 : 0xbfd4e6, L.ambient * AMB));
-  if (L.nvg) scene.add(new THREE.HemisphereLight(0xa8ffc8, 0x0e2416, 0.9));
-  $('nvg').style.display = L.nvg ? 'block' : 'none';
+  // Two ambients and two hemispheres, one pair natural and one pair intensified green, with
+  // exactly one pair visible at a time. Building both up front is what makes the goggles a
+  // free toggle instead of a level rebuild — and the green ambient is boosted because gain is
+  // the entire point of the device: goggles must show you MORE than your naked eye did.
+  const ambBase = new THREE.AmbientLight(0xbfd4e6, L.ambient * AMB);
+  const nvgAmb = new THREE.AmbientLight(0x8dffb4, L.ambient * AMB * (L.nvg ? 1 : 1.5));
+  const nvgHemi = new THREE.HemisphereLight(0xa8ffc8, 0x0e2416, 0.9);
+  scene.add(ambBase, nvgAmb, nvgHemi);
+  let sunLight = null, fillLight = null;
   if (L.sun > 0) {
     const sun = new THREE.DirectionalLight(0xdfe8ff, L.sun * KEY);
     sun.position.set(30, 60, 20);
@@ -231,13 +260,18 @@ function startLevel(id) {
       sun.shadow.normalBias = 0.04;
     }
     scene.add(sun);
+    sunLight = sun;
     // fill from the opposite side so faces away from the sun still separate
     const fill = new THREE.DirectionalLight(0xa8c0d8, L.sun * 0.35 * AMB);
     fill.position.set(-25, 30, -35);
     scene.add(fill);
+    fillLight = fill;
   }
   const hemi = new THREE.HemisphereLight(0x9db4c8, 0x2a323a, (L.flashlight ? 0.15 : 0.65) * AMB);
   scene.add(hemi);
+  nvgRig = { ambBase, nvgAmb, nvgHemi, hemi, sun: sunLight, fill: fillLight,
+             sunI: sunLight ? sunLight.intensity : 0, fillI: fillLight ? fillLight.intensity : 0 };
+  setNvg(!!L.nvg);
 
   // Interior fixtures. Every one of these is a per-fragment loop iteration on the big merged
   // mesh, so the count is capped hard and the drop is REPORTED — a silently truncated light
@@ -287,17 +321,41 @@ function startLevel(id) {
 
   world = {
     level: L, diff, solids, doors, nav,
-    enemies: [], civilians: [], grenades: [], effects: [],
-    playerPos: player.pos, playerSpeed: 0, playerAds: false, playerCrouched: false,
+    enemies: [], civilians: [], allies: [], grenades: [], effects: [],
+    playerPos: player.pos, playerYaw: player.yaw, playerSpeed: 0, playerAds: false, playerCrouched: false,
     combatHeat: 0, slowmo: 0, blind: 0,
     objectiveIdx: 0, won: false, over: false,
     stats: { kills: 0, shotsFired: 0, shotsHit: 0, civKills: 0, rescued: 0, startTime: performance.now(), score: 0 },
     sniperTeam: null,
-    onEnemyKilled(e) {
+    // A kill the squad made still counts toward the objective — the room has to be clearable
+    // — but it earns the player no score. Otherwise the optimal play is to stand behind cover
+    // and let them farm, and the grade stops meaning anything.
+    onEnemyKilled(e, byAlly) {
       this.stats.kills++;
-      this.stats.score += 100;
-      hud.feed('HOSTILE DOWN', '#a5d6a7');
+      if (byAlly) hud.feed('SQUAD — HOSTILE DOWN', '#8fd0ff');
+      else { this.stats.score += 100; hud.feed('HOSTILE DOWN', '#a5d6a7'); }
       this.combatHeat = Math.max(this.combatHeat, 4);
+    },
+    onAllyDown(a) {
+      hud.feed(`${a.name} IS DOWN`, '#ef9a9a');
+      sfx.noShoot();
+      if (this.allies.every(x => x.dead)) hud.feed('SQUAD ELIMINATED — YOU ARE ALONE', '#ef5350');
+    },
+    // Friendly muzzle flash and tracers are BLUE-white, not the hostiles' orange. In a dark
+    // firefight the colour of the tracer is how you know which direction is a threat.
+    allyFlash(pos) {
+      const l = new THREE.PointLight(0xcfe4ff, 2.2, 9);
+      l.position.set(pos.x, pos.y + 1.4, pos.z);
+      scene.add(l);
+      this.effects.push((dt) => { l.intensity -= dt * 25; if (l.intensity <= 0) { scene.remove(l); return true; } return false; });
+    },
+    allyTracer(a, t) {
+      const from = new THREE.Vector3(a.pos.x, a.pos.y + 1.35, a.pos.z);
+      const to = new THREE.Vector3(
+        t.pos.x + (Math.random() - 0.5) * 1.2,
+        t.pos.y + 1.1 + (Math.random() - 0.5) * 0.9,
+        t.pos.z + (Math.random() - 0.5) * 1.2);
+      tracer(from, to, 0x9fd0ff, 8);
     },
     damagePlayer(amt, from) {
       player.damage(amt, diff);
@@ -366,13 +424,19 @@ function startLevel(id) {
   }
   world.civilians = cdefs.map(d => new Civilian(scene, d));
 
+  // Squad. Not on the sniper mission: the player is a single man locked to a parapet and the
+  // team he is covering is already down at the fountain — a stick standing on the roof with
+  // him would contradict the entire premise of the level.
+  if (L.squad && !L.lockPlayer) {
+    world.allies = spawnSquad(scene, L.squad, L.start, solids);
+    hud.feed(`${world.allies.length} FRIENDLIES ON YOU`, '#8fd0ff');
+  }
+
   // sniper stage: friendly team at the fountain
   if (L.team) {
     world.sniperTeam = { pos: new THREE.Vector3(...L.team.pos), health: L.team.health, maxHealth: L.team.health, dead: false };
     for (const off of [[-1.2, 0.5], [1.2, -0.5]]) {
-      const m = makeCharacter({ hostile: true });
-      // recolor to friendly blue
-      m.traverse(o => { if (o.isMesh && o.material.color.getHex() === 0x2b2f33) o.material = o.material.clone(), o.material.color.setHex(0x1a3a5c); });
+      const m = makeCharacter({ friendly: true });
       m.position.set(L.team.pos[0] + off[0], L.team.pos[1], L.team.pos[2] + off[1]);
       scene.add(m);
     }
@@ -500,7 +564,7 @@ function onPlayerShot(spread) {
   const wallDist = raycastSolids(world.solids, o.x, o.y, o.z, dir.x, dir.y, dir.z, weapons.spec.range);
 
   // nearest actor hit — head sphere is a one-shot kill on any weapon
-  let hitEnemy = null, hitCiv = null, hitDist = wallDist, headshot = false;
+  let hitEnemy = null, hitCiv = null, hitAlly = null, hitDist = wallDist, headshot = false;
   for (const e of world.enemies) {
     if (e.dead) continue;
     const tHead = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, e.pos.x, e.pos.y + 1.66, e.pos.z, 0.34);
@@ -513,7 +577,14 @@ function onPlayerShot(spread) {
     const r = c.hostage ? 0.45 : 0.5;
     const y = c.hostage ? 0.6 : 1.0;
     const t = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, c.pos.x, c.pos.y + y, c.pos.z, r);
-    if (t < hitDist) { hitDist = t; hitCiv = c; hitEnemy = null; }
+    if (t < hitDist) { hitDist = t; hitCiv = c; hitEnemy = null; hitAlly = null; }
+  }
+  // Allies stop bullets. They have to: an ally you can shoot THROUGH is not in the world, and
+  // the first time you walk one into your own line of fire you learn to check before firing.
+  for (const a of world.allies) {
+    if (a.dead) continue;
+    const t = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, a.pos.x, a.pos.y + 1.1, a.pos.z, 0.55);
+    if (t < hitDist) { hitDist = t; hitAlly = a; hitEnemy = null; hitCiv = null; }
   }
 
   if (window.QA_SHOT !== undefined) {
@@ -544,6 +615,12 @@ function onPlayerShot(spread) {
     }
   } else if (hitCiv) {
     civilianKilled(hitCiv);
+  } else if (hitAlly) {
+    // Full weapon damage, no score penalty, no mission failure. Killing your own man is its
+    // own punishment: you spend the rest of the level without him.
+    hitAlly.damage(weapons.spec.damage, world);
+    hud.noShoot('FRIENDLY FIRE — CHECK YOUR LANE');
+    sfx.noShoot();
   } else if (hitDist < weapons.spec.range - 0.5) {
     impactAt(end);
   }
@@ -696,7 +773,7 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     hud.flashWhite(0);
     hud.show(false);
     hud.scope(false);
-    $('nvg').style.display = 'none';
+    hud.nvg(false);
     $('debrief-status').textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED' + (reason ? ' — ' + reason : '');
     $('debrief-grade').textContent = g;
     $('debrief-grade').style.color = won ? '#ffc107' : '#ef5350';
@@ -758,7 +835,9 @@ function frame() {
   player.update(dt, world.solids, world.diff, timeScale);
   world.playerSpeed = player.moveSpeed;
   world.playerAds = input.ads;
+  world.playerYaw = player.yaw;
   world.playerCrouched = player.crouch > 0.5;
+  if (input.nvgPressed) setNvg(!nvgOn);
   updateListener(camera.position, player.yaw, player.pitch);
   if (player.dead && !world.over) failMission('KIA');
 
@@ -814,6 +893,12 @@ function frame() {
         if (c.dead) continue;
         if (c.pos.distanceTo(P) < 6) civilianKilled(c);
       }
+      // Your own frag does not politely spare your squad. Same falloff as a hostile takes.
+      for (const a of world.allies) {
+        if (a.dead) continue;
+        const d = a.pos.distanceTo(P);
+        if (d < 7) a.damage(140 * (1 - d / 7), world);
+      }
       const pd = player.pos.distanceTo(P);
       if (pd < 6) world.damagePlayer(60 * (1 - pd / 6), P);
       world.combatHeat = 6;
@@ -860,6 +945,7 @@ function frame() {
 
   // actors
   for (const e of world.enemies) e.update(sdt, world);
+  for (const a of world.allies) a.update(sdt, world);
   for (const c of world.civilians) c.update(sdt, world);
   for (let i = world.effects.length - 1; i >= 0; i--) if (world.effects[i](dt)) world.effects.splice(i, 1);
 
@@ -924,6 +1010,11 @@ function frame() {
   let scoreLine = `HOSTILES: ${remaining} · SCORE: ${Math.max(0, world.stats.score)}`;
   if (world.sniperTeam) scoreLine += ` · TEAM: ${Math.max(0, Math.round(world.sniperTeam.health / world.sniperTeam.maxHealth * 100))}%`;
   hud.score(scoreLine);
+  if (world.allies.length) {
+    hud.squad(world.allies.map(a => a.dead
+      ? `${a.name} KIA`
+      : `${a.name} ${Math.max(0, Math.round(a.health / a.maxHealth * 100))}%`).join('  ·  '));
+  } else hud.squad('');
 
   renderer.render(scene, camera);
   clearEdges();

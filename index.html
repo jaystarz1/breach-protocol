@@ -63,6 +63,10 @@
   #btn-lean-l { left:max(16px, env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:16px; }
   #btn-lean-r { left:calc(68px + env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:16px; }
   #btn-flash { right:max(30px, env(safe-area-inset-right)); bottom:calc(212px + env(safe-area-inset-bottom)); width:52px; height:52px; font-size:10px; display:none; }
+  #btn-nvg { left:calc(120px + env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:10px; }
+  #btn-nvg.latched { background:rgba(76,255,150,.28); border-color:rgba(76,255,150,.75); color:#9dffc4; }
+  #squad-line { position:absolute; left:max(20px, env(safe-area-inset-left)); bottom:calc(168px + env(safe-area-inset-bottom));
+    font-size:11px; letter-spacing:.5px; color:#8fd0ff; text-shadow:0 1px 2px #000; }
 
   /* ---------- Directional damage ---------- */
   #dmg-ring { position:absolute; inset:0; pointer-events:none; }
@@ -93,12 +97,43 @@
   #nvg::after { content:''; position:absolute; inset:0;
     background: repeating-linear-gradient(0deg, rgba(0,0,0,.06) 0 1px, transparent 1px 3px); }
 
-  /* ---------- Scope overlay ---------- */
+  /* ---------- Scope overlay ----------
+     Illuminated reticle. Black crosshairs vanish against a night city, which is exactly what
+     this game is: at 7 degrees FOV over an unlit plaza the old reticle was invisible against
+     the ground and only readable against the sky. Etched glass gets lit for the same reason.
+     Everything here is CSS so it costs no draw calls and stays crisp at any resolution. */
   #scope { position:absolute; inset:0; display:none; pointer-events:none; }
-  #scope-mask { position:absolute; inset:0; background:radial-gradient(circle at 50% 50%, transparent 34%, rgba(0,0,0,.97) 35.5%); }
-  #scope-cross { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:70vmin; height:70vmin; }
-  #scope-cross::before { content:''; position:absolute; left:50%; top:0; width:1.5px; height:100%; background:rgba(0,0,0,.85); transform:translateX(-50%); }
-  #scope-cross::after { content:''; position:absolute; top:50%; left:0; height:1.5px; width:100%; background:rgba(0,0,0,.85); transform:translateY(-50%); }
+  #scope-mask { position:absolute; inset:0;
+    background:radial-gradient(circle at 50% 50%, transparent 33%, rgba(0,0,0,.6) 34%, rgba(0,0,0,.97) 36%); }
+  /* soft green wash inside the glass + a bright inner rim, like light in a coated tube */
+  #scope-glow { position:absolute; inset:0;
+    background:radial-gradient(circle at 50% 50%, rgba(90,255,160,.05) 0%, rgba(90,255,160,.02) 26%, rgba(120,255,180,.16) 33%, transparent 34.5%); }
+  #scope-cross { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:66vmin; height:66vmin;
+    --ret:rgba(150,255,190,.92); --glow:0 0 3px rgba(80,255,150,.9), 0 0 7px rgba(60,255,130,.45); }
+  /* main crosswires: thick outer posts that thin down toward a clear centre (duplex reticle) */
+  #scope-cross .post { position:absolute; background:var(--ret); box-shadow:var(--glow); }
+  #scope-cross .post.v { left:50%; width:2.5px; transform:translateX(-50%); }
+  #scope-cross .post.h { top:50%; height:2.5px; transform:translateY(-50%); }
+  #scope-cross .post.v.up { top:0; height:34%; }
+  #scope-cross .post.v.dn { bottom:0; height:34%; }
+  #scope-cross .post.h.lf { left:0; width:34%; }
+  #scope-cross .post.h.rt { right:0; width:34%; }
+  /* fine crosswires bridging the gap, 1px, so the aim point is precise but not obscured */
+  #scope-cross .fine { position:absolute; background:var(--ret); box-shadow:var(--glow); opacity:.8; }
+  #scope-cross .fine.v { left:50%; top:34%; height:32%; width:1px; transform:translateX(-50%); }
+  #scope-cross .fine.h { top:50%; left:34%; width:32%; height:1px; transform:translateY(-50%); }
+  /* mil dots down the vertical and across the horizontal: the ranging scale */
+  #scope-cross .dot { position:absolute; width:4px; height:4px; border-radius:50%; background:var(--ret);
+    box-shadow:var(--glow); transform:translate(-50%,-50%); }
+  /* holdover stadia: short ticks under the centre, longer the further out */
+  #scope-cross .tick { position:absolute; left:50%; height:1.5px; background:var(--ret); box-shadow:var(--glow);
+    transform:translateX(-50%); opacity:.85; }
+  /* centre aiming dot, dimmer than the wires so it never eats a distant target */
+  #scope-center { position:absolute; left:50%; top:50%; width:3px; height:3px; margin:-1.5px 0 0 -1.5px;
+    border-radius:50%; background:rgba(255,90,70,.95); box-shadow:0 0 4px rgba(255,70,50,.9); }
+  /* elevation/windage witness marks at the edge of the glass */
+  #scope-cross .edge { position:absolute; color:rgba(150,255,190,.7); font-size:9px; letter-spacing:1px;
+    text-shadow:0 0 4px rgba(60,255,130,.6); }
 
   /* ---------- Screens ---------- */
   .screen { position:absolute; inset:0; background:linear-gradient(160deg,#0a0e12 0%,#101820 60%,#0d1a24 100%); display:none; flex-direction:column; align-items:center; justify-content:center; padding:24px env(safe-area-inset-right) 24px env(safe-area-inset-left); text-align:center; z-index:10; overflow-y:auto; }
@@ -148,11 +183,35 @@
   <div id="health-bar"><div id="health-fill"></div></div>
   <div id="ammo">12 <small>/ 48</small></div>
   <div id="weapon-name">M9 SIDEARM</div>
+  <div id="squad-line"></div>
 </div>
 
 <div id="nvg"></div>
 <div id="flash-white"></div>
-<div id="scope"><div id="scope-mask"></div><div id="scope-cross"></div></div>
+<div id="scope">
+  <div id="scope-mask"></div>
+  <div id="scope-glow"></div>
+  <div id="scope-cross">
+    <div class="post v up"></div><div class="post v dn"></div>
+    <div class="post h lf"></div><div class="post h rt"></div>
+    <div class="fine v"></div><div class="fine h"></div>
+    <div class="dot" style="left:50%;top:57%"></div>
+    <div class="dot" style="left:50%;top:64%"></div>
+    <div class="dot" style="left:50%;top:71%"></div>
+    <div class="dot" style="left:50%;top:43%"></div>
+    <div class="dot" style="left:50%;top:36%"></div>
+    <div class="dot" style="left:43%;top:50%"></div>
+    <div class="dot" style="left:36%;top:50%"></div>
+    <div class="dot" style="left:57%;top:50%"></div>
+    <div class="dot" style="left:64%;top:50%"></div>
+    <div class="tick" style="top:60.5%;width:5%"></div>
+    <div class="tick" style="top:67.5%;width:8%"></div>
+    <div class="tick" style="top:74.5%;width:11%"></div>
+    <div class="edge" style="left:50%;top:2%;transform:translateX(-50%)">ELEV</div>
+    <div class="edge" style="right:2%;top:50%;transform:translateY(-50%)">WIND</div>
+  </div>
+  <div id="scope-center"></div>
+</div>
 
 <div id="controls">
   <div id="stick-zone"></div>
@@ -172,6 +231,7 @@
   <div class="btn" id="btn-lean-l">◐</div>
   <div class="btn" id="btn-lean-r">◑</div>
   <div class="btn" id="btn-flash">FLASH</div>
+  <div class="btn" id="btn-nvg">NVG</div>
   <div class="ctl-hint" id="move-hint"><div class="ring">✛</div><div class="lbl">LEFT THUMB — MOVE</div></div>
   <div class="ctl-hint" id="aim-hint"><div class="lbl">DRAG RIGHT SIDE — AIM · FIRE BUTTON — SHOOT</div></div>
 </div>
@@ -195,6 +255,7 @@
     <div class="kh-row"><span>Breach door</span><b>F</b></div>
     <div class="kh-row"><span>Grenade / Flashbang</span><b>G / B</b></div>
     <div class="kh-row"><span>Swap weapon</span><b>X</b></div>
+    <div class="kh-row"><span>Night vision (toggle)</span><b>N</b></div>
     <div class="kh-row"><span>Crouch (toggle)</span><b>C or Left Ctrl</b></div>
     <div class="kh-row"><span>Lean left / right</span><b>Q / E</b></div>
     <div class="kh-row"><span>Hold breath (steady scope)</span><b>Left Shift</b></div>

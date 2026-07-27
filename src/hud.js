@@ -16,6 +16,8 @@ export const hud = {
   weapon(name) { $('weapon-name').textContent = name; },
   objective(text) { $('objective').textContent = text; },
   score(text) { $('score-line').textContent = text; },
+  squad(text) { $('squad-line').textContent = text || ''; },
+  nvg(on) { $('nvg').style.display = on ? 'block' : 'none'; $('btn-nvg').classList.toggle('latched', on); },
   hitmarker() { const h = $('hitmarker'); h.classList.remove('show'); void h.offsetWidth; h.classList.add('show'); },
   noShoot(text = 'CIVILIAN DOWN') {
     const w = $('noshoot-warn'); w.textContent = text;

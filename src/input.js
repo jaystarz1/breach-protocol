@@ -11,6 +11,7 @@ export const input = {
   flashPressed: false,
   swapPressed: false,
   breachPressed: false,
+  nvgPressed: false,
   breath: false,
   pausePressed: false,
   crouch: false,
@@ -159,6 +160,7 @@ export function initInput() {
   hold('btn-flash', () => { input.flashPressed = true; });
   hold('btn-swap', () => { input.swapPressed = true; });
   hold('btn-breach', () => { input.breachPressed = true; });
+  hold('btn-nvg', () => { input.nvgPressed = true; });
   hold('btn-breath', () => { input.breath = true; }, () => { input.breath = false; });
   hold('btn-pause', () => { input.pausePressed = true; });
   hold('btn-crouch', () => { input.crouch = !input.crouch; el('btn-crouch').classList.toggle('latched', input.crouch); });
@@ -183,6 +185,7 @@ export function initInput() {
     if (e.code === 'KeyX') input.swapPressed = true;
     if (e.code === 'KeyF') input.breachPressed = true;
     if (e.code === 'KeyB') input.flashPressed = true;
+    if (e.code === 'KeyN') input.nvgPressed = true;
     if (e.code === 'Escape' || e.code === 'KeyP') input.pausePressed = true;
     if (e.code === 'ShiftLeft') input.breath = true;
     // Keyboard aim, held like the mouse button. Right-click was the ONLY way to scope,
@@ -261,6 +264,7 @@ export function clearEdges() {
   input.flashPressed = false;
   input.swapPressed = false;
   input.breachPressed = false;
+  input.nvgPressed = false;
   input.pausePressed = false;
   input.lookDelta.x = 0;
   input.lookDelta.y = 0;

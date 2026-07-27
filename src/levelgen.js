@@ -136,33 +136,57 @@ function jointed(w, h, d, color) {
   return m;
 }
 
-export function makeCharacter({ hostile, hostage }) {
+// Unlit accent, for identification marks that must stay readable in shadow at 40m. A lit
+// material here would sink into the same value as the kit around it, which for an IFF panel
+// defeats the entire point of having one.
+function accent(w, h, d, color, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color }));
+  m.position.set(x, y, z);
+  return m;
+}
+
+// `friendly` is armed and kitted exactly like a hostile — same helmet, same rifle, same
+// stance — because a squadmate that reads as a civilian is worse than useless. The ONLY
+// difference is colour, and it is deliberately extreme: navy kit plus unlit cyan IFF panels
+// front and back. You must be able to tell friend from foe in a doorway at a glance, under
+// NVGs, while being shot at.
+export function makeCharacter({ hostile, hostage, friendly }) {
   const g = new THREE.Group();
+  const armed = !!hostile || !!friendly;
   const skin = SKINS[Math.floor(Math.random() * SKINS.length)];
-  const shirt = hostile ? 0x3d4a42 : [0xef9a9a, 0x90caf9, 0xfff59d, 0xa5d6a7, 0xce93d8, 0xffcc80][Math.floor(Math.random() * 6)];
-  const pants = hostile ? 0x2c343a : [0x546e7a, 0x6d4c41, 0x37474f][Math.floor(Math.random() * 3)];
-  const boots = hostile ? 0x15181b : 0x3e2723;
+  const shirt = friendly ? 0x2d3a4a : hostile ? 0x3d4a42 : [0xef9a9a, 0x90caf9, 0xfff59d, 0xa5d6a7, 0xce93d8, 0xffcc80][Math.floor(Math.random() * 6)];
+  const pants = friendly ? 0x232b36 : hostile ? 0x2c343a : [0x546e7a, 0x6d4c41, 0x37474f][Math.floor(Math.random() * 3)];
+  const boots = armed ? 0x15181b : 0x3e2723;
 
   // hips + torso (slight taper: chest wider than waist)
   g.add(limb(0.32, 0.14, 0.2, pants, 0, 0.92, 0));
   g.add(limb(0.34, 0.3, 0.2, shirt, 0, 1.13, 0));
   g.add(limb(0.4, 0.3, 0.22, shirt, 0, 1.4, 0));       // chest
-  if (hostile) {
-    g.add(limb(0.42, 0.26, 0.26, 0x9c2b2b, 0, 1.38, 0)); // red chest rig
+  if (armed) {
+    g.add(limb(0.42, 0.26, 0.26, friendly ? 0x1b3560 : 0x9c2b2b, 0, 1.38, 0)); // chest rig
     g.add(limb(0.14, 0.1, 0.28, 0x1c1f22, -0.1, 1.24, 0.02)); // mag pouches
     g.add(limb(0.14, 0.1, 0.28, 0x1c1f22, 0.1, 1.24, 0.02));
+  }
+  if (friendly) {
+    g.add(accent(0.2, 0.05, 0.02, 0x38e8ff, 0, 1.48, 0.135));   // chest IFF panel
+    g.add(accent(0.2, 0.05, 0.02, 0x38e8ff, 0, 1.48, -0.135));  // back panel
+    g.add(accent(0.05, 0.09, 0.02, 0x38e8ff, -0.2, 1.44, 0.1));  // shoulder tabs
+    g.add(accent(0.05, 0.09, 0.02, 0x38e8ff, 0.2, 1.44, 0.1));
   }
 
   // head group with face
   const headG = new THREE.Group();
   headG.position.set(0, 1.62, 0);
-  const headColor = hostile ? 0x1c2024 : skin;              // balaclava vs skin
+  const headColor = armed ? 0x1c2024 : skin;              // balaclava vs skin
   headG.add(limb(0.22, 0.24, 0.24, headColor, 0, 0.06, 0));
-  // eyes (a strip for enemies — balaclava opening; two dots for civilians)
-  if (hostile) {
+  // eyes (a strip for the kitted-up; two dots for civilians)
+  if (armed) {
     headG.add(limb(0.18, 0.05, 0.02, skin, 0, 0.09, 0.125));
-    headG.add(limb(0.26, 0.1, 0.27, 0x2e3438, 0, 0.2, 0)); // helmet
-    headG.add(limb(0.26, 0.05, 0.1, 0x2e3438, 0, 0.14, -0.1));
+    headG.add(limb(0.26, 0.1, 0.27, friendly ? 0x22303f : 0x2e3438, 0, 0.2, 0)); // helmet
+    headG.add(limb(0.26, 0.05, 0.1, friendly ? 0x22303f : 0x2e3438, 0, 0.14, -0.1));
+    // Cat-eye strip on the back of the helmet: the real-world marking that exists for exactly
+    // this problem, and it means a squadmate is identifiable from directly behind too.
+    if (friendly) headG.add(accent(0.14, 0.03, 0.02, 0x38e8ff, 0, 0.22, -0.13));
   } else {
     headG.add(limb(0.035, 0.035, 0.02, 0x2a2a2a, -0.05, 0.08, 0.125));
     headG.add(limb(0.035, 0.035, 0.02, 0x2a2a2a, 0.05, 0.08, 0.125));
@@ -191,7 +215,7 @@ export function makeCharacter({ hostile, hostage }) {
     ag.add(jointed(0.11, 0.3, 0.13, color));
     const fore = new THREE.Group();
     fore.position.y = -0.3;
-    fore.add(jointed(0.1, 0.28, 0.11, hostile ? color : skin)); // civilians: rolled sleeves
+    fore.add(jointed(0.1, 0.28, 0.11, armed ? color : skin)); // civilians: rolled sleeves
     const hand = limb(0.09, 0.08, 0.09, skin, 0, -0.3, 0);
     fore.add(hand);
     ag.add(fore);
@@ -203,13 +227,15 @@ export function makeCharacter({ hostile, hostage }) {
   const lArm = mkArm(-0.26, shirt), rArm = mkArm(0.26, shirt);
 
   let rifle = null;
-  if (hostile) {
+  if (armed) {
     // rifle raised across the chest — THE visual tell
     rifle = new THREE.Group();
     const body = limb(0.06, 0.09, 0.72, 0x0a0a0a, 0, 0, -0.18);
     const mag = limb(0.05, 0.14, 0.07, 0x14171a, 0, -0.1, -0.12);
     mag.rotation.x = -0.2;
     rifle.add(body, mag);
+    rifle.add(limb(0.05, 0.05, 0.1, 0x1b1f22, 0, 0.02, 0.16));       // stock
+    rifle.add(limb(0.04, 0.06, 0.1, 0x2a3038, 0, 0.09, -0.1));       // optic
     rifle.position.set(0.1, 1.32, 0.22);
     rifle.rotation.y = 0.35;
     g.add(rifle);
@@ -229,7 +255,9 @@ export function makeCharacter({ hostile, hostage }) {
     rArm.rotation.x = Math.PI - 0.15; rArm.rotation.z = -0.18;
   }
 
-  g.userData.rig = { headG, lLeg, rLeg, lArm, rArm, rifle, hostile, hostage, torsoTilt: 0 };
+  // rig.hostile is read by animateRig only as "is this figure holding a weapon", so a friendly
+  // must set it too or a squadmate swings its arms while carrying a rifle.
+  g.userData.rig = { headG, lLeg, rLeg, lArm, rArm, rifle, hostile: armed, hostage, friendly, torsoTilt: 0 };
   return g;
 }
 

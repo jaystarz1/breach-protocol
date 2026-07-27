@@ -601,8 +601,150 @@ export function pipes(x1, z1, x2, z2, y, n = 2, color = 0x6a5f52) {
   return out;
 }
 
-export function poster(x, z, rot = false, y = 1.7, color = 0x7a6a4a) {
-  return [box(x, y, z, rot ? 0.03 : 0.8, 1.1, rot ? 0.8 : 0.03, color, false)];
+// ---------- wall decoration ----------
+// A single flat rectangle on a wall does not read as a poster, it reads as a differently
+// coloured patch of wall. What makes printed matter legible is layering: a border, an image
+// block that is not the same colour as the border, and a couple of bars where the type goes.
+// Four boxes instead of one, and the wall stops being blank.
+const POSTER_INK = [
+  [0x8f2f2a, 0xe0d6bd],   // red propaganda over off-white stock
+  [0x1f4a6b, 0xd8dee4],   // blue notice
+  [0x6b5a1f, 0xe6dcc0],   // aged ochre
+  [0x2d5a3a, 0xdfe6d8],   // green public-health poster
+  [0x3a2d5a, 0xdcd6e6],   // purple gig flyer
+  [0x1d2126, 0xc9ccd1],   // black-and-white newsprint
+];
+
+// rot=true means the piece lies in the Z/Y plane (mounted on a wall that faces along X).
+//
+// `dir` is which way the wall faces: +1 for a surface whose front is toward +X (rot) or +Z
+// (flat), -1 for the opposite. It is not cosmetic. Every one of these helpers stacks its
+// layers a couple of centimetres PROUD of the backing plate, and with the sign wrong the ink
+// block, the pinned slips and the clock hands all stack INTO the wall instead of out of it —
+// so they either vanish or hang in mid-air behind the thing they belong to.
+export function poster(x, z, rot = false, y = 1.7, color = null, seed = 5, dir = 1) {
+  const R = rng(seed + Math.round(x * 31 + z * 17));
+  const pal = POSTER_INK[Math.floor(R() * POSTER_INK.length)];
+  const ink = color ?? pal[0], stock = pal[1];
+  const w = 0.62 + R() * 0.34, h = 0.86 + R() * 0.42;
+  const t = 0.03, ft = 0.03 * dir;
+  const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
+  const ox = rot ? ft : 0, oz = rot ? 0 : ft;
+  const out = [
+    // paper, then the ink block inset inside it, sitting a hair proud so it never z-fights
+    box(x, y, z, wide(w), h, deep(w), stock, false),
+    box(x + ox, y + h * 0.14, z + oz, wide(w * 0.8), h * 0.5, deep(w * 0.8), ink, false),
+  ];
+  // type bars under the image: two or three, decreasing in width like a headline and subhead
+  const bars = 2 + Math.floor(R() * 2);
+  for (let i = 0; i < bars; i++) {
+    const bw = w * (0.7 - i * 0.16);
+    out.push(box(x + ox, y - h * (0.16 + i * 0.11), z + oz, wide(bw), h * 0.055, deep(bw), ink, false));
+  }
+  // some are torn: a corner missing is the cheapest possible "this place is not maintained"
+  if (R() < 0.35) out.push(box(x + ox * 1.4 + (rot ? 0 : w * 0.32), y + h * 0.36, z + oz * 1.4 + (rot ? w * 0.32 : 0),
+    wide(w * 0.3), h * 0.22, deep(w * 0.3), stock, false));
+  return out;
+}
+
+// A run of posters down a wall, fly-posted over each other at slightly different heights.
+// This is what actually fills a corridor: one poster is a decision, six is a place.
+export function posterWall(x1, z1, x2, z2, rot = false, seed = 11, n = 4, y = 1.65, dir = 1) {
+  const R = rng(seed);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n + (R() - 0.5) * 0.12;
+    const px = x1 + (x2 - x1) * t, pz = z1 + (z2 - z1) * t;
+    out.push(...poster(px, pz, rot, y + (R() - 0.5) * 0.5, null, seed * 7 + i * 13, dir));
+  }
+  return out;
+}
+
+// Cork notice board: frame, backing, and pinned slips. Axis-aligned boxes cannot rotate, so
+// break the grid by varying slip size and offset rather than angle.
+export function noticeBoard(x, z, rot = false, y = 1.6, w = 1.5, h = 1.0, seed = 17, dir = 1) {
+  const R = rng(seed);
+  const t = 0.05;
+  const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
+  const out = [
+    box(x, y, z, wide(w + 0.08), h + 0.08, deep(w + 0.08), 0x4a3a2a, false),
+    box(x + (rot ? 0.02 * dir : 0), y, z + (rot ? 0 : 0.02 * dir), wide(w), h, deep(w), 0x6b5a44, false),
+  ];
+  for (let i = 0; i < 7; i++) {
+    const sw = 0.16 + R() * 0.16, sh = 0.14 + R() * 0.16;
+    const off = (R() - 0.5) * (w - sw - 0.1), oy = (R() - 0.5) * (h - sh - 0.08);
+    out.push(box(x + (rot ? 0.045 * dir : off), y + oy, z + (rot ? off : 0.045 * dir),
+      wide(sw), sh, deep(sw), [0xdcd8c8, 0xd0dae0, 0xe0d6b8, 0xc8ccd2][Math.floor(R() * 4)], false));
+  }
+  return out;
+}
+
+// Dry-wipe board / floor plan. Reads as an office or a briefing room instantly.
+export function whiteboard(x, z, rot = false, y = 1.65, w = 1.9, h = 1.1, dir = 1) {
+  const t = 0.05;
+  const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
+  const o1 = 0.02 * dir, o2 = 0.04 * dir;
+  const out = [
+    box(x, y, z, wide(w + 0.06), h + 0.06, deep(w + 0.06), 0x8d949b, false),
+    box(x + (rot ? o1 : 0), y, z + (rot ? 0 : o1), wide(w), h, deep(w), 0xd8dce0, false),
+    box(x + (rot ? o2 : 0), y - h / 2 - 0.05, z + (rot ? 0 : o2), wide(w * 0.9), 0.05, deep(w * 0.9), 0x9aa1a8, false),
+  ];
+  // scrawl: a few thin dark bars, uneven, which at any distance reads as writing
+  for (let i = 0; i < 5; i++) {
+    const bw = w * (0.3 + (i % 3) * 0.2);
+    const along = -w * 0.2 + (i % 2) * 0.2;
+    out.push(box(x + (rot ? o2 : along), y + h * 0.3 - i * h * 0.15, z + (rot ? along : o2),
+      wide(bw), 0.035, deep(bw), 0x2b3a4a, false));
+  }
+  return out;
+}
+
+export function wallClock(x, z, rot = false, y = 2.3, r = 0.15, dir = 1) {
+  const t = 0.05;
+  const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
+  const o1 = 0.02 * dir, o2 = 0.04 * dir;
+  return [
+    box(x, y, z, wide(r * 2), r * 2, deep(r * 2), 0x2a3038, false),
+    box(x + (rot ? o1 : 0), y, z + (rot ? 0 : o1), wide(r * 1.6), r * 1.6, deep(r * 1.6), 0xe4e8ec, false),
+    box(x + (rot ? o2 : 0), y + r * 0.35, z + (rot ? 0 : o2), wide(0.02), r * 0.8, deep(0.02), 0x1d2126, false),
+    box(x + (rot ? o2 : r * 0.3), y, z + (rot ? r * 0.3 : o2), wide(r * 0.7), 0.02, deep(r * 0.7), 0x1d2126, false),
+  ];
+}
+
+// Spray paint. Flat, garish, non-solid, and clustered rather than centred, because real
+// graffiti is applied by someone standing on the ground with their arm out.
+const TAG_COLORS = [0xc4452f, 0x2f7cc4, 0xd8c22f, 0x4fc46b, 0xb44fc4, 0xe0e4e8];
+export function graffiti(x, z, rot = false, seed = 23, scale = 1, dir = 1) {
+  const R = rng(seed);
+  const out = [];
+  const col = TAG_COLORS[Math.floor(R() * TAG_COLORS.length)];
+  const t = 0.025;
+  const y0 = 0.9 + R() * 0.8;
+  const n = 4 + Math.floor(R() * 4);
+  for (let i = 0; i < n; i++) {
+    const bw = (0.18 + R() * 0.5) * scale, bh = (0.12 + R() * 0.45) * scale;
+    const off = (R() - 0.5) * 2.2 * scale;
+    // Every third stroke sits a whisker further out, so overlapping strokes layer in a fixed
+    // order instead of coplanar-fighting where two of them cross.
+    const p = (i % 3 === 0 ? 0.008 : 0) * dir;
+    out.push(box(x + (rot ? p : off), y0 + (R() - 0.5) * 0.6, z + (rot ? off : p),
+      rot ? t : bw, bh, rot ? bw : t, c(i, R, col), false));
+  }
+  return out;
+}
+function c(i, R, col) {
+  return i === 0 ? col : (R() < 0.3 ? TAG_COLORS[Math.floor(R() * TAG_COLORS.length)] : col);
+}
+
+// Framed photo / small artwork, for the rooms that should read as somebody's home.
+export function picture(x, z, rot = false, y = 1.75, w = 0.42, h = 0.32, dir = 1) {
+  const t = 0.04;
+  const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
+  const o = 0.015 * dir;
+  return [
+    box(x, y, z, wide(w), h, deep(w), 0x3a2d22, false),
+    box(x + (rot ? o : 0), y, z + (rot ? 0 : o), wide(w * 0.82), h * 0.78, deep(w * 0.82), 0x6b7a6b, false),
+  ];
 }
 
 // Scattered floor rubble. Non-solid so it never snags the character controller or the AI.

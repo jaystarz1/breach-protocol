@@ -6,9 +6,19 @@ import { sfx } from './audio.js';
 
 const EYE = 1.5;
 
-// A* is cheap but not free: cap how many enemies may repath in a single frame.
-let pathBudget = 4;
-export function resetPathBudget() { pathBudget = 4; }
+// A* is cheap but not free: cap how many actors may repath in a single frame. The budget is
+// shared with the friendly squad on purpose — the cost is per path, not per faction, and a
+// squad that could path for free would let a busy frame blow past the frame budget.
+let pathBudget = 5;
+export function resetPathBudget() { pathBudget = 5; }
+export function claimPath() {
+  if (pathBudget <= 0) return false;
+  pathBudget--;
+  return true;
+}
+export function findPathFor(nav, from, tx, ty, tz) {
+  return findPath(nav, from.x, from.y, from.z, tx, ty, tz);
+}
 
 export class Enemy {
   constructor(scene, def, diff) {
@@ -46,6 +56,8 @@ export class Enemy {
     this.pathGoal = null;
     this.coverTimer = 0;
     this.calledOut = false;
+    this.tgtAlly = null;      // which friendly this man has picked, null = the player
+    this.tgtTimer = Math.random() * 1.5;
     this.flee = !!def.flee;          // HVT: runs its route instead of fighting
     this.hvt = !!def.hvt;
     this.escapes = !!def.escapes;   // only a runner with somewhere to go can get away
@@ -53,9 +65,12 @@ export class Enemy {
 
   get pos() { return this.mesh.position; }
 
-  damage(amt, world, fromHead) {
+  // Whoever shoots a man is who that man turns to face. Without this the squad could gun down
+  // hostiles from the flank all mission and never once be shot back at.
+  damage(amt, world, fromHead, byAlly) {
     if (this.dead) return;
     this.health -= amt;
+    if (byAlly && this.state === 'patrol') this.tgtTimer = 0;   // force a retarget onto the shooter
     this.flinch = fromHead ? 0.32 : 0.22;
     if (this.state === 'patrol') {
       this.state = 'alert';
@@ -68,7 +83,7 @@ export class Enemy {
       deathPose(this.mesh);
       sfx.kill();
       sfx.flesh(this.pos);
-      world.onEnemyKilled(this);
+      world.onEnemyKilled(this, byAlly);
     } else {
       sfx.hit();
       sfx.flesh(this.pos);
@@ -140,6 +155,31 @@ export class Enemy {
     return best;
   }
 
+  // Who this man is fighting. Held for a second and a half at a time: retargeting every frame
+  // makes a hostile pivot between the player and a squadmate mid-burst and hit neither.
+  //
+  // The player is weighted as CLOSER than he is (0.72) so hostiles preferentially come for
+  // him. A squad splits incoming fire, which is the whole point of having one, but a squad
+  // that soaks all of it turns the mission into a spectator sport.
+  pickTarget(world) {
+    if (world.sniperTeam && !world.sniperTeam.dead) { this.tgtAlly = null; return world.sniperTeam.pos; }
+    const allies = world.allies;
+    if (!allies || !allies.length) { this.tgtAlly = null; return world.playerPos; }
+    if (this.tgtAlly && this.tgtAlly.dead) { this.tgtAlly = null; this.tgtTimer = 0; }
+    if (this.tgtTimer > 0) return this.tgtAlly ? this.tgtAlly.pos : world.playerPos;
+    this.tgtTimer = 1.5 + Math.random();
+    const p = this.pos;
+    let best = null;
+    let bestD = Math.hypot(world.playerPos.x - p.x, world.playerPos.z - p.z) * 0.72;
+    for (const a of allies) {
+      if (a.dead) continue;
+      const d = Math.hypot(a.pos.x - p.x, a.pos.z - p.z);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    this.tgtAlly = best;
+    return best ? best.pos : world.playerPos;
+  }
+
   update(dt, world) {
     if (this.dead) {
       if (this.deathAnim < 1) {
@@ -153,7 +193,8 @@ export class Enemy {
     this.flinch = Math.max(0, this.flinch - dt * 3);
     this.repathTimer -= dt;
 
-    const target = world.sniperTeam && !world.sniperTeam.dead ? world.sniperTeam.pos : world.playerPos;
+    this.tgtTimer -= dt;
+    const target = this.pickTarget(world);
     const dx = target.x - p.x, dz = target.z - p.z;
     const dist = Math.hypot(dx, target.y - p.y, dz);
 
@@ -316,11 +357,16 @@ export class Enemy {
     world.enemyFlash(this.pos);
     world.enemyTracer(this, target);
     let acc = this.diff.enemyAccuracy * Math.min(1, 18 / Math.max(6, dist));
-    if (world.playerSpeed > 3) acc *= 0.55;
-    if (world.playerCrouched) acc *= 0.65;   // crouching is real cover now
-    if (world.playerAds) acc *= 1.1;
+    // The player's movement/stance modifiers must NOT apply when the round is aimed at a
+    // squadmate: crouching would make an ally forty metres away harder to hit.
+    if (!this.tgtAlly) {
+      if (world.playerSpeed > 3) acc *= 0.55;
+      if (world.playerCrouched) acc *= 0.65;   // crouching is real cover now
+      if (world.playerAds) acc *= 1.1;
+    }
     if (Math.random() < acc) {
       if (world.sniperTeam && !world.sniperTeam.dead) world.damageTeam(this.diff.enemyDamage);
+      else if (this.tgtAlly && !this.tgtAlly.dead) this.tgtAlly.damage(this.diff.enemyDamage, world);
       else world.damagePlayer(this.diff.enemyDamage, this.pos);
     }
   }

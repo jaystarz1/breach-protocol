@@ -4,6 +4,7 @@ import {
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
   ceilingLight, hangingBulb, exitSign, baseboard, wainscot, doorFrame, desk, chair, table,
   shelf, cabinet, mattress, rug, radiator, pipes, poster, debris,
+  posterWall, noticeBoard, whiteboard, wallClock, graffiti, picture,
 } from '../world.js';
 
 // A multi-storey tower with a west-side stairwell. Flights alternate corners per floor
@@ -79,7 +80,22 @@ function tower(x, z, w, d, floors, opts = {}) {
     if (R() < 0.5) geo.push(...lift(mattress(ex1 + 1.2, cz2 - 1.1, R() < 0.5), y));
     if (R() < 0.7) geo.push(...lift(rug(x + 1.6, z, 2.6, 1.8), y));
     geo.push(...lift(radiator(ex2 - 0.22, z + (R() - 0.5) * 4, true), y));
-    geo.push(...lift(poster(ex2 - 0.16, z + (R() - 0.5) * 5, true, 1.75), y));
+    // Wall decoration, several pieces per floor rather than one lonely rectangle. The east
+    // wall gets a fly-posted run, the north and south walls get a mix, and each floor draws a
+    // different combination so climbing the building does not feel like the same room twice.
+    // dir: the east wall faces -X and the south wall faces -Z from inside this room, so those
+    // pieces have to stack their layers the other way or the ink hangs behind the paper.
+    geo.push(...lift(posterWall(ex2 - 0.16, cz1 + 1.2, ex2 - 0.16, cz2 - 1.2, true, 800 + f * 29, 4, 1.65, -1), y));
+    geo.push(...lift(poster(x + 1.2, cz1 + 0.18, false, 1.8, null, 810 + f), y));
+    geo.push(...lift(poster(x + 3.0, cz1 + 0.18, false, 1.55, null, 811 + f), y));
+    geo.push(...lift(poster(x + 2.0, cz2 - 0.18, false, 1.7, null, 812 + f, -1), y));
+    if (R() < 0.55) geo.push(...lift(noticeBoard(x + 4.2, cz1 + 0.2, false, 1.6, 1.4, 1.0, 820 + f), y));
+    else geo.push(...lift(whiteboard(x + 4.2, cz1 + 0.2, false, 1.65, 1.7, 1.05), y));
+    geo.push(...lift(wallClock(x - 0.4, cz2 - 0.2, false, 2.35, 0.15, -1), y));
+    geo.push(...lift(picture(x + 0.4, cz2 - 0.2, false, 1.7, 0.42, 0.32, -1), y));
+    geo.push(...lift(picture(x + 1.1, cz2 - 0.2, false, 1.9, 0.42, 0.32, -1), y));
+    // stairwell walls get tagged instead: nobody hangs art in a fire escape
+    geo.push(...lift(graffiti(x1 + 0.2, z + (R() - 0.5) * 5, true, 830 + f * 7, 1.1), y));
     geo.push(...lift(debris(x + 2 + R() * 3, z + (R() - 0.5) * 5, 1.8, 6, 41 + f), y));
     // doorway trim on the ground-floor entrance
     if (f === 0 && opts.door !== false) {
@@ -119,7 +135,7 @@ export const LEVELS = [
   {
     id: 1, name: 'FIRST DOOR',
     brief: 'Kill-house shakedown. Clear three rooms. Armed targets only — anyone with their hands up walks out alive. Pistol discipline: controlled pairs.',
-    weapons: ['pistol'], grenades: 0,
+    weapons: ['pistol'], grenades: 0, squad: 1,
     sky: 0x27313d, fog: [0x27313d, 40, 130], ambient: 0.95, sun: 1.25,
     // roofed kill-house: the sun never reaches the rooms, so let the ceiling strips light them
     ambientScale: 0.42,
@@ -162,7 +178,17 @@ export const LEVELS = [
         if (seat === 0) g.push(...table(6.4, rz + 1.4, 1.3, 0.9), ...chair(6.4, rz + 0.2));
         if (seat === 1) g.push(...mattress(5.2, rz - 2.4, false), ...rug(7.2, rz, 2.6, 1.8));
         if (seat === 2) g.push(...rug(6.8, rz + 0.6, 3.0, 2.0), ...radiator(10.75, rz - 0.4, true));
-        g.push(...poster(10.78, rz + 2.4, true, 1.8, R() < 0.5 ? 0x6b5a3c : 0x4a5a6b));
+        // Every room's walls get worked: a fly-posted run down the east wall, a board or a
+        // whiteboard on the north wall, framed pictures and a clock. A kill-house room with
+        // one poster in it still reads as a grey box; the eye needs several things to land on.
+        g.push(...posterWall(10.78, rz - 2.4, 10.78, rz + 2.8, true, 900 + rz * 3, 4, 1.65, -1));
+        g.push(...noticeBoard(6.2, rz + 3.28, false, 1.6, 1.5, 1.0, 910 + rz, -1));
+        g.push(...poster(4.6, rz - 3.28, false, 1.75, null, 920 + rz));
+        g.push(...poster(8.2, rz - 3.28, false, 1.6, null, 921 + rz));
+        g.push(...picture(9.4, rz + 3.28, false, 1.85, 0.42, 0.32, -1));
+        g.push(...wallClock(3.4, rz - 2.0, true, 2.35));
+        if (seat === 1) g.push(...whiteboard(7.4, rz - 3.26, false, 1.7, 1.8, 1.05));
+        if (seat === 2) g.push(...graffiti(3.35, rz - 1.0, true, 930 + rz, 1.0));
         g.push(...debris(6.0 + R() * 2, rz + (R() - 0.5) * 3, 1.6, 6, 200 + rz));
         seat++;
       }
@@ -171,6 +197,18 @@ export const LEVELS = [
       g.push(...baseboard(-2.8, 21.8, -2.8, -19.8));
       g.push(...baseboard(2.8, 21.8, 2.8, -19.8));
       g.push(...pipes(-1.4, 21, -1.4, -19, 2.95, 2));
+      // The corridor is the longest wall run in the level and it was completely bare. Notices
+      // and range-safety posters down the west side, tags down the east, boards at both ends.
+      g.push(...posterWall(-2.78, 19, -2.78, 6, true, 940, 5, 1.7));
+      g.push(...posterWall(-2.78, 0, -2.78, -18, true, 941, 5, 1.6));
+      g.push(...noticeBoard(-2.72, 12, true, 1.6, 1.6, 1.1, 942));
+      g.push(...whiteboard(-2.72, -8, true, 1.65, 1.9, 1.1));
+      // 16.5, not 15: the corridor's east wall has doorways at z 12.5..14, 0.5..2 and
+      // -11.5..-10, and a tag centred at 15 spans back to 13.9 — it would hang in the opening.
+      g.push(...graffiti(2.78, 16.5, true, 943, 1.0));
+      g.push(...graffiti(2.78, -16, true, 944, 1.1));
+      g.push(...wallClock(-2.72, 20.5, true, 2.4));
+      g.push(...poster(0, 21.8, false, 1.75, null, 945, -1));
       g.push(...exitSign(0, 2.5, -19.4, false));
       // roof over the whole house
       g.push(...floorSlab(4, 1, 16, 44, 3.3, 0.3, C.roof));
@@ -197,7 +235,7 @@ export const LEVELS = [
   {
     id: 2, name: 'STREET SWEEP',
     brief: 'Night sweep through an occupied block. Hostiles hold the storefronts and the street. M4 authorized. Civilians are still on the block — check your targets.',
-    weapons: ['pistol', 'm4'], grenades: 0,
+    weapons: ['pistol', 'm4'], grenades: 0, squad: 2,
     sky: 0x1b2634, fog: [0x1b2634, 40, 160], ambient: 0.85, sun: 1.1,
     start: [0, 0, 40, 0],
     geo: () => {
@@ -233,6 +271,14 @@ export const LEVELS = [
       g.push(...trafficLight(-13.0, -46, 4.6, 1), ...trafficLight(13.0, -46, 4.6, -1));
       g.push(...roadLine(0, -48, 52));
       g.push(...crosswalk(-42, -8, 8), ...crosswalk(28, -8, 8));
+      // Tagged walls and fly-posting down both building faces. A 110m run of unbroken concrete
+      // is the single largest surface in the level and it had nothing on it at eye height.
+      for (const gz of [44, 30, 15, -2, -18, -34, -48]) g.push(...graffiti(-15.8, gz, true, 250 + gz, 1.3));
+      for (const gz of [38, 22, 6, -12, -26, -44]) g.push(...graffiti(15.8, gz, true, 270 + gz, 1.3, -1));
+      g.push(...posterWall(-15.78, 40, -15.78, 24, true, 280, 4, 1.7));
+      g.push(...posterWall(-15.78, -6, -15.78, -22, true, 281, 4, 1.7));
+      g.push(...posterWall(15.78, 34, 15.78, 18, true, 282, 4, 1.7, -1));
+      g.push(...posterWall(15.78, -20, 15.78, -36, true, 283, 4, 1.7, -1));
       g.push(...dumpster(-13.6, 38), ...dumpster(13.6, -30, true));
       g.push(...hydrant(-13.8, 12), ...hydrant(13.8, -16));
       g.push(...bench(-13.2, 26, true), ...bench(13.2, 8, true));
@@ -266,7 +312,7 @@ export const LEVELS = [
   {
     id: 3, name: 'STACK UP',
     brief: 'Apartment block, three floors, hostiles holding hostages on each. Flashbangs are the tool here: bang the room, then enter. Walk up to a bound hostage to cut them loose. A dead hostage ends the op.',
-    weapons: ['pistol', 'm4'], grenades: 0, flashes: 3,
+    weapons: ['pistol', 'm4'], grenades: 0, flashes: 3, squad: 2,
     sky: 0x232e3a, fog: [0x232e3a, 35, 120], ambient: 0.9, sun: 1.15,
     start: [0, 0, 16, 0],
     geo: () => {
@@ -309,7 +355,7 @@ export const LEVELS = [
   {
     id: 4, name: 'THE CHASE',
     brief: 'The cell leader is running and he does not stop. Chase him through the alleys and the parking structure and put him down before he reaches the far gate. His guards will try to buy him time.',
-    weapons: ['pistol', 'm4'], grenades: 3, flashes: 2,
+    weapons: ['pistol', 'm4'], grenades: 3, flashes: 2, squad: 2,
     sky: 0x1e2836, fog: [0x1e2836, 38, 150], ambient: 0.85, sun: 1.1,
     start: [0, 0, 45, 0],
     geo: () => {
@@ -331,6 +377,14 @@ export const LEVELS = [
       // the slab (which spans y 3.0..3.5) where it is never rasterized.
       for (const px of [-24, -14, -4, 6, 14]) for (const pz of [-16, -25, -34]) g.push([px, 1.7, pz, 0.7, 3.4, 0.7, C.concrete]);
       g.push(...car(-18, -20)); g.push(...car(-8, -25, true)); g.push(...car(2, -31)); g.push(...car(10, -22));
+      // Alley graffiti: this level is a corridor chase and the walls are all the player sees.
+      for (const [gx, gz, r, d] of [[-4.8, 40, true, 1], [-4.8, 28, true, 1], [4.8, 42, true, -1],
+        [4.8, 32, true, -1], [17.8, 12, true, -1], [17.8, 2, true, -1], [24.8, 16, true, -1],
+        [10, -4.8, false, -1], [-6, -4.8, false, -1], [4, -9.8, false, -1]]) {
+        g.push(...graffiti(gx, gz, r, 400 + gx * 3 + gz, 1.4, d));
+      }
+      g.push(...posterWall(-4.78, 46, -4.78, 34, true, 410, 4, 1.7));
+      g.push(...posterWall(4.78, 38, 4.78, 27, true, 411, 4, 1.7, -1));
       g.push(...crate(21, 10), ...crate(21.8, 11));
       // exit gate south end of garage
       g.push(...wall(-27, -39, 17, -39, 4, C.metal, [{ off: 18, w: 5, h: 3 }]));
@@ -363,7 +417,7 @@ export const LEVELS = [
   {
     id: 5, name: 'MARKET PANIC',
     brief: 'Shooters embedded in a crowded night market. The crowd will bolt when the first shot lands. Weapons tight: a single civilian casualty at this range is a career, at Veteran it is the mission.',
-    weapons: ['pistol', 'm4'], grenades: 0,
+    weapons: ['pistol', 'm4'], grenades: 0, squad: 2,
     sky: 0x2a2230, fog: [0x2a2230, 40, 140], ambient: 0.9, sun: 1.1,
     start: [0, 0, 34, 0],
     geo: () => {
@@ -493,7 +547,7 @@ export const LEVELS = [
   {
     id: 7, name: 'VERTICAL ASSAULT',
     brief: 'Helicopter drops you on the roof of their safehouse tower. Fight DOWN four floors to the street. They know you are coming, so bang the stairwells before you take them.',
-    weapons: ['pistol', 'm4'], grenades: 3, flashes: 3,
+    weapons: ['pistol', 'm4'], grenades: 3, flashes: 3, squad: 2,
     sky: 0x1d2734, fog: [0x1d2734, 40, 160], ambient: 0.85, sun: 1.1,
     start: [3, 12.3, -2, 180],
     geo: () => {
@@ -533,7 +587,7 @@ export const LEVELS = [
   {
     id: 8, name: 'BLACKOUT',
     brief: 'They cut the power to the records office. Night vision goggles on. Clear the floor and reach the server room. They are blind in the dark — you are not.',
-    weapons: ['pistol', 'm4'], grenades: 2, flashes: 3, nvg: true,
+    weapons: ['pistol', 'm4'], grenades: 2, flashes: 3, nvg: true, squad: 2,
     sky: 0x030a05, fog: [0x061510, 14, 60], ambient: 0.6, sun: 0.0,
     start: [0, 0, 24, 0],
     geo: () => {
@@ -561,6 +615,20 @@ export const LEVELS = [
       for (const [dx, dz] of [[-10, 5], [0, 6], [10, 4], [-10, -8], [10, -10], [2, -10], [-8, -17], [8, -17]]) {
         g.push([dx, 0.45, dz, 2.2, 0.9, 1.1, C.metal]);
       }
+      // Records office: boards, floor plans and departmental notices. Under NVGs these are the
+      // only things telling you which cubicle you have already cleared.
+      g.push(...whiteboard(-8, 9.7, false, 1.65, 2.0, 1.2, -1));
+      g.push(...whiteboard(8, -5.7, false, 1.65, 1.8, 1.1));
+      g.push(...noticeBoard(4, 9.7, false, 1.6, 1.6, 1.1, 1200, -1));
+      g.push(...noticeBoard(-12, -13.7, false, 1.6, 1.4, 1.0, 1201));
+      g.push(...posterWall(-14.8, 16, -14.8, 4, true, 1210, 4, 1.7));
+      g.push(...posterWall(14.8, 6, 14.8, -4, true, 1211, 4, 1.7, -1));
+      g.push(...posterWall(-14.8, -6, -14.8, -18, true, 1212, 4, 1.7));
+      g.push(...wallClock(-14.75, 18, true, 2.4));
+      g.push(...wallClock(14.75, -18, true, 2.4, 0.15, -1));
+      for (const [px, pz] of [[-6, 19.7], [6, 19.7], [-2, -19.7], [11, -19.7]]) {
+        g.push(...poster(px, pz, false, 1.75, null, 1220 + px, pz > 0 ? -1 : 1));
+      }
       return g;
     },
     doors: [{ pos: [1, 0, -14], rot: 0, w: 2 }],
@@ -585,7 +653,7 @@ export const LEVELS = [
   {
     id: 9, name: 'UNDERGROUND',
     brief: 'They pulled the hostages into the metro. Platform level, then the tunnels. Frags bounce far down here, so mind the overpressure. Every hostage taped to a column comes home: walk up to each one and cut them free.',
-    weapons: ['pistol', 'm4'], grenades: 4, flashes: 2,
+    weapons: ['pistol', 'm4'], grenades: 4, flashes: 2, squad: 2,
     sky: 0x0d1116, fog: [0x0d1116, 22, 90], ambient: 0.55, sun: 0.25,
     start: [0, 6, 40, 0],
     geo: () => {
@@ -616,6 +684,21 @@ export const LEVELS = [
       g.push(...floorSlab(0, -45, 16, 32, 4.6, 0.5, C.tunnel));
       g.push(...wall(-7, -60, 7, -60, 4.5, C.tunnel));
       // clutter
+      // Metro walls: tags and layered fly-posting, plus advertising boards on the platform.
+      // A tunnel with bare walls is the most obviously wrong surface in the whole game.
+      for (const gz of [24, 14, 2, -10, -20]) {
+        g.push(...graffiti(-21.7, gz, true, 900 + gz, 1.5));
+        g.push(...graffiti(21.7, gz - 5, true, 940 + gz, 1.5, -1));
+      }
+      for (const gz of [-34, -44, -54]) {
+        g.push(...graffiti(-6.7, gz, true, 970 + gz, 1.3));
+        g.push(...graffiti(6.7, gz + 5, true, 990 + gz, 1.3, -1));
+      }
+      g.push(...posterWall(-21.68, 20, -21.68, 6, true, 910, 5, 1.8));
+      g.push(...posterWall(-21.68, -6, -21.68, -22, true, 911, 5, 1.8));
+      g.push(...posterWall(21.68, 16, 21.68, 0, true, 912, 5, 1.8, -1));
+      g.push(...noticeBoard(-21.6, 26, true, 1.7, 2.0, 1.3, 913));
+      g.push(...noticeBoard(21.6, -26, true, 1.7, 2.0, 1.3, 914, -1));
       g.push(...crate(4, 14), ...crate(-4, 4), ...crate(2, -16, 0, 1.3), ...crate(0, -40), ...crate(2, -50));
       return g;
     },
@@ -645,7 +728,7 @@ export const LEVELS = [
   {
     id: 10, name: 'THE CELL',
     brief: 'Endgame. Breach the compound, take the tower, then go down into the bunker where the cell leader is holed up behind human shields. Bang the room, drop him, cut them loose. Everything you have learned, every layer of the city.',
-    weapons: ['pistol', 'm4'], grenades: 4, flashes: 4,
+    weapons: ['pistol', 'm4'], grenades: 4, flashes: 4, squad: 3,
     sky: 0x1e2835, fog: [0x1e2835, 40, 170], ambient: 0.85, sun: 1.15,
     start: [0, 0, 42, 0],
     geo: () => {
@@ -681,6 +764,16 @@ export const LEVELS = [
       g.push(...wall(14, -44, 30, -44, 4.98, C.tunnel, [], -5));
       g.push(...wall(14, -24, 30, -24, 4.98, C.tunnel, [{ off: 7, w: 2.4, h: 2.6 }], -5));
       g.push(...floorSlab(22, -34, 16, 20, 0.2, 0.4, C.concrete)); // bunker ceiling / courtyard surface
+      // Compound wall tags and bunker-interior boards: the bunker is the climax room and it
+      // was four flat panels of tunnel grey.
+      for (const gz of [22, 8, -8, -24]) g.push(...graffiti(-29.7, gz, true, 1100 + gz, 1.5));
+      for (const gz of [16, 0, -16, -32]) g.push(...graffiti(29.7, gz, true, 1140 + gz, 1.5, -1));
+      g.push(...posterWall(-29.68, 18, -29.68, 2, true, 1110, 4, 1.8));
+      g.push(...graffiti(14.3, -30, true, 1150, 1.2), ...graffiti(14.3, -38, true, 1151, 1.2));
+      g.push(...graffiti(29.7, -34, true, 1152, 1.2, -1));
+      g.push(...whiteboard(22, -43.7, false, 1.6, 2.0, 1.2));
+      g.push(...noticeBoard(18, -43.7, false, 1.55, 1.4, 1.0, 1160));
+      g.push(...posterWall(29.68, -28, 29.68, -40, true, 1170, 3, 1.7, -1));
       g.push(...crate(20, -30, -5), ...crate(26, -36, -5));
       return g;
     },
