@@ -718,7 +718,9 @@ function onPlayerShot(spread) {
     if (t < hitDist) { hitDist = t; hitEnemy = e; hitCiv = null; headshot = tHead <= tBody; }
   }
   for (const c of world.civilians) {
-    if (c.dead) continue;
+    // exposed===false is a window civilian who is down behind the apron of his bay. Same rule
+    // as the shooters: if he is not in the opening there is nothing there to hit.
+    if (c.dead || c.exposed === false) continue;
     // hitY drops as they go prone, so a body on the floor is still hittable where it lies
     const t = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, c.pos.x, c.pos.y + c.hitY, c.pos.z, c.hitR);
     if (t < hitDist) { hitDist = t; hitCiv = c; hitEnemy = null; hitAlly = null; }

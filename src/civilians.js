@@ -2,6 +2,10 @@ import { makeCharacter, animateRig, deathPose } from './levelgen.js';
 import { groundHeight, resolveXZ } from './physics.js';
 import { sfx } from './audio.js';
 
+// Matches DUCK_DROP in enemies.js and the apron height in windowBay(): the distance a window
+// occupant sinks to be genuinely hidden by geometry rather than switched off.
+const WIN_DROP = 1.72;
+
 // No-shoot actors. Hostages kneel in place; free civilians flee AWAY from the player
 // and never across his firing line, so a fair shot is never spoiled by a panicking body.
 export class Civilian {
@@ -27,6 +31,20 @@ export class Civilian {
     this.rush = def.rush !== undefined ? !!def.rush : (!this.hostage && Math.random() < 0.35);
     this.rushDone = false;
     this.baseY = this.mesh.position.y;
+    // Window civilians. Same bay geometry the shooters use, and that is the point: at 160m
+    // through a 7-degree scope, a head appearing in an opening is a head appearing in an
+    // opening. Whether it belongs to a rifleman or to somebody who came to see what the
+    // noise was is the shot you are being asked to make.
+    this.perch = def.window || null;
+    if (this.perch) {
+      this.mesh.position.set(this.perch[0], this.perch[1] - WIN_DROP, this.perch[2]);
+      this.mesh.rotation.y = def.yaw !== undefined ? def.yaw * Math.PI / 180 : 0;
+      this.perchY = this.perch[1];
+      this.duck = 1;
+      this.up = false;
+      this.winTimer = 0.5 + Math.random() * 4;
+      this.exposed = false;
+    }
   }
 
   get pos() { return this.mesh.position; }
@@ -84,6 +102,7 @@ export class Civilian {
       }
       return;
     }
+    if (this.perch) { this.updateWindow(dt, world); return; }
     // Bound hostages cannot run, so the only thing they can do once rounds start flying is
     // get flat. It also opens the shot: a kneeling hostage next to a standing gunman is a
     // cluttered target picture, and a prone one is not.
@@ -141,6 +160,30 @@ export class Civilian {
     }
 
     this.step(dt, world, 3.2);
+  }
+
+  // Somebody upstairs in a building a firefight has started underneath. They come to the
+  // window, they look, they get frightened and drop back down — and once rounds are actually
+  // in the air they show themselves far less often and for much less time.
+  updateWindow(dt, world) {
+    this.winTimer -= dt;
+    const hot = world.combatHeat > 0;
+    if (this.winTimer <= 0) {
+      this.up = !this.up;
+      this.winTimer = this.up
+        ? (hot ? 1.0 + Math.random() * 1.6 : 3.0 + Math.random() * 4)
+        : (hot ? 4.5 + Math.random() * 6 : 2.0 + Math.random() * 4);
+      if (this.up && hot && !this.screamed && Math.random() < 0.4) {
+        this.screamed = true;
+        sfx.civScream(this.pos);
+      }
+    }
+    this.duck = Math.max(0, Math.min(1, this.duck + (this.up ? -1 : 1) * dt * 2.6));
+    this.pos.y = this.perchY - WIN_DROP * this.duck;
+    this.baseY = this.pos.y;
+    this.exposed = this.duck < 0.55;
+    this.mesh.visible = this.duck < 1;
+    animateRig(this.mesh, this.walkPhase, false);
   }
 
   step(dt, world, s) {

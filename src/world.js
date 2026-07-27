@@ -297,6 +297,35 @@ export function facade(x1, z1, x2, z2, yBase, height, seed, opts = {}) {
   return geo;
 }
 
+// A window a man can actually stand IN. The building shells are single solid boxes, so there
+// is no hole to occupy — put a figure at the facade plane and he reads as pinned to the wall
+// like a fridge magnet, which is exactly what he was. The opening is faked in two layers: a
+// black recess pushed out far enough to swallow whatever pane facade() rolled at this slot,
+// and a reveal built PROUD of where the occupant stands. That second layer is the whole
+// trick: a man who drops below the sill is hidden by real opaque geometry, so ducking is
+// occlusion rather than switching him off.
+//
+// (x, sillY) is the bottom-left-to-centre of the opening; wallZ is the face of the shell and
+// dir the outward normal along z. All of it is non-solid: it must not block his own fire, the
+// player's return fire, or the pathing of anyone on the street below.
+export function windowBay(x, sillY, wallZ, dir = 1, opts = {}) {
+  const w = opts.w ?? 1.9;
+  const h = opts.h ?? 1.6;
+  const frame = opts.frame ?? 0x6f757b;
+  const z = out => wallZ + dir * out;
+  return [
+    // The room behind. Unlit, so it holds the same value whatever the level's sun is doing —
+    // and NOT black. A black figure in a black hole is not a silhouette, it is an empty
+    // window: the backdrop is the only thing that makes an occupant readable at 160m.
+    box(x, sillY + h / 2, z(0.36), w, h, 0.16, opts.room ?? 0x4a545e, false, true),
+    box(x, sillY - 0.69, z(0.92), w + 0.3, 1.5, 0.34, frame, false),              // apron: hides a ducked man
+    box(x, sillY + h + 0.2, z(0.92), w + 0.3, 0.4, 0.34, frame, false),           // lintel
+    box(x - w / 2 - 0.13, sillY + h / 2, z(0.92), 0.26, h + 0.4, 0.34, frame, false),
+    box(x + w / 2 + 0.13, sillY + h / 2, z(0.92), 0.26, h + 0.4, 0.34, frame, false),
+    box(x, sillY + 0.06, z(0.86), w + 0.4, 0.14, 0.52, P.paint, false),           // sill ledge
+  ];
+}
+
 // ---------- street props ----------
 export function lamp(x, z, h = 6.5, arm = 1.6, dir = 1) {
   return [

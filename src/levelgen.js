@@ -157,7 +157,12 @@ const OD_SHIRT = [0x424833, 0x4a5139, 0x3b422c, 0x4e5440];
 const OD_PANTS = [0x343a25, 0x3b4129, 0x2e3320];
 
 // `black` is the CT variant: near-black assault kit. Only used with `friendly`.
-export function makeCharacter({ hostile, hostage, friendly, black }) {
+// One shared flat black. A silhouette is not a dark-coloured man: it is a man with no shading
+// at all, which is why this is Basic and not Standard — any lighting response at 160m turns
+// him back into a grey figure and the whole "he is inside an unlit room" read collapses.
+const SILHOUETTE_MAT = new THREE.MeshBasicMaterial({ color: 0x020305 });
+
+export function makeCharacter({ hostile, hostage, friendly, black, silhouette }) {
   const g = new THREE.Group();
   const armed = !!hostile || !!friendly;
   const skin = SKINS[Math.floor(Math.random() * SKINS.length)];
@@ -280,6 +285,7 @@ export function makeCharacter({ hostile, hostage, friendly, black }) {
   // rig.hostile is read by animateRig only as "is this figure holding a weapon", so a friendly
   // must set it too or a squadmate swings its arms while carrying a rifle.
   g.userData.rig = { headG, lLeg, rLeg, lArm, rArm, rifle, hostile: armed, hostage, friendly, torsoTilt: 0 };
+  if (silhouette) g.traverse(o => { if (o.isMesh) o.material = SILHOUETTE_MAT; });
   return g;
 }
 

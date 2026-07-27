@@ -4,8 +4,22 @@ import {
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
   ceilingLight, hangingBulb, exitSign, baseboard, wainscot, doorFrame, desk, chair, table,
   shelf, cabinet, mattress, rug, radiator, pipes, poster, debris,
-  posterWall, noticeBoard, whiteboard, wallClock, graffiti, picture,
+  posterWall, noticeBoard, whiteboard, wallClock, graffiti, picture, windowBay,
 } from '../world.js';
+
+// ---- OVERWATCH window bays -------------------------------------------------------------
+// Slots are on facade()'s own grid, so a bay lands exactly over a pane and swallows it: the
+// pane rows sit at x = wallStart + 1.8 + 3n and the sills at y = 1.2 + 3n. Off-grid values
+// leave a lit pane peeking out of the side of the recess, which looks like a bug because it is.
+// [x, sillY] against a wall face at z = -80 (near pair) or z = -100 (centre).
+const BAY_A = [[-53.2, 4.2], [-50.2, 7.2], [-47.2, 4.2], [-44.2, 7.2], [-41.2, 4.2], [-35.2, 7.2], [-32.2, 4.2]];
+const BAY_B = [[26.8, 4.2], [29.8, 7.2], [32.8, 4.2], [38.8, 7.2], [44.8, 4.2], [47.8, 7.2], [50.8, 4.2]];
+// The sniper's building, and his alone. Eight openings on two floors of the centre block:
+// nothing else lives here, so every silhouette that appears in this facade is him.
+const BAY_C = [[-15.2, 4.2], [-9.2, 7.2], [-3.2, 4.2], [2.8, 7.2], [8.8, 4.2], [14.8, 7.2], [-6.2, 7.2], [5.8, 4.2]];
+// A man stands 0.62m proud of the wall face: behind the reveal that hides him when he ducks,
+// in front of the black recess that puts him inside a room instead of flat against the brick.
+const inBay = (b, wallZ) => [b[0], b[1], wallZ + 0.62];
 
 // A multi-storey tower with a west-side stairwell. Flights alternate corners per floor
 // (even floors: NW flight ascending north; odd floors: SW flight ascending south) so no
@@ -487,7 +501,7 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 6
   {
     id: 6, name: 'OVERWATCH',
-    brief: 'Barrett M82 on the rooftop. An assault element in black is crossing the plaza on foot to cut three hostages loose — they live or die on your marksmanship. Hold breath to steady. Civilians are still fleeing the square, and they have a shooter working the windows across the way: watch for the glint. A .50 does not give second chances.',
+    brief: 'Barrett M82 on the rooftop. An assault element in black is crossing the plaza on foot to cut three hostages loose, and they live or die on your marksmanship. Hold breath to steady. Riflemen are working the windows of the two near blocks down onto the team, but there are residents at those same windows, so read every opening before you fire. One more thing: there is a sniper in the unlit centre block, he is shooting at YOU, and the only thing that will ever show you where he is is his muzzle flash. He moves rooms after every second round.',
     weapons: ['barrett'], grenades: 0, sniper: true, lockPlayer: true,
     sky: 0x1a2432, fog: [0x1a2432, 120, 500], ambient: 0.9, sun: 1.2,
     start: [0, 24, 61.2, 0],
@@ -538,7 +552,17 @@ export const LEVELS = [
       g.push([0, 7, -110, 40, 14, 20, C.building]);
       g.push(...facade(-55, -80, -25, -80, 0, 14, 611, { away: [-40, -90] }));
       g.push(...facade(25, -80, 55, -80, 0, 14, 612, { away: [40, -90] }));
-      g.push(...facade(-20, -100, 20, -100, 0, 14, 613, { away: [0, -110] }));
+      // The centre block is the sniper's, so it gets no warm panes at all: a lit window is
+      // exactly the thing that makes a dark one legible, and a facade of dark holes with a
+      // silhouette in one of them is the whole picture the mission is built on.
+      g.push(...facade(-20, -100, 20, -100, 0, 14, 613, { away: [0, -110], lit: 0.06 }));
+      for (const b of BAY_A) g.push(...windowBay(b[0], b[1], -80, 1));
+      for (const b of BAY_B) g.push(...windowBay(b[0], b[1], -80, 1));
+      // The sniper's rooms are the brightest interiors on the map, which sounds backwards
+      // until you look through the glass: he is flat black and unlit, so the only thing that
+      // can ever show him to you is what is BEHIND him. Eight faintly lit openings, and one
+      // of them has a shape standing in it.
+      for (const b of BAY_C) g.push(...windowBay(b[0], b[1], -100, 1, { frame: 0x5a6066, room: 0x606c7a }));
       g.push(...lift(acUnit(-34, 14, -92, 1.3), 0), ...lift(waterTank(44, 14, -93), 0));
       g.push(...lift(ventStack(-6, 14, -112), 0));
       // plaza furniture: scale cues so the distance to the fountain is legible through glass
@@ -568,16 +592,24 @@ export const LEVELS = [
       { pos: [-10, 0, -96], patrol: [[-14, -50], [-3, -32]], aggro: true, range: 200 },
       { pos: [10, 0, -96], patrol: [[18, -60], [8, -30]], aggro: true, range: 200 },
       { pos: [22, 0, -93], patrol: [[28, -64], [20, -42]], aggro: true, range: 200 },
-      // Counter-sniper. He never walks: he occupies a window, takes his shot and drops out of
-      // sight, then turns up in a different one. Perch heights match the facade() window rows
-      // (panes sit at y = 1.95 / 4.95 / 7.95 / 10.95) and the z/x values put him just proud of
-      // each building face so he is genuinely visible and genuinely shootable while up.
-      { pos: [-44, 4.95, -79.4], range: 260, dmgMul: 2.6, accMul: 2.2, firstPeek: 14,
-        perches: [
-          [-50, 4.95, -79.4], [-44, 7.95, -79.4], [-34, 4.95, -79.4], [-29, 7.95, -79.4],
-          [29, 4.95, -79.4], [36, 7.95, -79.4], [48, 4.95, -79.4],
-          [-14, 7.95, -99.4], [-2, 4.95, -99.4], [12, 7.95, -99.4],
-        ] },
+      // Riflemen holding the upper floors of the near pair. They work the windows over the
+      // assault element's heads: up, a burst down into the plaza, gone. Two bays each so the
+      // floor stays alive without them teleporting across the building.
+      { pos: inBay(BAY_A[0], -80), range: 220, moveEvery: 5, teamOnly: true,
+        perches: [inBay(BAY_A[0], -80), inBay(BAY_A[2], -80)], firstPeek: 5 },
+      { pos: inBay(BAY_A[3], -80), range: 220, moveEvery: 5, teamOnly: true,
+        perches: [inBay(BAY_A[3], -80), inBay(BAY_A[5], -80)], firstPeek: 9 },
+      { pos: inBay(BAY_B[0], -80), range: 220, moveEvery: 5, teamOnly: true,
+        perches: [inBay(BAY_B[0], -80), inBay(BAY_B[2], -80)], firstPeek: 7 },
+      { pos: inBay(BAY_B[4], -80), range: 220, moveEvery: 5, teamOnly: true,
+        perches: [inBay(BAY_B[4], -80), inBay(BAY_B[6], -80)], firstPeek: 12 },
+      // The sniper. One man, in the centre block, in an unlit room: no colour, no shading, no
+      // glint — a black shape and then the flash. Single aimed rounds at the PLAYER rather
+      // than at the team, and he gives up the room after the second one, so the window that
+      // just fired at you is the one window he is guaranteed not to be in next.
+      { pos: inBay(BAY_C[0], -100), range: 300, dmgMul: 2.6, accMul: 2.2, firstPeek: 13,
+        silhouette: true, targetPlayer: true, single: true, moveEvery: 2,
+        perches: BAY_C.map(b => inBay(b, -100)) },
     ],
     civilians: [
       // Hostages the assault team is going in for. Prone the moment shooting starts.
@@ -589,12 +621,21 @@ export const LEVELS = [
       { pos: [-25, 0, -35], rush: true }, { pos: [18, 0, -58] }, { pos: [-5, 0, -48], rush: true },
       { pos: [30, 0, -62] }, { pos: [-20, 0, -70] }, { pos: [12, 0, -40], rush: true },
       { pos: [-30, 0, -55] }, { pos: [8, 0, -66] },
+      // Residents at the windows of the two occupied buildings, sharing a facade with the
+      // riflemen. Through the scope the first thing you get is a head in an opening, and the
+      // only thing separating these from a target is what they are wearing.
+      { pos: [0, 0, 0], window: inBay(BAY_A[1], -80) },
+      { pos: [0, 0, 0], window: inBay(BAY_A[4], -80) },
+      { pos: [0, 0, 0], window: inBay(BAY_A[6], -80) },
+      { pos: [0, 0, 0], window: inBay(BAY_B[1], -80) },
+      { pos: [0, 0, 0], window: inBay(BAY_B[3], -80) },
+      { pos: [0, 0, 0], window: inBay(BAY_B[5], -80) },
     ],
     reinforce: { every: 32, first: 45, max: 5, group: 2, range: 220,
       at: [[-44, 0, -78], [44, 0, -78], [4, 0, -98]] },
     objectives: [
       { type: 'rescue', text: 'COVER THE ASSAULT TEAM — THEY ARE GOING IN FOR THE HOSTAGES' },
-      { type: 'clear', zone: null, text: 'FINISH THEM — WATCH THE WINDOWS, THEY HAVE A SHOOTER UP THERE' },
+      { type: 'clear', zone: null, text: 'CLEAR THE WINDOWS — AND FIND THE SNIPER IN THE DARK BLOCK' },
     ],
   },
 

@@ -20,9 +20,13 @@ export function findPathFor(nav, from, tx, ty, tz) {
   return findPath(nav, from.x, from.y, from.z, tx, ty, tz);
 }
 
+// How far a window occupant sinks to get behind the apron of his bay. Tied to windowBay()'s
+// reveal: shorter than this and the top of his head still shows over the ledge.
+const DUCK_DROP = 1.72;
+
 export class Enemy {
   constructor(scene, def, diff) {
-    this.mesh = makeCharacter({ hostile: true });
+    this.mesh = makeCharacter({ hostile: true, silhouette: !!def.silhouette });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
     scene.add(this.mesh);
     this.scene = scene;
@@ -65,29 +69,51 @@ export class Enemy {
     this.hvt = !!def.hvt;
     this.escapes = !!def.escapes;   // only a runner with somewhere to go can get away
     this.tag = def.tag || null;     // scripted-event grouping, e.g. which room this man holds
-    // Counter-sniper: instead of walking a patrol he occupies one of a fixed set of window
-    // perches, shoots, and drops out of sight before you can range him — then shows up in a
-    // different window. He is the only hostile you have to FIND rather than merely hit.
+    // Window occupants. Instead of walking a patrol this man stands in a windowBay() opening,
+    // rises into it to work, and sinks below the sill. `perches` are [x, sillY, z] triples and
+    // the reveal built proud of them does the hiding, so ducking is real occlusion.
+    //   moveEvery  — rounds fired before he gives up the window and turns up in another one.
+    //                0 keeps him in whichever perch he took, which is what a rifleman holding
+    //                a floor does; the sniper is the one who must never be pre-aimed.
+    //   targetPlayer — everything else on the overwatch map shoots at the assault element.
     this.perches = def.perches || null;
     this.exposed = !this.perches;   // ordinary hostiles are always a valid target
     this.perchIdx = -1;
+    this.up = false;                // state: working the window (vs. down behind the apron)
+    this.duck = 1;                  // 0 = fully in the opening, 1 = fully below the sill
+    this.shotsHere = 0;
+    this.moveEvery = def.moveEvery ?? 0;
+    this.targetPlayer = !!def.targetPlayer;
+    this.teamOnly = !!def.teamOnly;
+    this.single = !!def.single;     // aimed single rounds instead of bursts
     this.peekTimer = def.firstPeek ?? (2 + Math.random() * 3);
     this.dmgMul = def.dmgMul ?? 1;
     this.accMul = def.accMul ?? 1;
     if (this.perches) {
       this.mesh.visible = false;
-      // Scope glint: the tell that gives the player a fair chance to spot him. Unlit and
-      // additive so it is a pinpoint of light at 150m rather than a shaded grey box.
-      const glint = new THREE.Mesh(
-        new THREE.SphereGeometry(0.09, 6, 5),
-        new THREE.MeshBasicMaterial({
-          color: 0xfff0c0, transparent: true, opacity: 0.9,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        })
-      );
-      glint.position.set(0, 1.55, 0.3);
-      this.mesh.add(glint);
-      this.glint = glint;
+      this.perchY = this.pos.y;
+      // The muzzle flash IS the tell. A silhouette in an unlit room has no glint, no outline
+      // and no shading to catch — the only thing that gives him away is the round going off,
+      // which is the trade: you get one frame of light per shot and that is where he is.
+      // Two quads, not one. A single additive plane at 160m is a warm smudge you can talk
+      // yourself out of having seen; a wide halo with a small near-white core is the shape a
+      // muzzle flash actually makes, and it survives the filmic curve crushing the highlight.
+      const f = new THREE.Group();
+      const quad = (w, h, col, z) => {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({
+          color: col, transparent: true, opacity: 0,
+          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+        }));
+        m.position.z = z;
+        f.add(m);
+        return m.material;
+      };
+      this.mhalo = quad(2.0, 1.35, 0xff7a10, 0);
+      this.mcore = quad(0.85, 0.58, 0xfff0c8, 0.02);
+      f.position.set(0.18, 1.3, 0.55);
+      this.mesh.add(f);
+      this.mflash = f;
+      this.mflashLife = 0;
     }
   }
 
@@ -190,8 +216,27 @@ export class Enemy {
   // him. A squad splits incoming fire, which is the whole point of having one, but a squad
   // that soaks all of it turns the mission into a spectator sport.
   pickTarget(world) {
+    // The sniper is the one thing on the overwatch map that is not shooting at the assault
+    // element. He is shooting at YOU, which is what makes finding him urgent rather than tidy.
+    if (this.targetPlayer) { this.tgtAlly = null; return world.playerPos; }
     if (world.sniperTeam && !world.sniperTeam.dead) { this.tgtAlly = null; return world.sniperTeam.pos; }
     const allies = world.allies;
+    // Window riflemen are shooting DOWN at the element in the plaza. Left to the normal
+    // weighting they would occasionally swing onto a player who is 160m away behind a
+    // parapet, which wastes the one thing they exist to create: pressure on the team.
+    if (this.teamOnly && allies && allies.length) {
+      if (this.tgtAlly && this.tgtAlly.dead) this.tgtAlly = null;
+      if (this.tgtAlly && this.tgtTimer > 0) return this.tgtAlly.pos;
+      this.tgtTimer = 1.5 + Math.random();
+      let near = null, nd = Infinity;
+      for (const a of allies) {
+        if (a.dead) continue;
+        const d = Math.hypot(a.pos.x - this.pos.x, a.pos.z - this.pos.z);
+        if (d < nd) { nd = d; near = a; }
+      }
+      this.tgtAlly = near;
+      if (near) return near.pos;
+    }
     if (!allies || !allies.length) { this.tgtAlly = null; return world.playerPos; }
     if (this.tgtAlly && this.tgtAlly.dead) { this.tgtAlly = null; this.tgtTimer = 0; }
     if (this.tgtTimer > 0) return this.tgtAlly ? this.tgtAlly.pos : world.playerPos;
@@ -211,9 +256,40 @@ export class Enemy {
   // Peek / shoot / vanish. No pathing, no gravity, no ground snap: he is standing in a window
   // opening several metres up a solid facade, and settle() would drop him straight to street
   // level the first frame.
+  // Take a fresh opening. Never the one he just left: a shooter who can come back to the same
+  // hole is a shooter you can pre-aim, and pre-aiming is the entire thing this defeats.
+  takePerch() {
+    let i = this.perchIdx;
+    for (let n = 0; n < 10 && i === this.perchIdx; n++) i = Math.floor(Math.random() * this.perches.length);
+    this.perchIdx = i;
+    const p = this.perches[i];
+    this.perchY = p[1];
+    this.pos.set(p[0], p[1] - DUCK_DROP, p[2]);
+    this.up = true;
+    this.mesh.visible = true;
+    this.shotsHere = 0;
+    // Time in the opening. A man who leaves on a shot count needs long enough to actually
+    // FIRE that many rounds, or the timer wins every time and "moves after two shots" quietly
+    // becomes "moves after one" — the timer is only his backstop for a target he never gets.
+    this.peekTimer = (this.moveEvery ? 10 : 4.0) + Math.random() * 3;
+    this.reactTimer = 1.1;    // the beat the player has to spot him and react in
+    this.burstShots = 0;
+    this.burstTimer = 0.5;
+  }
+
+  // Rise / work / sink. No pathing, no gravity, no ground snap: he is standing on a floor
+  // several metres up inside a solid shell, and settle() would drop him to street level on
+  // the first frame.
   updateSniper(dt, world) {
+    if (this.mflashLife > 0) {
+      const f = this.mflashLife = Math.max(0, this.mflashLife - dt * 14);
+      this.mhalo.opacity = f * 0.72;
+      this.mcore.opacity = f * f;
+      this.mflash.scale.setScalar(1.2 - f * 0.3);
+      this.mflash.visible = f > 0.02;
+    }
     if (this.dead) {
-      if (this.glint) this.glint.visible = false;
+      if (this.mflash) this.mflash.visible = false;
       if (this.deathAnim < 1) {
         this.deathAnim = Math.min(1, this.deathAnim + dt * 3);
         this.mesh.rotation.x = -Math.PI / 2 * this.deathAnim;
@@ -223,27 +299,21 @@ export class Enemy {
     this.peekTimer -= dt;
     this.flinch = Math.max(0, this.flinch - dt * 3);
 
-    if (!this.exposed) {
+    this.duck = Math.max(0, Math.min(1, this.duck + (this.up ? -1 : 1) * dt * 3.2));
+    this.pos.y = this.perchY - DUCK_DROP * this.duck;
+    // Hit gating. This is deliberately a shade tighter than "not fully down": a torso that
+    // is two thirds behind the apron should not be a free kill, and the same threshold gates
+    // the overwatch marker so it cannot betray a window he is not actually in.
+    this.exposed = this.duck < 0.55;
+
+    if (!this.up) {
+      if (this.duck >= 1) this.mesh.visible = false;
       if (this.peekTimer > 0) return;
-      // Never the same window twice running — the whole point is that you cannot pre-aim.
-      let i = this.perchIdx;
-      for (let n = 0; n < 8 && i === this.perchIdx; n++) i = Math.floor(Math.random() * this.perches.length);
-      this.perchIdx = i;
-      const p = this.perches[i];
-      this.pos.set(p[0], p[1], p[2]);
-      this.exposed = true;
-      this.mesh.visible = true;
-      if (this.glint) this.glint.visible = true;
-      // Exposure window, then he is gone whether or not he got his shot away.
-      this.peekTimer = 4.5 + Math.random() * 3;
-      // A beat before the first round: this is the window the player has to react in.
-      this.reactTimer = 1.3;
-      this.burstShots = 0;
-      this.burstTimer = 0.6;
+      this.takePerch();
       return;
     }
 
-    // Exposed: track whoever he is shooting at and work them.
+    // In the opening: track whoever he is working and shoot them.
     const t = this.pickTarget(world);
     const dx = t.x - this.pos.x, dz = t.z - this.pos.z;
     this.yaw = lerpAng(this.yaw, Math.atan2(dx, dz), Math.min(1, dt * 4));
@@ -251,13 +321,13 @@ export class Enemy {
     animateRig(this.mesh, this.walkPhase, false, this.flinch);
     this.reactTimer -= dt;
     const dist = Math.hypot(dx, t.y - this.pos.y, dz);
-    if (this.reactTimer <= 0) this.doShoot(dt, world, dist, t);
+    if (this.reactTimer <= 0 && this.duck < 0.25) this.doShoot(dt, world, dist, t);
 
-    if (this.peekTimer <= 0) {
-      this.exposed = false;
-      this.mesh.visible = false;
-      if (this.glint) this.glint.visible = false;
-      this.peekTimer = 3.5 + Math.random() * 4;   // time off the glass
+    // Down again: either his time is up, or he has fired his allotted rounds from this hole.
+    const worked = this.moveEvery > 0 && this.shotsHere >= this.moveEvery;
+    if (this.peekTimer <= 0 || worked) {
+      this.up = false;
+      this.peekTimer = (worked ? 2.2 : 3.2) + Math.random() * 3;
     }
   }
 
@@ -476,16 +546,23 @@ export class Enemy {
     this.burstTimer -= dt;
     if (this.burstTimer > 0) return;
     if (this.burstShots <= 0) {
-      this.burstShots = 3 + Math.floor(Math.random() * 3);
-      this.burstTimer = 0.7 + Math.random() * 0.8;
+      this.burstShots = this.single ? 1 : 3 + Math.floor(Math.random() * 3);
+      this.burstTimer = this.single ? 0.9 + Math.random() * 0.5 : 0.7 + Math.random() * 0.8;
       return;
     }
     this.burstShots--;
-    this.burstTimer = 0.11;
+    this.burstTimer = this.single ? 1.7 + Math.random() : 0.11;
+    this.shotsHere++;
     sfx.enemyShot(this.pos);
     world.enemyFlash(this.pos);
     world.enemyTracer(this, target);
-    let acc = this.diff.enemyAccuracy * this.accMul * Math.min(1, 18 / Math.max(6, dist));
+    if (this.mflash) { this.mflashLife = 1; this.mflash.visible = true; }
+    // Range falloff models a man hosing bursts, and applying it to an aimed round through
+    // glass turns the sniper into a 4%-per-shot novelty at 160m — which is to say, not a
+    // sniper. A single deliberate shot pays a flat penalty instead and does not care how
+    // far away you are. That is the entire reason he is frightening.
+    let acc = this.diff.enemyAccuracy * this.accMul
+      * (this.single ? 0.5 : Math.min(1, 18 / Math.max(6, dist)));
     // The player's movement/stance modifiers must NOT apply when the round is aimed at a
     // squadmate: crouching would make an ally forty metres away harder to hit.
     if (!this.tgtAlly) {
@@ -494,7 +571,8 @@ export class Enemy {
       if (world.playerAds) acc *= 1.1;
     }
     if (Math.random() < acc) {
-      if (world.sniperTeam && !world.sniperTeam.dead) world.damageTeam(this.diff.enemyDamage);
+      if (this.targetPlayer) world.damagePlayer(this.diff.enemyDamage * this.dmgMul, this.pos);
+      else if (world.sniperTeam && !world.sniperTeam.dead) world.damageTeam(this.diff.enemyDamage);
       else if (this.tgtAlly && !this.tgtAlly.dead) this.tgtAlly.damage(this.diff.enemyDamage * this.dmgMul, world);
       else world.damagePlayer(this.diff.enemyDamage * this.dmgMul, this.pos);
     }
