@@ -142,7 +142,10 @@ function metalRough() {
     x.lineTo(Math.random() * SIZE + 80, y);
     x.stroke();
   }
-  return finish(c, 1);
+  // Return the canvas like every other source generator. surfaces() performs the one and only
+  // CanvasTexture wrap; returning a Texture here made it try to upload a Texture object as if
+  // it were an HTML image, which WebGL rejects on the desktop PBR path.
+  return c;
 }
 
 // ---------- Environment ----------

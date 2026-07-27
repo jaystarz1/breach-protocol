@@ -177,7 +177,7 @@
   .diff-row { display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin:10px 0 18px; }
   .diff-pill { padding:8px 13px; border-radius:16px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.05); font-size:12px; color:#b0bec5; }
   .diff-pill.sel { background:rgba(255,193,7,.2); border-color:#ffc107; color:#ffd54f; font-weight:700; }
-  .brief-text { max-width:420px; font-size:14px; line-height:1.55; color:#b0bec5; margin:14px 0 26px; }
+  .brief-text { max-width:620px; font-size:14px; line-height:1.55; color:#b0bec5; margin:14px 0 26px; white-space:pre-line; }
   .debrief-grid { display:grid; grid-template-columns:auto auto; gap:8px 26px; font-size:14px; margin:18px 0 26px; text-align:left; }
   .debrief-grid .val { text-align:right; font-weight:700; color:#fff; }
   .grade { font-size:52px; font-weight:900; color:#ffc107; margin:6px 0; }
@@ -308,8 +308,8 @@
   <h1 class="logo" style="font-size:22px">SETTINGS</h1>
   <div class="sens-row"><span style="font-size:13px">Look sensitivity</span><input type="range" id="sens-slider" min="0.3" max="2.5" step="0.1" value="1"></div>
   <div class="sens-row"><span style="font-size:13px">Invert Y</span><button class="menu-btn" id="invert-btn" style="width:80px;margin:0;padding:8px">OFF</button></div>
-  <div class="sens-row"><span style="font-size:13px">Graphics</span><button class="menu-btn" id="quality-btn" style="width:110px;margin:0;padding:8px">AUTO</button></div>
-  <div style="font-size:10px;color:#546e7a;max-width:300px;margin-top:-4px">Shadows, textures and PBR lighting. Takes effect after reload.</div>
+  <div class="sens-row"><span style="font-size:13px">Graphics</span><button class="menu-btn" id="quality-btn" style="width:140px;margin:0;padding:8px">AUTO</button></div>
+  <div style="font-size:10px;color:#546e7a;max-width:340px;margin-top:-4px">Desktop is the full renderer. Compatibility retains the old lightweight path. Takes effect after reload.</div>
   <button class="menu-btn" id="settings-back" style="margin-top:20px">BACK</button>
 </div>
 

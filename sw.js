@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v18';
+const CACHE = 'breach-protocol-v19-desktop';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js',
@@ -6,6 +6,8 @@ const ASSETS = [
   'src/civilians.js', 'src/breach.js', 'src/hud.js', 'src/audio.js', 'src/physics.js',
   'src/levelgen.js', 'src/difficulty.js', 'src/save.js', 'src/levels/index.js', 'src/navgrid.js',
   'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js', 'src/street-sweep-art.js',
+  'src/campaign.js', 'src/renderer/capabilities.js', 'src/renderer/render-pipeline.js',
+  'src/renderer/telemetry.js',
   'assets/street-sweep/asphalt.jpg', 'assets/street-sweep/asphalt-height.jpg',
   'assets/street-sweep/sidewalk.jpg', 'assets/street-sweep/sidewalk-height.jpg',
   'assets/street-sweep/brick.jpg', 'assets/street-sweep/brick-height.jpg',

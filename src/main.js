@@ -6,7 +6,7 @@ import { Enemy, resetPathBudget } from './enemies.js';
 import { Civilian } from './civilians.js';
 import { DoorSystem } from './breach.js';
 import { buildStaticGeometry } from './levelgen.js';
-import { raycastSolids, raySphere, groundHeight, hasLOS } from './physics.js';
+import { raycastSolids, raySphere, rayVerticalCapsule, groundHeight, hasLOS } from './physics.js';
 import { LEVELS } from './levels/index.js';
 import { buildNavGrid } from './navgrid.js';
 import { DIFFICULTIES } from './difficulty.js';
@@ -18,21 +18,17 @@ import { environment, environmentFrom } from './textures.js';
 import { skyDome, groundPlate, skyline, takeLights } from './world.js';
 import { spawnSquad, spawnRouteTeam } from './squad.js';
 import { addStreetSweepArt } from './street-sweep-art.js';
+import { createRenderPipeline } from './renderer/render-pipeline.js';
+import { CAMPAIGN, briefingText, campaignSnapshot } from './campaign.js';
 
 const $ = id => document.getElementById(id);
 
 // ---------- Renderer ----------
 const canvas = $('game-canvas');
-// antialias is fixed at construction, so quality.js resolves the tier from localStorage
-// directly rather than waiting for save.load() further down this module.
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: quality.antialias, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatioCap));
-// Filmic curve instead of raw linear clipping. Cheap enough to run on every tier and it is
-// most of what separates "flat toy colours" from "lit scene".
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
-renderer.shadowMap.enabled = quality.shadows;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const renderPipeline = createRenderPipeline(canvas, quality);
+// Kept as a local alias because environment-map generation and light setup legitimately need
+// the underlying Three renderer. Frame rendering itself goes only through renderPipeline.
+const renderer = renderPipeline.renderer;
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 500);
 let scene = null;
 // Re-centred on the camera every frame: a 460m dome that stays at the origin would clip
@@ -40,7 +36,7 @@ let scene = null;
 let skyMesh = null;
 
 function resize() {
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  renderPipeline.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 }
@@ -96,7 +92,7 @@ function showBrief(id) {
   const L = LEVELS[id - 1];
   $('brief-num').textContent = `MISSION ${String(id).padStart(2, '0')} · ${DIFFICULTIES[S.difficulty].name}`;
   $('brief-title').textContent = L.name;
-  $('brief-text').textContent = L.brief;
+  $('brief-text').textContent = briefingText(id, L.brief);
   hud.screen('brief');
 }
 
@@ -124,16 +120,18 @@ sens.oninput = () => { S.sensitivity = parseFloat(sens.value); input.sensitivity
 $('invert-btn').textContent = S.invertY ? 'ON' : 'OFF';
 $('invert-btn').onclick = () => { S.invertY = !S.invertY; input.invertY = S.invertY; $('invert-btn').textContent = S.invertY ? 'ON' : 'OFF'; save.save(); };
 
-// Graphics tier. Cycles AUTO -> LOW -> HIGH. Needs a reload because WebGLRenderer's
+// Render path. Cycles AUTO -> COMPATIBILITY -> DESKTOP. Needs a reload because WebGLRenderer's
 // antialias flag can only be set at construction, so the label shows what's pending.
-const QUALITY_MODES = ['auto', 'low', 'high'];
+const QUALITY_MODES = ['auto', 'compatibility', 'desktop'];
 const qBtn = $('quality-btn');
 function paintQuality() {
   const pending = S.quality !== quality.choice;
   qBtn.textContent = (S.quality || 'auto').toUpperCase() + (pending ? ' *' : '');
   qBtn.title = pending ? 'Reload to apply' : `Running: ${quality.tier.toUpperCase()}`;
 }
-S.quality = S.quality || 'auto';
+S.quality = S.quality === 'high' ? 'desktop'
+  : S.quality === 'low' ? 'compatibility'
+    : S.quality || 'auto';
 paintQuality();
 qBtn.onclick = () => {
   S.quality = QUALITY_MODES[(QUALITY_MODES.indexOf(S.quality) + 1) % QUALITY_MODES.length];
@@ -564,12 +562,15 @@ function setObjective() {
   const obj = world.level.objectives[world.objectiveIdx];
   hud.objective(obj ? obj.text : 'MISSION COMPLETE');
   world.objStuckTime = 0;
+  world.lastIntelCallout = 0;
   if (world.markers) { for (const { m } of world.markers) scene.remove(m); world.markers = null; }
   if (world.objMarkers) { for (const m of world.objMarkers) scene.remove(m); world.objMarkers = []; }
   // beacon at reach zones: glowing column visible through walls
   if (world.beacon) { scene.remove(world.beacon); world.beacon = null; }
-  if (obj && (obj.type === 'rescue' || obj.type === 'target')) {
-    world.markLive = obj.type;
+  // Hostiles are identified by sight, behavior and weapon presentation—not supernatural UI.
+  // Rescue markers remain a navigation aid, but are depth-tested and LOS-gated below.
+  if (obj && obj.type === 'rescue') {
+    world.markLive = 'rescue';
     world.markZone = obj.zone || null;
   } else { world.markLive = null; world.markZone = null; }
   if (obj && obj.type === 'reach') {
@@ -642,24 +643,23 @@ function objectiveWatchdog(dt) {
   world.objStuckTime = (world.objStuckTime || 0) + dt;
   if (obj.type !== 'clear') return;
   const live = world.enemies.filter(e => !e.dead);
-  // after 60s stuck: mark remaining hostiles with red diamonds
-  if (world.objStuckTime > 60 && !world.markers) {
-    world.markers = live.map(e => {
-      const m = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.22),
-        new THREE.MeshBasicMaterial({ color: 0xff3d3d, depthTest: false })
-      );
-      m.renderOrder = 999;
-      scene.add(m);
-      return { m, e };
-    });
-  }
-  if (world.markers) {
-    for (const { m, e } of world.markers) {
-      m.visible = !e.dead && e.exposed !== false;
-      m.position.set(e.pos.x, e.pos.y + 2.2, e.pos.z);
-      m.rotation.y += dt * 3;
-    }
+  // A stalled clear gets a coarse radio callout, never an x-ray marker. The direction is
+  // relative and the range is deliberately broad: command can report a sector, not a head.
+  if (world.objStuckTime > 60 && live.length
+      && world.objStuckTime - (world.lastIntelCallout || 0) > 20) {
+    const e = live.reduce((best, x) =>
+      x.pos.distanceTo(player.pos) < best.pos.distanceTo(player.pos) ? x : best);
+    const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
+    let rel = Math.atan2(-dx, -dz) - player.yaw;
+    while (rel > Math.PI) rel -= Math.PI * 2;
+    while (rel < -Math.PI) rel += Math.PI * 2;
+    const dir = Math.abs(rel) < 0.65 ? 'AHEAD'
+      : Math.abs(rel) > 2.5 ? 'BEHIND'
+        : rel > 0 ? 'RIGHT' : 'LEFT';
+    const d = Math.hypot(dx, dz);
+    const range = d < 18 ? 'NEAR' : d < 45 ? 'MID-RANGE' : 'FAR';
+    hud.feed(`COMMAND: LAST MOVEMENT ${dir} — ${range}`, '#ffd180');
+    world.lastIntelCallout = world.objStuckTime;
   }
   if (world.objStuckTime > 90) {
     for (const e of live) {
@@ -677,12 +677,10 @@ function onPlayerShot(spread) {
   world.stats.shotsFired++;
   world.combatHeat = Math.max(world.combatHeat, 5);
 
-  const dir = player.forward(); // compute the ray BEFORE the recoil kick — kick affects the NEXT shot, not this one
-  // sniper sway
-  if (world.level.sniper && !input.breath) {
-    dir.x += Math.sin(swayPhase * 1.7) * weapons.spec.sway;
-    dir.y += Math.cos(swayPhase * 1.3) * weapons.spec.sway;
-  }
+  // The rendered camera centre is authoritative. Scope sway has already moved the camera, so
+  // deriving another ray from player yaw/pitch would make the picture and bullet disagree.
+  // Compute before recoil: recoil affects the NEXT shot, never the current one.
+  const dir = camera.getWorldDirection(new THREE.Vector3());
   // spread
   dir.x += (Math.random() - 0.5) * spread * 2;
   dir.y += (Math.random() - 0.5) * spread * 2;
@@ -714,8 +712,10 @@ function onPlayerShot(spread) {
     // exposed===false is the counter-sniper between peeks: he is not in the window, so there
     // is nothing there to hit. Without this you could kill him through a wall by memory.
     if (e.dead || e.exposed === false) continue;
-    const tHead = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, e.pos.x, e.pos.y + 1.66, e.pos.z, 0.34);
-    const tBody = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, e.pos.x, e.pos.y + 1.0, e.pos.z, 0.55);
+    const tHead = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z,
+      e.pos.x, e.pos.y + 1.64, e.pos.z, 0.2);
+    const tBody = rayVerticalCapsule(o.x, o.y, o.z, dir.x, dir.y, dir.z,
+      e.pos.x, e.pos.y + 0.72, e.pos.y + 1.37, e.pos.z, 0.25);
     const t = Math.min(tHead, tBody);
     if (t < hitDist) { hitDist = t; hitEnemy = e; hitCiv = null; headshot = tHead <= tBody; }
   }
@@ -969,7 +969,7 @@ function frame() {
   lastTime = now;
 
   if (skyMesh) skyMesh.position.copy(camera.position);
-  if (mode !== 'playing' || !world) { if (scene) renderer.render(scene, camera); clearEdges(); return; }
+  if (mode !== 'playing' || !world) { if (scene) renderPipeline.render(scene, camera); clearEdges(); return; }
 
   if (input.pausePressed) { mode = 'paused'; hud.screen('pause'); clearEdges(); return; }
 
@@ -1018,9 +1018,9 @@ function frame() {
   // weapons
   if (input.swapPressed) weapons.swap();
   if (input.reloadPressed) weapons.reload();
-  weapons.update(dt, input.fire, input.firePressed, input.ads);
 
-  // ADS FOV + scope
+  // ADS FOV + scope. This runs BEFORE weapons.update because firing happens inside that call:
+  // the ballistic ray must see the same camera rotation as the player on the firing frame.
   const scoped = weapons.spec.scoped && input.ads;
   hud.scope(!!scoped);
   hud.aimRef(scoped ? 'scope' : input.ads ? 'ads' : 'hip');
@@ -1029,11 +1029,13 @@ function frame() {
   const targetFov = input.ads ? weapons.spec.adsFov : 70;
   camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 10);
   camera.updateProjectionMatrix();
-  // scope sway applied to camera for feel
+  // Scope sway is camera motion and therefore ballistic motion. There is no separate hidden
+  // sway in onPlayerShot. Holding breath removes both picture and shot movement.
   if (world.level.sniper && scoped && !input.breath) {
-    camera.rotation.y += Math.sin(swayPhase * 1.7) * 0.0006;
-    camera.rotation.x += Math.cos(swayPhase * 1.3) * 0.0006;
+    camera.rotation.y += Math.sin(swayPhase * 1.7) * weapons.spec.sway;
+    camera.rotation.x += Math.cos(swayPhase * 1.3) * weapons.spec.sway;
   }
+  weapons.update(dt, input.fire, input.firePressed, input.ads);
 
   // grenades
   if (input.nadePressed && weapons.grenades > 0) {
@@ -1131,16 +1133,14 @@ function frame() {
   // markers on whatever the current objective actually wants from you
   if (!world.objMarkers) world.objMarkers = [];
   const wantMark = world.markLive;
-  const marked = wantMark === 'target'
-    ? world.enemies.filter(e => e.hvt && !e.dead)
-    : wantMark === 'rescue'
+  const marked = wantMark === 'rescue'
       ? world.civilians.filter(c => c.hostage && !c.dead && !c.rescued && inZone(c.pos, world.markZone))
       : [];
   while (world.objMarkers.length > marked.length) { scene.remove(world.objMarkers.pop()); }
   while (world.objMarkers.length < marked.length) {
     const m = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.26),
-      new THREE.MeshBasicMaterial({ color: wantMark === 'target' ? 0xff5252 : 0x7cffb0, depthTest: false })
+      new THREE.MeshBasicMaterial({ color: 0x7cffb0, depthTest: true })
     );
     m.renderOrder = 999;
     scene.add(m);
@@ -1148,6 +1148,7 @@ function frame() {
   }
   for (let i = 0; i < marked.length; i++) {
     const a = marked[i];
+    world.objMarkers[i].visible = hasLOSTo({ x: a.pos.x, y: a.pos.y + 1.2, z: a.pos.z });
     world.objMarkers[i].position.set(a.pos.x, a.pos.y + 2.3 + Math.sin(performance.now() / 350) * 0.12, a.pos.z);
     world.objMarkers[i].rotation.y += dt * 2.5;
   }
@@ -1200,7 +1201,7 @@ function frame() {
       : `${a.name} ${Math.max(0, Math.round(a.health / a.maxHealth * 100))}%`).join('  ·  '));
   } else hud.squad('');
 
-  renderer.render(scene, camera);
+  renderPipeline.render(scene, camera);
   clearEdges();
 }
 frame();
@@ -1216,7 +1217,10 @@ window.BP = {
   get player() { return player; },
   get weapons() { return weapons; },
   get mode() { return mode; },
+  get rendererMode() { return renderPipeline.mode; },
   startLevel, LEVELS, S, input,
+  CAMPAIGN,
+  get campaign() { return campaignSnapshot(currentLevel, S); },
   setDifficulty(d) { S.difficulty = d; },
 };
 

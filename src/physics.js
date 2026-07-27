@@ -81,3 +81,27 @@ export function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
   if (d2 > r * r) return Infinity;
   return tca - Math.sqrt(Math.max(0, r * r - d2));
 }
+
+// Ray vs a vertical capsule: a finite cylinder with spherical ends. Actor bodies are tall,
+// narrow volumes; one large sphere rewards visibly off-target "proximity" shots. Returns the
+// nearest positive distance or Infinity.
+export function rayVerticalCapsule(ox, oy, oz, dx, dy, dz, cx, y0, y1, cz, r) {
+  let nearest = Math.min(
+    raySphere(ox, oy, oz, dx, dy, dz, cx, y0, cz, r),
+    raySphere(ox, oy, oz, dx, dy, dz, cx, y1, cz, r)
+  );
+  const rx = ox - cx, rz = oz - cz;
+  const a = dx * dx + dz * dz;
+  if (a < 1e-10) return nearest;
+  const b = 2 * (rx * dx + rz * dz);
+  const c = rx * rx + rz * rz - r * r;
+  const disc = b * b - 4 * a * c;
+  if (disc < 0) return nearest;
+  const root = Math.sqrt(disc);
+  for (const t of [(-b - root) / (2 * a), (-b + root) / (2 * a)]) {
+    if (t <= 0 || t >= nearest) continue;
+    const y = oy + dy * t;
+    if (y >= y0 && y <= y1) nearest = t;
+  }
+  return nearest;
+}
