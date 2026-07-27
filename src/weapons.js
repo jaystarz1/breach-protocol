@@ -239,22 +239,41 @@ export class Weapons {
       this.meshes[k].visible = false;
       this.holder.add(this.meshes[k]);
     }
-    // muzzle flash: point light + visible star billboard
-    this.flash = new THREE.PointLight(0xffcc66, 0, 14);
+    // ---------- muzzle flash ----------
+    // A short orange pop, not a white starburst.
+    //
+    // The old one read as white for a reason worth writing down: additive blending ADDS to
+    // whatever is behind it, so a pale warm colour at full opacity clips every channel and
+    // lands on white no matter what hex you asked for. Staying orange means a saturated
+    // colour AND a peak opacity under 1, so the blue channel never saturates.
+    //
+    // It was also enormous. These planes live on the holder, which is NOT scaled by the
+    // gun's 0.6-0.78, so 0.34m of plane at half a metre from the eye covered a third of the
+    // screen. Petals are 0.095m now and the whole thing is scaled per weapon.
+    this.flash = new THREE.PointLight(0xff9838, 0, 12);
     this.flash.position.set(0, 0, -0.55);
     this.holder.add(this.flash);
-    const flashMat = new THREE.MeshBasicMaterial({
-      color: 0xffe0a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+    this.petalMat = new THREE.MeshBasicMaterial({
+      color: 0xff7418, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    this.coreMat = new THREE.MeshBasicMaterial({
+      color: 0xffb452, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
       depthWrite: false, side: THREE.DoubleSide,
     });
     this.flashMesh = new THREE.Group();
     for (const rot of [0, Math.PI / 3, -Math.PI / 3]) {
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.1), flashMat);
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.095, 0.023), this.petalMat);
       plane.rotation.z = rot;
       this.flashMesh.add(plane);
     }
+    // Hot core, small and short-lived. It is what gives the pop a centre instead of leaving
+    // three crossed streaks floating in front of the barrel.
+    this.flashMesh.add(new THREE.Mesh(new THREE.CircleGeometry(0.022, 10), this.coreMat));
     this.flashMesh.position.set(0, 0.02, -0.55);
-    this.flashMat = flashMat;
+    this.flashMesh.visible = false;
+    this.flashLife = 0;
+    this.flashSize = 1;
     this.holder.add(this.flashMesh);
     this.loadout = ['pistol'];
     this.current = 'pistol';
@@ -290,6 +309,8 @@ export class Weapons {
     const mz = m.userData.muzzle || [0, 0, -0.55];
     this.flash.position.set(mz[0] * s, mz[1] * s, mz[2] * s);
     this.flashMesh.position.set(mz[0] * s, mz[1] * s + 0.02, mz[2] * s);
+    // A 9mm pop and a .50 muzzle brake blast are not the same event.
+    this.flashSize = kind === 'pistol' ? 0.72 : kind === 'barrett' ? 1.75 : 1;
     const sg = m.userData.sight || [0, 0, 0];
     // Where the holder must sit for the sights to land on the crosshair.
     this.adsX = -sg[0] * s;
@@ -316,8 +337,20 @@ export class Weapons {
   update(dt, fireHeld, firePressed, ads) {
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.recoilKick = Math.max(0, this.recoilKick - dt * 3);
-    this.flash.intensity = Math.max(0, this.flash.intensity - dt * 90);
-    this.flashMat.opacity = Math.max(0, this.flashMat.opacity - dt * 14);
+    this.flash.intensity = Math.max(0, this.flash.intensity - dt * 110);
+    // One life value drives the whole pop, so the pieces cannot drift out of step. ~45ms.
+    if (this.flashLife > 0) {
+      this.flashLife = Math.max(0, this.flashLife - dt * 22);
+      const f = this.flashLife;
+      // Peak 0.78, not 1: above that the additive blend clips to white and the colour is lost.
+      this.petalMat.opacity = f * 0.78;
+      // f*f: the core snaps out faster than the petals, which is what makes it read as a
+      // flash with a hot centre rather than a uniform glowing shape fading out.
+      this.coreMat.opacity = f * f * 0.9;
+      // Expands slightly as it dies — the "poof" rather than a hard blink.
+      this.flashMesh.scale.setScalar(this.flashSize * (1.22 - f * 0.34));
+      this.flashMesh.visible = f > 0.02;
+    }
 
     if (this.reloading > 0) {
       this.reloading -= dt;
@@ -339,10 +372,11 @@ export class Weapons {
         st.mag--;
         this.cooldown = 60 / sp.rpm;
         this.recoilKick = Math.min(1, this.recoilKick + 0.5);
-        this.flash.intensity = 9;
-        this.flashMat.opacity = 1;
+        this.flash.intensity = 7 * this.flashSize;
+        this.flashLife = 1;
+        this.flashMesh.visible = true;
+        // Fresh orientation every shot so consecutive rounds do not stamp the same shape.
         this.flashMesh.rotation.z = Math.random() * Math.PI;
-        this.flashMesh.scale.setScalar(0.8 + Math.random() * 0.6);
         sfx[sp.sound]();
         const spread = ads ? sp.adsSpread : sp.spread;
         if (this.onFire) this.onFire(spread);
