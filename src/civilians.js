@@ -20,9 +20,34 @@ export class Civilian {
     this.panicTimer = 0;
     this.screamed = false;
     this.exhausted = 0;
+    this.prone = 0;                       // 0..1 blend into flat-on-the-floor
+    // A civilian who runs AT you is the actual shoot/no-shoot test. Fleeing bodies are easy:
+    // they leave the frame. Someone sprinting at your muzzle with their hands up, in a level
+    // where everything else running at you is trying to kill you, is the decision.
+    this.rush = def.rush !== undefined ? !!def.rush : (!this.hostage && Math.random() < 0.35);
+    this.rushDone = false;
+    this.baseY = this.mesh.position.y;
   }
 
   get pos() { return this.mesh.position; }
+
+  // Hit sphere. Goes low and forward once they are face-down, because a sphere floating at
+  // chest height over a prone body means you can "miss" a hostage you visibly shot.
+  get hitY() { return this.hostage ? 0.6 - this.prone * 0.35 : 1.0 - this.prone * 0.6; }
+  get hitR() { return this.hostage ? 0.45 : 0.5; }
+
+  // Face-down, hands over the head. Called the moment rounds start flying.
+  goProne(dt) {
+    this.prone = Math.min(1, this.prone + dt * 2.6);
+    this.mesh.rotation.x = -1.32 * this.prone;
+    this.mesh.position.y = this.baseY + 0.34 * this.prone;
+  }
+
+  standUp() {
+    this.prone = 0;
+    this.mesh.rotation.x = 0;
+    this.mesh.position.y = this.baseY;
+  }
 
   // cut loose: the bound man stands up and stops being scenery
   rescue() {
@@ -36,8 +61,10 @@ export class Civilian {
       r.lArm.rotation.set(0.1, 0, 0.15); r.rArm.rotation.set(0.1, 0, -0.15);
       r.lArm.userData.fore.rotation.x = 0; r.rArm.userData.fore.rotation.x = 0;
     }
+    this.standUp();            // a man you just cut loose does not stay face-down
     this.hostage = false;      // now a free civilian: flees like the rest
     this.panic = true;
+    this.rush = false;         // and he runs AWAY from the man who freed him, obviously
     return true;
   }
 
@@ -57,7 +84,19 @@ export class Civilian {
       }
       return;
     }
-    if (this.hostage) return;                    // bound, stays put
+    // Bound hostages cannot run, so the only thing they can do once rounds start flying is
+    // get flat. It also opens the shot: a kneeling hostage next to a standing gunman is a
+    // cluttered target picture, and a prone one is not.
+    if (this.hostage) {
+      if (world.combatHeat > 0) {
+        this.goProne(dt);
+        if (!this.screamed && this.pos.distanceTo(world.playerPos) < 28) {
+          this.screamed = true;
+          sfx.civScream(this.pos);
+        }
+      }
+      return;
+    }
 
     if (world.combatHeat > 0 && !this.panic) {
       this.panic = true;
@@ -69,7 +108,22 @@ export class Civilian {
     if (!this.panic) return;
 
     this.exhausted += dt;
-    if (this.exhausted > 14) { animateRig(this.mesh, this.walkPhase, false); return; } // spent, cowers
+
+    // Rushers: sprint at the player, then throw themselves flat a few metres short rather
+    // than running through him. The flare of movement straight down your sights is the point.
+    if (this.rush && !this.rushDone) {
+      const d = this.pos.distanceTo(world.playerPos);
+      if (d < 3.2 || this.exhausted > 9) { this.rushDone = true; }
+      else {
+        const toward = Math.atan2(world.playerPos.x - this.pos.x, world.playerPos.z - this.pos.z);
+        this.panicDir = toward;
+        this.step(dt, world, 3.9);
+        return;
+      }
+    }
+    if (this.rushDone) { this.goProne(dt); animateRig(this.mesh, this.walkPhase, false); return; }
+
+    if (this.exhausted > 14) { this.goProne(dt); animateRig(this.mesh, this.walkPhase, false); return; } // spent, hits the deck
 
     this.panicTimer -= dt;
     if (this.panicTimer <= 0) {
@@ -86,7 +140,10 @@ export class Civilian {
       this.panicDir = dir;
     }
 
-    const s = 3.2;
+    this.step(dt, world, 3.2);
+  }
+
+  step(dt, world, s) {
     const p = this.pos;
     const prev = { x: p.x, z: p.z };
     p.x += Math.sin(this.panicDir) * s * dt;
@@ -99,5 +156,6 @@ export class Civilian {
     animateRig(this.mesh, this.walkPhase, true);
     const g = groundHeight(world.solids, p.x, p.z, 0.25, p.y + 0.75);
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
+    this.baseY = p.y;
   }
 }

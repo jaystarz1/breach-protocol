@@ -65,6 +65,10 @@
   #btn-flash { right:max(30px, env(safe-area-inset-right)); bottom:calc(212px + env(safe-area-inset-bottom)); width:52px; height:52px; font-size:10px; display:none; }
   #btn-nvg { left:calc(120px + env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:10px; }
   #btn-nvg.latched { background:rgba(76,255,150,.28); border-color:rgba(76,255,150,.75); color:#9dffc4; }
+  #reinf-warn { position:absolute; top:calc(66px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
+    font-size:12px; font-weight:700; letter-spacing:1.5px; color:#ff8a65; text-shadow:0 0 8px rgba(255,80,40,.6);
+    animation:reinfpulse 1s ease-in-out infinite; }
+  @keyframes reinfpulse { 0%,100%{opacity:1} 50%{opacity:.45} }
   #squad-line { position:absolute; left:max(20px, env(safe-area-inset-left)); bottom:calc(168px + env(safe-area-inset-bottom));
     font-size:11px; letter-spacing:.5px; color:#8fd0ff; text-shadow:0 1px 2px #000; }
 
@@ -184,6 +188,7 @@
   <div id="ammo">12 <small>/ 48</small></div>
   <div id="weapon-name">M9 SIDEARM</div>
   <div id="squad-line"></div>
+  <div id="reinf-warn"></div>
 </div>
 
 <div id="nvg"></div>

@@ -214,6 +214,9 @@ export const LEVELS = [
       g.push(...floorSlab(4, 1, 16, 44, 3.3, 0.3, C.roof));
       return g;
     },
+    // Role players fed in from the north end of the corridor. Small and slow: this is the
+    // shakedown mission and the clock is meant to be felt, not to punish.
+    reinforce: { every: 40, first: 45, max: 2, group: 1, range: 40, at: [[0, 0, 20]] },
     doors: [
       { pos: [3.15, 0, 13.25], rot: 90 }, { pos: [3.15, 0, 1.25], rot: 90 }, { pos: [3.15, 0, -10.75], rot: 90 },
     ],
@@ -300,8 +303,12 @@ export const LEVELS = [
       { pos: [0, 0, -44], hold: true, yaw: 0 },
     ],
     civilians: [
-      { pos: [-9, 0, 30] }, { pos: [8, 0, 10] }, { pos: [-8, 0, -12] }, { pos: [9.5, 0, -3], hostage: true },
+      { pos: [-9, 0, 30], rush: true }, { pos: [8, 0, 10] }, { pos: [-8, 0, -12], rush: true },
+      { pos: [9.5, 0, -3], hostage: true },
     ],
+    // Fed in from both ends of the street. Dawdle and the block refills behind you.
+    reinforce: { every: 24, first: 28, max: 6, group: 2, range: 70,
+      at: [[0, 0, 50], [-8, 0, -46], [8, 0, -46]] },
     objectives: [
       { type: 'clear', zone: null, text: 'SWEEP THE BLOCK — ELIMINATE ALL HOSTILES' },
       { type: 'reach', zone: [0, -52, 3], text: 'PUSH THROUGH THE BARRICADE' },
@@ -344,6 +351,7 @@ export const LEVELS = [
       { pos: [5.5, 0, -8.5], hostage: true }, { pos: [5.8, 3, -8.5], hostage: true },
       { pos: [4.8, 6, -8.8], hostage: true }, { pos: [6, 6, -8.2], hostage: true },
     ],
+    reinforce: { every: 30, first: 35, max: 4, group: 2, range: 45, at: [[0, 0, 6]] },
     objectives: [
       { type: 'clear', zone: null, text: 'CLEAR ALL THREE FLOORS — PROTECT THE HOSTAGES' },
       { type: 'rescue', text: 'CUT THE HOSTAGES LOOSE — WALK UP TO EACH ONE' },
@@ -404,8 +412,11 @@ export const LEVELS = [
       { pos: [-4, 0, -37], hold: true, yaw: 0 },
     ],
     civilians: [
-      { pos: [-2, 0, 35] }, { pos: [20, 0, 5] }, { pos: [-10, 0, -22] }, { pos: [6, 0, -33] },
+      { pos: [-2, 0, 35], rush: true }, { pos: [20, 0, 5] }, { pos: [-10, 0, -22], rush: true }, { pos: [6, 0, -33] },
     ],
+    // He is running and his men are buying time. The clock here is the entire mission.
+    reinforce: { every: 20, first: 22, max: 8, group: 2, range: 60,
+      at: [[0, 0, 46], [22, 0, 18], [-20, 0, -8], [-6, 0, -36]] },
     objectives: [
       { type: 'target', text: 'RUN HIM DOWN — DO NOT LET HIM REACH THE GATE' },
       { type: 'clear', zone: [-5, -25, 30], text: 'CLEAR THE GARAGE' },
@@ -452,10 +463,13 @@ export const LEVELS = [
       { pos: [-26, 0, -30], hold: true, yaw: 0 },
     ],
     civilians: [
-      { pos: [-18, 0, 20] }, { pos: [-4, 0, 16] }, { pos: [12, 0, 12] }, { pos: [24, 0, 10] },
-      { pos: [-24, 0, 2] }, { pos: [2, 0, -2] }, { pos: [18, 0, -6] }, { pos: [-10, 0, -14] },
-      { pos: [6, 0, -24] }, { pos: [-20, 0, -26] }, { pos: [26, 0, 24] }, { pos: [0, 0, 24] },
+      { pos: [-18, 0, 20], rush: true }, { pos: [-4, 0, 16], rush: true }, { pos: [12, 0, 12] },
+      { pos: [24, 0, 10] }, { pos: [-24, 0, 2] }, { pos: [2, 0, -2], rush: true }, { pos: [18, 0, -6] },
+      { pos: [-10, 0, -14], rush: true }, { pos: [6, 0, -24] }, { pos: [-20, 0, -26] },
+      { pos: [26, 0, 24] }, { pos: [0, 0, 24], rush: true },
     ],
+    reinforce: { every: 26, first: 30, max: 6, group: 2, range: 60,
+      at: [[0, 0, 34], [-30, 0, -34], [30, 0, -34]] },
     objectives: [
       { type: 'clear', zone: null, text: 'NEUTRALIZE EMBEDDED SHOOTERS — ZERO CIVILIAN CASUALTIES' },
       { type: 'reach', zone: [0, -40, 3.5], text: 'EXIT THE MARKET SOUTH GATE' },
@@ -469,7 +483,19 @@ export const LEVELS = [
     weapons: ['barrett'], grenades: 0, sniper: true, lockPlayer: true,
     sky: 0x1a2432, fog: [0x1a2432, 120, 500], ambient: 0.9, sun: 1.2,
     start: [0, 24, 61.2, 0],
-    team: { pos: [0, 0, -10], health: 300 },
+    // The assault element: four CT operators in black who cross the plaza on foot and cut the
+    // hostages loose at the far buildings. They are the mission. Everything the player does is
+    // in service of getting them there, and a .50 round through one of them ends the op.
+    ctTeam: {
+      // 380, not 200: with no covering fire the element loses the 4-v-8 attrition fight in
+      // about a minute, and the player needs a window long enough to actually work the
+      // targets through a 7-degree scope. This is the dial that decides whether the mission
+      // is tense or merely unfair.
+      count: 4, health: 380, at: [0, 0, -6],
+      // The last leg walks the element INTO the hostage cluster rather than stopping short
+      // of it: a rescue team that halts three metres away and stares never cuts anyone loose.
+      route: [[0, -18], [-4, -32], [-8, -48], [-16, -62], [-26, -72], [-35, -77.5]],
+    },
     geo: () => {
       const g = [];
       g.push(...GROUND(240, 300, C.street));
@@ -536,10 +562,21 @@ export const LEVELS = [
       { pos: [22, 0, -93], patrol: [[28, -64], [20, -42]], aggro: true, range: 200 },
     ],
     civilians: [
-      { pos: [-25, 0, -35] }, { pos: [18, 0, -58] }, { pos: [-5, 0, -48] }, { pos: [30, 0, -62] }, { pos: [-35, 0, -70] },
+      // Hostages the assault team is going in for. Prone the moment shooting starts.
+      { pos: [-36, 0, -77], hostage: true }, { pos: [-33.5, 0, -77], hostage: true },
+      { pos: [-34.8, 0, -78.5], hostage: true },
+      // Fleeing civilians, and three who bolt straight up the plaza toward the perch. Through
+      // a 7-degree scope a running silhouette at 60m is a shape and nothing more — that is the
+      // whole test, and it is why the .50 has no business firing at movement alone.
+      { pos: [-25, 0, -35], rush: true }, { pos: [18, 0, -58] }, { pos: [-5, 0, -48], rush: true },
+      { pos: [30, 0, -62] }, { pos: [-20, 0, -70] }, { pos: [12, 0, -40], rush: true },
+      { pos: [-30, 0, -55] }, { pos: [8, 0, -66] },
     ],
+    reinforce: { every: 32, first: 45, max: 5, group: 2, range: 220,
+      at: [[-44, 0, -78], [44, 0, -78], [4, 0, -98]] },
     objectives: [
-      { type: 'clear', zone: null, text: 'PROTECT THE TEAM — ELIMINATE ALL ADVANCING HOSTILES' },
+      { type: 'rescue', text: 'COVER THE ASSAULT TEAM — THEY ARE GOING IN FOR THE HOSTAGES' },
+      { type: 'clear', zone: null, text: 'FINISH THE REMAINING HOSTILES' },
     ],
   },
 
@@ -577,6 +614,7 @@ export const LEVELS = [
     civilians: [
       { pos: [6, 6, -9.5], hostage: true }, { pos: [-6, 0, -2], hostage: true },
     ],
+    reinforce: { every: 26, first: 30, max: 5, group: 2, range: 50, at: [[0, 0, 6], [-6, 0, 8]] },
     objectives: [
       { type: 'clear', zone: null, text: 'CLEAR THE TOWER TOP TO BOTTOM' },
       { type: 'reach', zone: [0, 14, 4], text: 'EXTRACT AT STREET LEVEL' },
@@ -643,6 +681,7 @@ export const LEVELS = [
     civilians: [
       { pos: [-12, 0, 2], hostage: true }, { pos: [12, 0, -16], hostage: true },
     ],
+    reinforce: { every: 28, first: 32, max: 5, group: 2, range: 40, at: [[0, 0, 18], [-13, 0, 17]] },
     objectives: [
       { type: 'clear', zone: null, text: 'NVGs ON — CLEAR THE DARK FLOOR' },
       { type: 'reach', zone: [0, -18, 2.5], text: 'SECURE THE SERVER ROOM' },
@@ -717,6 +756,7 @@ export const LEVELS = [
       { pos: [-7.2, 0, 8], hostage: true }, { pos: [8.2, 0, -12], hostage: true },
       { pos: [-7.2, 0, -22], hostage: true }, { pos: [0, 0, -56], hostage: true },
     ],
+    reinforce: { every: 26, first: 30, max: 6, group: 2, range: 55, at: [[0, 0, 24], [0, 0, -28]] },
     objectives: [
       { type: 'clear', zone: [0, 0, 40], text: 'CLEAR THE PLATFORM — HOSTAGES ON THE COLUMNS' },
       { type: 'clear', zone: null, text: 'PUSH THE SOUTH TUNNEL' },
@@ -797,10 +837,13 @@ export const LEVELS = [
         patrol: [[17, -41], [28, -41], [28, -28], [17, -30], [17, -41]] },
     ],
     civilians: [
-      { pos: [-16, 0, 14] },
+      { pos: [-16, 0, 14], rush: true },
       { pos: [5.5, 3, -9], hostage: true },
       { pos: [20, -5, -39], hostage: true }, { pos: [24, -5, -39.2], hostage: true },
     ],
+    // Endgame: the compound keeps feeding men through the gate until you take the tower.
+    reinforce: { every: 22, first: 26, max: 9, group: 3, range: 70,
+      at: [[0, 0, 27], [-24, 0, 24], [24, 0, 24]] },
     objectives: [
       { type: 'clear', zone: [0, 10, 34], text: 'TAKE THE COURTYARD' },
       { type: 'clear', zone: [0, -10, 14, 8], text: 'CLEAR THE TOWER' },

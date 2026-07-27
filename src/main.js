@@ -5,7 +5,7 @@ import { Weapons, Grenade, explosionEffect } from './weapons.js';
 import { Enemy, resetPathBudget } from './enemies.js';
 import { Civilian } from './civilians.js';
 import { DoorSystem } from './breach.js';
-import { buildStaticGeometry, makeCharacter } from './levelgen.js';
+import { buildStaticGeometry } from './levelgen.js';
 import { raycastSolids, raySphere, groundHeight, hasLOS } from './physics.js';
 import { LEVELS } from './levels/index.js';
 import { buildNavGrid } from './navgrid.js';
@@ -16,7 +16,7 @@ import { sfx, unlock as audioUnlock, updateListener, startAmbient, stopAmbient }
 import { quality } from './quality.js';
 import { environment, environmentFrom } from './textures.js';
 import { skyDome, groundPlate, skyline, takeLights } from './world.js';
-import { spawnSquad } from './squad.js';
+import { spawnSquad, spawnRouteTeam } from './squad.js';
 
 const $ = id => document.getElementById(id);
 
@@ -147,6 +147,7 @@ function toMenu() {
   hud.scope(false);
   hud.nvg(false);
   hud.squad('');
+  hud.reinf('');
   hud.screen('menu');
 }
 
@@ -339,7 +340,11 @@ function startLevel(id) {
     onAllyDown(a) {
       hud.feed(`${a.name} IS DOWN`, '#ef9a9a');
       sfx.noShoot();
-      if (this.allies.every(x => x.dead)) hud.feed('SQUAD ELIMINATED — YOU ARE ALONE', '#ef5350');
+      if (this.allies.every(x => x.dead)) {
+        // On the sniper mission the team IS the mission — you exist to keep them alive.
+        if (this.ctMission) failMission('ASSAULT TEAM LOST');
+        else hud.feed('SQUAD ELIMINATED — YOU ARE ALONE', '#ef5350');
+      }
     },
     // Friendly muzzle flash and tracers are BLUE-white, not the hostiles' orange. In a dark
     // firefight the colour of the tracer is how you know which direction is a threat.
@@ -408,6 +413,19 @@ function startLevel(id) {
   }
   world.enemies = defs.map(d => new Enemy(scene, d, diff));
 
+  // Reinforcements. The clock is the pressure: dawdle and more men arrive, so a fast clean
+  // sweep is rewarded with a smaller fight. The cap is HARD and scales with difficulty — an
+  // uncapped drip would make every "eliminate all hostiles" objective impossible to satisfy,
+  // and reinforcing during the final objective would do the same, so both are ruled out below.
+  if (L.reinforce) {
+    world.reinf = {
+      ...L.reinforce,
+      timer: L.reinforce.first ?? L.reinforce.every,
+      sent: 0,
+      max: Math.max(1, Math.round(L.reinforce.max * diff.enemyCountMul)),
+    };
+  }
+
   // civilian scaling (never scale hostages — they're placed deliberately)
   let cdefs = [...L.civilians];
   const cmul = diff.civilianMul;
@@ -432,14 +450,13 @@ function startLevel(id) {
     hud.feed(`${world.allies.length} FRIENDLIES ON YOU`, '#8fd0ff');
   }
 
-  // sniper stage: friendly team at the fountain
-  if (L.team) {
-    world.sniperTeam = { pos: new THREE.Vector3(...L.team.pos), health: L.team.health, maxHealth: L.team.health, dead: false };
-    for (const off of [[-1.2, 0.5], [1.2, -0.5]]) {
-      const m = makeCharacter({ friendly: true });
-      m.position.set(L.team.pos[0] + off[0], L.team.pos[1], L.team.pos[2] + off[1]);
-      scene.add(m);
-    }
+  // Sniper stage: a CT element in black that actually goes in, instead of two ornaments
+  // standing at a fountain. They advance a route toward the hostages while the player covers
+  // them, which is what makes the mission a shoot / no-shoot problem rather than target
+  // practice — every silhouette crossing the scope has to be identified before it is engaged.
+  if (L.ctTeam) {
+    world.allies = spawnRouteTeam(scene, L.ctTeam.count, L.ctTeam.at, L.ctTeam.route, solids, L.ctTeam.health);
+    world.ctMission = true;
     input.ads = true;
   } else {
     input.ads = false;
@@ -487,6 +504,44 @@ function setObjective() {
     scene.add(col);
     world.beacon = col;
   }
+}
+
+// Timed reinforcements. Spawns are refused on the LAST objective so the mission always
+// converges, and refused within 22m of the player so nobody materialises in front of him.
+function reinforcements(dt) {
+  const r = world.reinf;
+  if (!r || world.over) return;
+  const last = world.objectiveIdx >= world.level.objectives.length - 1;
+  if (r.sent >= r.max || last) { hud.reinf(''); return; }
+  r.timer -= dt;
+  if (r.timer > 0) {
+    // Only warn when it is close enough to act on; a permanent countdown is just noise.
+    hud.reinf(r.timer < 12 ? `REINFORCEMENTS INBOUND ${Math.ceil(r.timer)}s` : '');
+    return;
+  }
+  const group = Math.min(r.group ?? 2, r.max - r.sent);
+  const spots = r.at.filter(s => Math.hypot(s[0] - player.pos.x, s[2] - player.pos.z) > 22);
+  const pool = spots.length ? spots : r.at;
+  let made = 0;
+  for (let i = 0; i < group; i++) {
+    const s = pool[(r.sent + i) % pool.length];
+    const e = new Enemy(scene, {
+      pos: [s[0] + (Math.random() - 0.5) * 2, s[1], s[2] + (Math.random() - 0.5) * 2],
+      aggro: true, range: r.range ?? 70,
+      patrol: r.patrol || null, hold: !r.patrol,
+    }, world.diff);
+    // They arrive already looking for you — a reinforcement that stands around defeats
+    // the entire point of putting a clock on the mission.
+    e.state = 'alert';
+    e.lastKnown = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
+    world.enemies.push(e);
+    made++;
+  }
+  r.sent += made;
+  r.timer = r.every;
+  hud.feed(`${made} HOSTILE${made > 1 ? 'S' : ''} REINFORCING`, '#ffab91');
+  sfx.contact(player.pos);
+  world.combatHeat = Math.max(world.combatHeat, 4);
 }
 
 // Deadlock failsafe: an enemy that hasn't moved or fired for 90s while a clear
@@ -574,9 +629,8 @@ function onPlayerShot(spread) {
   }
   for (const c of world.civilians) {
     if (c.dead) continue;
-    const r = c.hostage ? 0.45 : 0.5;
-    const y = c.hostage ? 0.6 : 1.0;
-    const t = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, c.pos.x, c.pos.y + y, c.pos.z, r);
+    // hitY drops as they go prone, so a body on the floor is still hittable where it lies
+    const t = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, c.pos.x, c.pos.y + c.hitY, c.pos.z, c.hitR);
     if (t < hitDist) { hitDist = t; hitCiv = c; hitEnemy = null; hitAlly = null; }
   }
   // Allies stop bullets. They have to: an ally you can shoot THROUGH is not in the world, and
@@ -616,11 +670,21 @@ function onPlayerShot(spread) {
   } else if (hitCiv) {
     civilianKilled(hitCiv);
   } else if (hitAlly) {
-    // Full weapon damage, no score penalty, no mission failure. Killing your own man is its
-    // own punishment: you spend the rest of the level without him.
+    const wasAlive = !hitAlly.dead;
     hitAlly.damage(weapons.spec.damage, world);
-    hud.noShoot('FRIENDLY FIRE — CHECK YOUR LANE');
     sfx.noShoot();
+    if (wasAlive && hitAlly.dead && world.ctMission) {
+      // A .50 through the man you were sent to protect is not a scoring event. This IS the
+      // shoot / no-shoot test on this mission, so it ends it.
+      hud.noShoot('YOU SHOT YOUR OWN MAN');
+      failMission('FRIENDLY KILLED BY OVERWATCH');
+    } else {
+      // Otherwise: full damage, a score bite, no mission failure. Killing your own man is
+      // mostly its own punishment — you spend the rest of the level without him.
+      world.stats.score -= 150;
+      hud.noShoot('FRIENDLY FIRE — CHECK YOUR LANE');
+      hud.feed('-150 FRIENDLY FIRE', '#ef9a9a');
+    }
   } else if (hitDist < weapons.spec.range - 0.5) {
     impactAt(end);
   }
@@ -774,6 +838,8 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     hud.show(false);
     hud.scope(false);
     hud.nvg(false);
+    hud.squad('');
+    hud.reinf('');
     $('debrief-status').textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED' + (reason ? ' — ' + reason : '');
     $('debrief-grade').textContent = g;
     $('debrief-grade').style.color = won ? '#ffc107' : '#ef5350';
@@ -973,16 +1039,21 @@ function frame() {
     world.objMarkers[i].rotation.y += dt * 2.5;
   }
 
-  // free any hostage you walk up to
+  // free any hostage you walk up to — or that the assault team reaches, which is the whole
+  // job on the sniper mission, where the player physically cannot get to them
   for (const c of world.civilians) {
     if (!c.hostage || c.dead || c.rescued) continue;
-    if (player.pos.distanceTo(c.pos) < 2.2 && Math.abs(player.pos.y - c.pos.y) < 2.2) {
-      if (c.rescue()) {
-        world.stats.rescued++;
-        world.stats.score += 150;
-        hud.feed('HOSTAGE FREED +150', '#a5d6a7');
-        sfx.objective();
-      }
+    let by = null;
+    if (player.pos.distanceTo(c.pos) < 2.2 && Math.abs(player.pos.y - c.pos.y) < 2.2) by = 'you';
+    else {
+      const man = world.allies.find(a => !a.dead && a.pos.distanceTo(c.pos) < 3.0 && Math.abs(a.pos.y - c.pos.y) < 2.2);
+      if (man) by = man.name;
+    }
+    if (by && c.rescue()) {
+      world.stats.rescued++;
+      world.stats.score += 150;
+      hud.feed(by === 'you' ? 'HOSTAGE FREED +150' : `${by}: HOSTAGE FREED +150`, '#a5d6a7');
+      sfx.objective();
     }
   }
 
@@ -993,7 +1064,7 @@ function frame() {
   }
 
   // objectives + HUD
-  if (!world.over) { checkObjectives(); objectiveWatchdog(dt); }
+  if (!world.over) { checkObjectives(); objectiveWatchdog(dt); reinforcements(dt); }
   // beacon pulse + live distance readout on reach objectives
   if (world.beacon) {
     world.beacon.material.opacity = 0.22 + Math.sin(performance.now() / 300) * 0.12;
@@ -1008,7 +1079,7 @@ function frame() {
   hud.weapon(weapons.spec.name + (weapons.reloading > 0 ? ' — RELOADING' : ''));
   const remaining = world.enemies.filter(e => !e.dead).length;
   let scoreLine = `HOSTILES: ${remaining} · SCORE: ${Math.max(0, world.stats.score)}`;
-  if (world.sniperTeam) scoreLine += ` · TEAM: ${Math.max(0, Math.round(world.sniperTeam.health / world.sniperTeam.maxHealth * 100))}%`;
+  if (world.ctMission) scoreLine += ` · TEAM: ${world.allies.filter(a => !a.dead).length}/${world.allies.length}`;
   hud.score(scoreLine);
   if (world.allies.length) {
     hud.squad(world.allies.map(a => a.dead

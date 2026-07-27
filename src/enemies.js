@@ -58,6 +58,9 @@ export class Enemy {
     this.calledOut = false;
     this.tgtAlly = null;      // which friendly this man has picked, null = the player
     this.tgtTimer = Math.random() * 1.5;
+    this.blocked = 0;         // seconds spent pushing into geometry and getting nowhere
+    this.progress = 0;        // metres actually covered this frame, post-collision
+    this.standoff = 7 + Math.random() * 5;   // how close this man is willing to close
     this.flee = !!def.flee;          // HVT: runs its route instead of fighting
     this.hvt = !!def.hvt;
     this.escapes = !!def.escapes;   // only a runner with somewhere to go can get away
@@ -190,6 +193,7 @@ export class Enemy {
     }
     const p = this.pos;
     this.moving = false;
+    this.progress = 0;
     this.flinch = Math.max(0, this.flinch - dt * 3);
     this.repathTimer -= dt;
 
@@ -252,6 +256,11 @@ export class Enemy {
         if (seesTarget && this.reactTimer <= 0) this.doShoot(dt, world, dist, target);
       } else if (seesTarget) {
         if (this.reactTimer <= 0) this.doShoot(dt, world, dist, target);
+        // Close to a firing position, then STOP. Walking all the way onto the man you are
+        // shooting at is both wrong and the thing that jammed everyone into the fountain.
+        if (dist > this.standoff && this.repathTimer <= 0 && this.blocked < 0.8) {
+          this.moveToward(target.x, target.z, dt, world, this.speed * 0.75);
+        }
         // hurt men break contact instead of standing in the open
         const hurt = this.health < this.maxHealth * 0.45;
         if (hurt && this.coverTimer <= 0 && this.repathTimer <= 0) {
@@ -273,13 +282,21 @@ export class Enemy {
         // lost him: PATH to where he was, around walls, instead of pressing into one
         this.state = 'hunt';
         const lk = this.lastKnown;
-        const reached = Math.hypot(lk.x - p.x, lk.z - p.z) < 2.0;
+        // 2.0m was not reachable when the last known position is INSIDE a solid — which is
+        // exactly the case on the sniper map, where the target is the assault team sitting on
+        // the fountain. A* refuses to route into a solid, the straight-line fallback walks
+        // into the wall, collision cancels it, and "reached" never becomes true. Every hostile
+        // on the level then grinds against the same face at the same point, stacked inside one
+        // another, which is why some of them could not be shot at all. Giving up on arrival
+        // once we are wedged is what actually breaks the loop.
+        const reached = Math.hypot(lk.x - p.x, lk.z - p.z) < 2.0 || this.blocked > 1.2;
         if (reached) {
           this.lastKnown = null; this.path = null;
           this.state = 'alert';
           this.repositionTimer = 1.5;
-        } else if (this.aggro || true) {
-          if ((!this.path || this.repathTimer <= 0) && this.repathTimer <= 0) {
+          this.blocked = 0;
+        } else {
+          if (this.repathTimer <= 0) {
             this.repathTimer = 1.5 + Math.random();
             this.setPath(world, lk.x, lk.y ?? p.y, lk.z);
           }
@@ -293,6 +310,12 @@ export class Enemy {
 
   settle(dt, world) {
     const p = this.pos;
+    // Wedge accounting. `progress` is post-collision, so this measures ground actually covered
+    // rather than ground requested — the only version that catches being pinned on geometry.
+    if (this.moving) {
+      if (this.progress < this.speed * dt * 0.25) this.blocked += dt; else this.blocked = 0;
+    } else this.blocked = Math.max(0, this.blocked - dt * 0.5);
+    this.separate(world);
     const g = groundHeight(world.solids, p.x, p.z, 0.3, p.y + 0.75);
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.mesh.rotation.y = this.yaw;
@@ -308,6 +331,32 @@ export class Enemy {
         if (p.distanceTo(world.playerPos) < 30) sfx.enemyStep(p);
       }
     } else this.stepAccum = 0.3;
+  }
+
+  // Bodies do not occupy the same cubic metre. Without this, several men converging on one
+  // objective end up at the identical coordinate — visually one silhouette, and a bullet that
+  // kills the front one leaves the rest hidden inside him and effectively unshootable. Cheap
+  // O(n^2) over live hostiles, which is at most a couple of hundred checks a frame here.
+  separate(world) {
+    if (this.dead) return;
+    const p = this.pos;
+    const MIN = 1.05;
+    for (const o of world.enemies) {
+      if (o === this || o.dead) continue;
+      if (Math.abs(o.pos.y - p.y) > 1.2) continue;      // different floor, not crowding
+      const dx = p.x - o.pos.x, dz = p.z - o.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d >= MIN) continue;
+      // Perfectly coincident is the case that matters most and has no direction to push along,
+      // so derive a stable one from identity rather than random jitter.
+      if (d < 0.001) {
+        const a = (this.walkPhase * 7.13) % (Math.PI * 2);
+        p.x += Math.cos(a) * 0.06; p.z += Math.sin(a) * 0.06;
+        continue;
+      }
+      const push = (MIN - d) * 0.5;
+      p.x += dx / d * push; p.z += dz / d * push;
+    }
   }
 
   doPatrol(dt, world) {
@@ -341,6 +390,7 @@ export class Enemy {
     const prev = { x: p.x, z: p.z };
     p.x += mx; p.z += mz;
     resolveXZ(world.solids, p, 0.35, p.y + 0.6, p.y + 1.6, prev);
+    this.progress = Math.hypot(p.x - prev.x, p.z - prev.z);
   }
 
   doShoot(dt, world, dist, target) {

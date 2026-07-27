@@ -150,12 +150,23 @@ function accent(w, h, d, color, x, y, z) {
 // difference is colour, and it is deliberately extreme: navy kit plus unlit cyan IFF panels
 // front and back. You must be able to tell friend from foe in a doorway at a glance, under
 // NVGs, while being shot at.
-export function makeCharacter({ hostile, hostage, friendly }) {
+// Olive drab, in a few shades so a squad of hostiles is not eight identical dolls.
+// Pulled down and desaturated from a true field olive: under ACES tone mapping against a
+// desaturated blue night, a saturated green reads as a costume rather than as kit.
+const OD_SHIRT = [0x424833, 0x4a5139, 0x3b422c, 0x4e5440];
+const OD_PANTS = [0x343a25, 0x3b4129, 0x2e3320];
+
+// `black` is the CT variant: near-black assault kit. Only used with `friendly`.
+export function makeCharacter({ hostile, hostage, friendly, black }) {
   const g = new THREE.Group();
   const armed = !!hostile || !!friendly;
   const skin = SKINS[Math.floor(Math.random() * SKINS.length)];
-  const shirt = friendly ? 0x2d3a4a : hostile ? 0x3d4a42 : [0xef9a9a, 0x90caf9, 0xfff59d, 0xa5d6a7, 0xce93d8, 0xffcc80][Math.floor(Math.random() * 6)];
-  const pants = friendly ? 0x232b36 : hostile ? 0x2c343a : [0x546e7a, 0x6d4c41, 0x37474f][Math.floor(Math.random() * 3)];
+  const shirt = friendly ? (black ? 0x16191c : 0x2d3a4a)
+    : hostile ? OD_SHIRT[Math.floor(Math.random() * OD_SHIRT.length)]
+      : [0xef9a9a, 0x90caf9, 0xfff59d, 0xa5d6a7, 0xce93d8, 0xffcc80][Math.floor(Math.random() * 6)];
+  const pants = friendly ? (black ? 0x121417 : 0x232b36)
+    : hostile ? OD_PANTS[Math.floor(Math.random() * OD_PANTS.length)]
+      : [0x546e7a, 0x6d4c41, 0x37474f][Math.floor(Math.random() * 3)];
   const boots = armed ? 0x15181b : 0x3e2723;
 
   // hips + torso (slight taper: chest wider than waist)
@@ -163,9 +174,18 @@ export function makeCharacter({ hostile, hostage, friendly }) {
   g.add(limb(0.34, 0.3, 0.2, shirt, 0, 1.13, 0));
   g.add(limb(0.4, 0.3, 0.22, shirt, 0, 1.4, 0));       // chest
   if (armed) {
-    g.add(limb(0.42, 0.26, 0.26, friendly ? 0x1b3560 : 0x9c2b2b, 0, 1.38, 0)); // chest rig
-    g.add(limb(0.14, 0.1, 0.28, 0x1c1f22, -0.1, 1.24, 0.02)); // mag pouches
-    g.add(limb(0.14, 0.1, 0.28, 0x1c1f22, 0.1, 1.24, 0.02));
+    const rig = friendly ? (black ? 0x0d0f11 : 0x1b3560) : 0x3f4529;   // olive webbing
+    g.add(limb(0.42, 0.26, 0.26, rig, 0, 1.38, 0));                    // chest rig
+    g.add(limb(0.14, 0.1, 0.28, armed && !friendly ? 0x2f3520 : 0x1c1f22, -0.1, 1.24, 0.02)); // mag pouches
+    g.add(limb(0.14, 0.1, 0.28, armed && !friendly ? 0x2f3520 : 0x1c1f22, 0.1, 1.24, 0.02));
+  }
+  if (hostile) {
+    // Olive drab is correct for what these men are, but it cost the silhouette its single
+    // strongest hostile tell (the old red chest rig) at exactly the moment identification
+    // matters most. A red armband and helmet rag put that cue back — and irregular forces
+    // really do mark themselves this way, so it costs nothing in plausibility.
+    g.add(limb(0.13, 0.11, 0.135, 0x8f2622, -0.265, 1.33, 0));
+    g.add(limb(0.135, 0.11, 0.13, 0x8f2622, 0.265, 1.33, 0));
   }
   if (friendly) {
     g.add(accent(0.2, 0.05, 0.02, 0x38e8ff, 0, 1.48, 0.135));   // chest IFF panel
@@ -181,9 +201,11 @@ export function makeCharacter({ hostile, hostage, friendly }) {
   headG.add(limb(0.22, 0.24, 0.24, headColor, 0, 0.06, 0));
   // eyes (a strip for the kitted-up; two dots for civilians)
   if (armed) {
+    const lid = friendly ? (black ? 0x141719 : 0x22303f) : 0x424a2c;   // olive helmet
     headG.add(limb(0.18, 0.05, 0.02, skin, 0, 0.09, 0.125));
-    headG.add(limb(0.26, 0.1, 0.27, friendly ? 0x22303f : 0x2e3438, 0, 0.2, 0)); // helmet
-    headG.add(limb(0.26, 0.05, 0.1, friendly ? 0x22303f : 0x2e3438, 0, 0.14, -0.1));
+    headG.add(limb(0.26, 0.1, 0.27, lid, 0, 0.2, 0)); // helmet
+    headG.add(limb(0.26, 0.05, 0.1, lid, 0, 0.14, -0.1));
+    if (hostile) headG.add(limb(0.27, 0.045, 0.28, 0x8f2622, 0, 0.155, 0)); // red helmet rag
     // Cat-eye strip on the back of the helmet: the real-world marking that exists for exactly
     // this problem, and it means a squadmate is identifiable from directly behind too.
     if (friendly) headG.add(accent(0.14, 0.03, 0.02, 0x38e8ff, 0, 0.22, -0.13));

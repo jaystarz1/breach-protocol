@@ -24,16 +24,25 @@ const SLOTS = [[-2.0, 2.6], [2.0, 2.6], [-3.4, 4.4], [3.4, 4.4]];
 
 export const CALLSIGNS = ['BRAVO-2', 'BRAVO-3', 'BRAVO-4', 'BRAVO-5'];
 
+export const CT_CALLSIGNS = ['ALPHA-1', 'ALPHA-2', 'ALPHA-3', 'ALPHA-4'];
+
 export class Ally {
-  constructor(scene, pos, idx) {
-    this.mesh = makeCharacter({ friendly: true });
+  constructor(scene, pos, idx, opts = {}) {
+    this.mesh = makeCharacter({ friendly: true, black: !!opts.black });
     this.mesh.position.set(pos[0], pos[1], pos[2]);
     scene.add(this.mesh);
     this.idx = idx;
-    this.name = CALLSIGNS[idx % CALLSIGNS.length];
+    this.ct = !!opts.black;
+    this.name = (opts.black ? CT_CALLSIGNS : CALLSIGNS)[idx % CALLSIGNS.length];
     this.slot = SLOTS[idx % SLOTS.length];
-    this.health = 140;
-    this.maxHealth = 140;
+    // A route makes this man an independent element working to his own plan rather than a
+    // shadow of the player. Needed for the sniper mission, where the player is locked to a
+    // parapet 90m away and "follow him" would mean standing still on a roof forever.
+    this.route = opts.route || null;
+    this.routeIdx = 0;
+    this.routeOff = opts.routeOff || [0, 0];
+    this.health = opts.health ?? 140;
+    this.maxHealth = this.health;
     this.dead = false;
     this.deathAnim = 0;
     this.yaw = 0;
@@ -106,6 +115,17 @@ export class Ally {
       if (Math.abs(vx * uz - vz * ux) < 1.4) return false;   // perpendicular distance
     }
     return true;
+  }
+
+  // Closest hostage still tied up, within reach of the objective area.
+  nearestBound(world) {
+    let best = null, bestD = 14;
+    for (const c of world.civilians) {
+      if (!c.hostage || c.dead || c.rescued) continue;
+      const d = Math.hypot(c.pos.x - this.pos.x, c.pos.z - this.pos.z);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
   }
 
   setPath(world, tx, ty, tz) {
@@ -221,7 +241,17 @@ export class Ally {
       // Regroup beats engage. An ally that keeps trading shots while the player walks two
       // rooms away is not a squad, and "too far" has to include a floor difference or a man
       // left upstairs will happily shoot down the stairwell forever.
-      if (leash > 16 || leashY > 1.6) this.goTo(dt, world, pp.x, pp.y, pp.z, this.speed);
+      //
+      // A route element is exempt: it answers to its own plan, and on the sniper mission the
+      // player is locked on a rooftop 90m away, so "regroup on him" would freeze the assault.
+      if (this.route) {
+        const wp = this.route[Math.min(this.routeIdx, this.route.length - 1)];
+        const tx = wp[0] + this.routeOff[0], tz = wp[1] + this.routeOff[1];
+        // keep pushing unless the contact is close enough to be worth stopping for
+        if (dist > 26 && Math.hypot(tx - p.x, tz - p.z) > 2.4) this.goTo(dt, world, tx, p.y, tz, this.speed * 0.55);
+        else if (this.strafeTimer <= 0) { this.strafeTimer = 1.4 + Math.random() * 1.8; this.strafeDir *= -1; }
+      }
+      else if (leash > 16 || leashY > 1.6) this.goTo(dt, world, pp.x, pp.y, pp.z, this.speed);
       else if (dist > 22) this.goTo(dt, world, t.pos.x, t.pos.y, t.pos.z, this.speed * 0.7);
       else if (this.strafeTimer <= 0) { this.strafeTimer = 1.4 + Math.random() * 1.8; this.strafeDir *= -1; }
       else if (dist > 8) {
@@ -232,6 +262,28 @@ export class Ally {
       // Face the contact regardless of what the feet are doing.
       this.yaw = lerpAng(this.yaw, Math.atan2(t.pos.x - p.x, t.pos.z - p.z), Math.min(1, dt * 8));
       this.shoot(dt, world, t, dist);
+    } else if (this.route) {
+      // Working his own route. Each man carries a small lateral offset so a four-man element
+      // moves as a spread line rather than a single-file conga.
+      const last = this.routeIdx >= this.route.length - 1;
+      const wp = this.route[Math.min(this.routeIdx, this.route.length - 1)];
+      const tx = wp[0] + this.routeOff[0], tz = wp[1] + this.routeOff[1];
+      // Mid-route a loose arrival is fine and keeps the element moving. On the FINAL leg it
+      // is not: stopping 2.4m short of the objective puts the hostages out of arm's reach and
+      // the mission simply never completes.
+      const arrive = last ? 1.0 : 2.4;
+      if (Math.hypot(tx - p.x, tz - p.z) < arrive) {
+        if (!last) { this.routeIdx++; this.path = null; }
+        else {
+          // At the objective: go and physically get whoever is still tied up. Depending on
+          // hostages happening to fall inside a fixed radius of a fixed stopping point is how
+          // you ship a rescue mission that cannot be completed.
+          const h = this.nearestBound(world);
+          if (h) this.goTo(dt, world, h.pos.x, p.y, h.pos.z, this.speed * 0.7);
+        }
+      } else {
+        this.goTo(dt, world, tx, p.y, tz, this.speed * 0.8);
+      }
     } else {
       // no contact: hold the formation slot, rotated into the player's frame
       const c = Math.cos(world.playerYaw || 0), s = Math.sin(world.playerYaw || 0);
@@ -257,6 +309,7 @@ export class Ally {
   // push is applied after the AI has decided where it wants to be, so it overrides the
   // formation logic rather than fighting it.
   yieldToPlayer(dt, world) {
+    if (this.route) return;                      // independent element, not in his pocket
     const p = this.pos, pp = world.playerPos;
     if (Math.abs(pp.y - p.y) > 1.6) return;      // different floor, not in the way
     const dx = p.x - pp.x, dz = p.z - pp.z;
@@ -352,6 +405,21 @@ export function spawnSquad(scene, count, start, solids) {
     const z = start[2] - (oz * c - ox * s);
     const g = groundHeight(solids, x, z, 0.35, start[1] + 1.2);
     out.push(new Ally(scene, [x, g === -Infinity ? start[1] : g, z], i));
+  }
+  return out;
+}
+
+// A CT element in black that works a route instead of following the player. Spread in a
+// shallow wedge so the player can tell four men apart through a scope at a hundred metres.
+const WEDGE = [[-1.6, 1.2], [1.6, 1.2], [-3.2, 3.0], [3.2, 3.0]];
+export function spawnRouteTeam(scene, count, at, route, solids, health = 180) {
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const off = WEDGE[i % WEDGE.length];
+    const x = at[0] + off[0], z = at[2] + off[1];
+    const g = groundHeight(solids, x, z, 0.35, at[1] + 1.2);
+    out.push(new Ally(scene, [x, g === -Infinity ? at[1] : g, z], i,
+      { black: true, route, routeOff: off, health }));
   }
   return out;
 }
