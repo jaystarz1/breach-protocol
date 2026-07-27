@@ -117,7 +117,7 @@ export class Ally {
     const p = this.pos;
     let best = null, bestD = Infinity;
     for (const e of world.enemies) {
-      if (e.dead) continue;
+      if (e.dead || e.exposed === false) continue;   // not on the glass, not a target
       const d = Math.hypot(e.pos.x - p.x, e.pos.y - p.y, e.pos.z - p.z);
       if (d > 48 || d >= bestD) continue;
       if (!hasLOS(world.solids, p.x, p.y + EYE, p.z, e.pos.x, e.pos.y + 1.2, e.pos.z)) continue;
@@ -271,7 +271,7 @@ export class Ally {
       const stacking = !!world.stackDoor;
       const table = stacking ? STACK : SLOTS;
       const off = table[this.idx % table.length];
-      const sl = slotWorld(pp.x, pp.z, world.playerYaw || 0, off);
+      const sl = slotWorld(pp.x, pp.z, world.squadHeading ?? world.playerYaw ?? 0, off);
       const sx = sl.x, sz = sl.z;
       const slotD = Math.hypot(sx - p.x, sz - p.z);
       const stepOff = Math.abs(pp.y - p.y) > 1.6;
@@ -402,7 +402,9 @@ export class Ally {
     if (this.route || this.dead) return;
     const p = this.pos, pp = world.playerPos;
     if (Math.abs(pp.y - p.y) > 2.0) return;         // different floor: not "in front" of anything
-    const yaw = world.playerYaw || 0;
+    // Travel heading, not look direction: clamping against where he happens to be LOOKING
+    // would shove the whole squad across the floor every time he glanced over his shoulder.
+    const yaw = world.squadHeading ?? world.playerYaw ?? 0;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw); // Player.forward() convention
     const along = (p.x - pp.x) * fx + (p.z - pp.z) * fz;
     const LIMIT = -0.35;                            // stay at least this far behind his shoulder

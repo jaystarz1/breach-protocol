@@ -65,6 +65,30 @@ export class Enemy {
     this.hvt = !!def.hvt;
     this.escapes = !!def.escapes;   // only a runner with somewhere to go can get away
     this.tag = def.tag || null;     // scripted-event grouping, e.g. which room this man holds
+    // Counter-sniper: instead of walking a patrol he occupies one of a fixed set of window
+    // perches, shoots, and drops out of sight before you can range him — then shows up in a
+    // different window. He is the only hostile you have to FIND rather than merely hit.
+    this.perches = def.perches || null;
+    this.exposed = !this.perches;   // ordinary hostiles are always a valid target
+    this.perchIdx = -1;
+    this.peekTimer = def.firstPeek ?? (2 + Math.random() * 3);
+    this.dmgMul = def.dmgMul ?? 1;
+    this.accMul = def.accMul ?? 1;
+    if (this.perches) {
+      this.mesh.visible = false;
+      // Scope glint: the tell that gives the player a fair chance to spot him. Unlit and
+      // additive so it is a pinpoint of light at 150m rather than a shaded grey box.
+      const glint = new THREE.Mesh(
+        new THREE.SphereGeometry(0.09, 6, 5),
+        new THREE.MeshBasicMaterial({
+          color: 0xfff0c0, transparent: true, opacity: 0.9,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        })
+      );
+      glint.position.set(0, 1.55, 0.3);
+      this.mesh.add(glint);
+      this.glint = glint;
+    }
   }
 
   get pos() { return this.mesh.position; }
@@ -184,7 +208,61 @@ export class Enemy {
     return best ? best.pos : world.playerPos;
   }
 
+  // Peek / shoot / vanish. No pathing, no gravity, no ground snap: he is standing in a window
+  // opening several metres up a solid facade, and settle() would drop him straight to street
+  // level the first frame.
+  updateSniper(dt, world) {
+    if (this.dead) {
+      if (this.glint) this.glint.visible = false;
+      if (this.deathAnim < 1) {
+        this.deathAnim = Math.min(1, this.deathAnim + dt * 3);
+        this.mesh.rotation.x = -Math.PI / 2 * this.deathAnim;
+      }
+      return;
+    }
+    this.peekTimer -= dt;
+    this.flinch = Math.max(0, this.flinch - dt * 3);
+
+    if (!this.exposed) {
+      if (this.peekTimer > 0) return;
+      // Never the same window twice running — the whole point is that you cannot pre-aim.
+      let i = this.perchIdx;
+      for (let n = 0; n < 8 && i === this.perchIdx; n++) i = Math.floor(Math.random() * this.perches.length);
+      this.perchIdx = i;
+      const p = this.perches[i];
+      this.pos.set(p[0], p[1], p[2]);
+      this.exposed = true;
+      this.mesh.visible = true;
+      if (this.glint) this.glint.visible = true;
+      // Exposure window, then he is gone whether or not he got his shot away.
+      this.peekTimer = 4.5 + Math.random() * 3;
+      // A beat before the first round: this is the window the player has to react in.
+      this.reactTimer = 1.3;
+      this.burstShots = 0;
+      this.burstTimer = 0.6;
+      return;
+    }
+
+    // Exposed: track whoever he is shooting at and work them.
+    const t = this.pickTarget(world);
+    const dx = t.x - this.pos.x, dz = t.z - this.pos.z;
+    this.yaw = lerpAng(this.yaw, Math.atan2(dx, dz), Math.min(1, dt * 4));
+    this.mesh.rotation.y = this.yaw;
+    animateRig(this.mesh, this.walkPhase, false, this.flinch);
+    this.reactTimer -= dt;
+    const dist = Math.hypot(dx, t.y - this.pos.y, dz);
+    if (this.reactTimer <= 0) this.doShoot(dt, world, dist, t);
+
+    if (this.peekTimer <= 0) {
+      this.exposed = false;
+      this.mesh.visible = false;
+      if (this.glint) this.glint.visible = false;
+      this.peekTimer = 3.5 + Math.random() * 4;   // time off the glass
+    }
+  }
+
   update(dt, world) {
+    if (this.perches) { this.updateSniper(dt, world); return; }
     if (this.dead) {
       if (this.deathAnim < 1) {
         this.deathAnim = Math.min(1, this.deathAnim + dt * 3);
@@ -407,7 +485,7 @@ export class Enemy {
     sfx.enemyShot(this.pos);
     world.enemyFlash(this.pos);
     world.enemyTracer(this, target);
-    let acc = this.diff.enemyAccuracy * Math.min(1, 18 / Math.max(6, dist));
+    let acc = this.diff.enemyAccuracy * this.accMul * Math.min(1, 18 / Math.max(6, dist));
     // The player's movement/stance modifiers must NOT apply when the round is aimed at a
     // squadmate: crouching would make an ally forty metres away harder to hit.
     if (!this.tgtAlly) {
@@ -417,8 +495,8 @@ export class Enemy {
     }
     if (Math.random() < acc) {
       if (world.sniperTeam && !world.sniperTeam.dead) world.damageTeam(this.diff.enemyDamage);
-      else if (this.tgtAlly && !this.tgtAlly.dead) this.tgtAlly.damage(this.diff.enemyDamage, world);
-      else world.damagePlayer(this.diff.enemyDamage, this.pos);
+      else if (this.tgtAlly && !this.tgtAlly.dead) this.tgtAlly.damage(this.diff.enemyDamage * this.dmgMul, world);
+      else world.damagePlayer(this.diff.enemyDamage * this.dmgMul, this.pos);
     }
   }
 }

@@ -221,7 +221,11 @@ function startLevel(id) {
   scene = new THREE.Scene();
   // built before the lights because the sun's shadow frustum is fitted to these bounds
   takeLights();   // drop anything a stray L.geo() call left behind
+  // Levels register flashing lights by pushing onto this while building their geometry.
+  const levelBeacons = [];
+  window.__bpBeacons = levelBeacons;
   const geo = [...L.geo(), ...(L.extraGeo ? L.extraGeo() : [])];
+  window.__bpBeacons = null;
   const roomLights = takeLights();
   scene.background = new THREE.Color(L.sky);
   scene.fog = new THREE.Fog(L.fog[0], L.fog[1], L.fog[2]);
@@ -326,6 +330,24 @@ function startLevel(id) {
   }
 
   const { solids, litMesh } = buildStaticGeometry(scene, geo);
+
+  // Emergency beacons. These cannot ride in the merged static mesh — that whole design is one
+  // draw call precisely because nothing in it animates — so each lens is its own tiny unlit
+  // quad plus a point light, driven by a persistent effect below.
+  const beaconLights = [];
+  for (const b of (levelBeacons || [])) {
+    const warm = b.hue === 'red' ? 0xff2d24 : 0x2d6bff;
+    const lens = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.16, 0.62),
+      new THREE.MeshBasicMaterial({ color: warm, transparent: true, opacity: 0.25 })
+    );
+    lens.position.set(b.pos[0], b.pos[1], b.pos[2]);
+    scene.add(lens);
+    const pl = new THREE.PointLight(warm, 0, 18, 2);
+    pl.position.set(b.pos[0], b.pos[1] + 0.25, b.pos[2]);
+    scene.add(pl);
+    beaconLights.push({ lens, pl, red: b.hue === 'red' });
+  }
 
   // navigation mesh: without this the AI can only walk in straight lines.
   // Built BEFORE doors are added as solids, so a doorway stays routable once breached —
@@ -498,6 +520,25 @@ function startLevel(id) {
     input.ads = false;
   }
 
+  // Alternating red/blue with a double-blink on each side: the rhythm is what makes it read
+  // as an emergency light rather than a lamp on a timer. Returns false forever, so it lives
+  // for the level; world.effects is rebuilt per level so it cannot leak.
+  if (beaconLights.length) {
+    let bt = 0;
+    world.effects.push(dt => {
+      bt += dt;
+      const phase = bt % 1.1;
+      const redOn = phase < 0.09 || (phase > 0.16 && phase < 0.25);
+      const blueOn = phase > 0.55 && (phase < 0.64 || (phase > 0.71 && phase < 0.8));
+      for (const b of beaconLights) {
+        const on = b.red ? redOn : blueOn;
+        b.pl.intensity = on ? 16 : 0;
+        b.lens.material.opacity = on ? 1 : 0.22;
+      }
+      return false;
+    });
+  }
+
   weapons.onFire = onPlayerShot;
 
   hud.screen(null);
@@ -613,7 +654,7 @@ function objectiveWatchdog(dt) {
   }
   if (world.markers) {
     for (const { m, e } of world.markers) {
-      m.visible = !e.dead;
+      m.visible = !e.dead && e.exposed !== false;
       m.position.set(e.pos.x, e.pos.y + 2.2, e.pos.z);
       m.rotation.y += dt * 3;
     }
@@ -668,7 +709,9 @@ function onPlayerShot(spread) {
   // nearest actor hit — head sphere is a one-shot kill on any weapon
   let hitEnemy = null, hitCiv = null, hitAlly = null, hitDist = wallDist, headshot = false;
   for (const e of world.enemies) {
-    if (e.dead) continue;
+    // exposed===false is the counter-sniper between peeks: he is not in the window, so there
+    // is nothing there to hit. Without this you could kill him through a wall by memory.
+    if (e.dead || e.exposed === false) continue;
     const tHead = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, e.pos.x, e.pos.y + 1.66, e.pos.z, 0.34);
     const tBody = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, e.pos.x, e.pos.y + 1.0, e.pos.z, 0.55);
     const t = Math.min(tHead, tBody);
@@ -950,6 +993,19 @@ function frame() {
   world.playerSpeed = player.moveSpeed;
   world.playerAds = input.ads;
   world.playerYaw = player.yaw;
+  // The formation anchors to the direction the player is TRAVELLING, not to where his head is
+  // pointed. Anchoring it to the look direction meant the squad orbited him every time he
+  // turned around, so they were permanently out of shot and he felt alone — turn to check on
+  // your men and they have already scurried behind you again. Real men hold their ground when
+  // the lead turns his head. Lerped rather than snapped so a change of direction walks them
+  // round instead of teleporting them.
+  if (world.squadHeading === undefined) world.squadHeading = player.yaw;
+  if (world.playerSpeed > 1.2) {
+    let d = player.yaw - world.squadHeading;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    world.squadHeading += d * Math.min(1, dt * 3);
+  }
   world.playerCrouched = player.crouch > 0.5;
   if (input.nvgPressed) setNvg(!nvgOn);
   updateListener(camera.position, player.yaw, player.pitch);

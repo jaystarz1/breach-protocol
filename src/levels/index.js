@@ -1,4 +1,4 @@
-import { C, floorSlab, wall, stairs, crate, car } from '../levelgen.js';
+import { C, floorSlab, wall, stairs, crate, car, policeCar } from '../levelgen.js';
 import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
@@ -291,6 +291,10 @@ export const LEVELS = [
       g.push(...bench(-13.2, 26, true), ...bench(13.2, 8, true));
       // street clutter
       g.push(...car(-4, 25)); g.push(...car(3, 5, true)); g.push(...car(-2, -18)); g.push(...car(5, -35, true));
+      // First responders got here before you did. The light bar is the only moving light in
+      // the level and it does a lot of work on a static night street.
+      g.push(...policeCar(-6, 33, false, window.__bpBeacons));
+      g.push(...policeCar(6, -28, true, window.__bpBeacons));
       g.push(...crate(0, 12), ...crate(1.2, 12.8), ...crate(-6, -8));
       // end barricade
       g.push(...wall(-16, -50, 16, -50, 3, C.metal, [{ off: 13, w: 6, h: 2.6 }]));
@@ -483,7 +487,7 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 6
   {
     id: 6, name: 'OVERWATCH',
-    brief: 'Barrett M82 on the rooftop. Your assault team is pinned at the fountain while hostiles advance across the plaza. Hold breath to steady. Civilians are still fleeing the square — a .50 does not give second chances.',
+    brief: 'Barrett M82 on the rooftop. An assault element in black is crossing the plaza on foot to cut three hostages loose — they live or die on your marksmanship. Hold breath to steady. Civilians are still fleeing the square, and they have a shooter working the windows across the way: watch for the glint. A .50 does not give second chances.',
     weapons: ['barrett'], grenades: 0, sniper: true, lockPlayer: true,
     sky: 0x1a2432, fog: [0x1a2432, 120, 500], ambient: 0.9, sun: 1.2,
     start: [0, 24, 61.2, 0],
@@ -564,6 +568,16 @@ export const LEVELS = [
       { pos: [-10, 0, -96], patrol: [[-14, -50], [-3, -32]], aggro: true, range: 200 },
       { pos: [10, 0, -96], patrol: [[18, -60], [8, -30]], aggro: true, range: 200 },
       { pos: [22, 0, -93], patrol: [[28, -64], [20, -42]], aggro: true, range: 200 },
+      // Counter-sniper. He never walks: he occupies a window, takes his shot and drops out of
+      // sight, then turns up in a different one. Perch heights match the facade() window rows
+      // (panes sit at y = 1.95 / 4.95 / 7.95 / 10.95) and the z/x values put him just proud of
+      // each building face so he is genuinely visible and genuinely shootable while up.
+      { pos: [-44, 4.95, -79.4], range: 260, dmgMul: 2.6, accMul: 2.2, firstPeek: 14,
+        perches: [
+          [-50, 4.95, -79.4], [-44, 7.95, -79.4], [-34, 4.95, -79.4], [-29, 7.95, -79.4],
+          [29, 4.95, -79.4], [36, 7.95, -79.4], [48, 4.95, -79.4],
+          [-14, 7.95, -99.4], [-2, 4.95, -99.4], [12, 7.95, -99.4],
+        ] },
     ],
     civilians: [
       // Hostages the assault team is going in for. Prone the moment shooting starts.
@@ -580,7 +594,7 @@ export const LEVELS = [
       at: [[-44, 0, -78], [44, 0, -78], [4, 0, -98]] },
     objectives: [
       { type: 'rescue', text: 'COVER THE ASSAULT TEAM — THEY ARE GOING IN FOR THE HOSTAGES' },
-      { type: 'clear', zone: null, text: 'FINISH THE REMAINING HOSTILES' },
+      { type: 'clear', zone: null, text: 'FINISH THEM — WATCH THE WINDOWS, THEY HAVE A SHOOTER UP THERE' },
     ],
   },
 

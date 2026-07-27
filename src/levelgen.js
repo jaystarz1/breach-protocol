@@ -420,10 +420,72 @@ export function crate(x, z, y = 0, s = 1.0) {
   return [[x, y + s / 2, z, s, s, s, C.crate]];
 }
 
-export function car(x, z, rotZAxis = false) {
-  // simple parked car: body + cabin
-  const body = rotZAxis ? [x, 0.45, z, 1.8, 0.9, 4.2] : [x, 0.45, z, 4.2, 0.9, 1.8];
-  const cab = rotZAxis ? [x, 1.15, z, 1.6, 0.55, 2.0] : [x, 1.15, z, 2.0, 0.55, 1.6];
-  const col = [0x7a2e2e, 0x2e4a7a, 0x666666, 0x3f5c3f][Math.floor(Math.random() * 4)];
-  return [[...body, col], [...cab, col]];
+// A parked car. Two boxes read as a shoebox with a smaller shoebox on it; what actually makes
+// the shape say "car" is the stuff around the edges — wheels under the arches, a glasshouse
+// inset from the body sides, bumpers proud of the panels, and lights at both ends.
+//
+// `l` is a length-wise offset helper and `w` a width-wise one, so the whole thing is authored
+// once in car-local terms and mapped onto whichever world axis the car is parked along.
+const CAR_COLORS = [0x6e2a2a, 0x27406b, 0x5a5f63, 0x37503a, 0x6b5a2a, 0x2f2f33];
+
+export function car(x, z, rotZAxis = false, color = null, opts = {}) {
+  const col = color ?? CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
+  const glass = opts.glass ?? 0x141b22;
+  const trim = 0x1b1f23;
+  const out = [];
+  // (along, across, y, lenAlong, h, lenAcross) in car-local space -> world box
+  const B = (a, c, y, la, h, lc, colour, solid = false) => out.push(rotZAxis
+    ? [x + c, y, z + a, lc, h, la, colour, solid]
+    : [x + a, y, z + c, la, h, lc, colour, solid]);
+
+  B(0, 0, 0.62, 4.3, 0.62, 1.82, col, true);            // main body, the only solid part
+  B(0.15, 0, 1.16, 2.25, 0.5, 1.66, col);               // greenhouse, inset from the sides
+  B(0.15, 0, 1.19, 2.05, 0.44, 1.72, glass);            // side glass band, proud of the pillars
+  B(-0.98, 0, 1.16, 0.1, 0.44, 1.6, glass);             // windscreen
+  B(1.3, 0, 1.16, 0.1, 0.4, 1.56, glass);               // rear screen
+  B(0.15, 0, 1.42, 2.1, 0.06, 1.6, col);                // roof panel
+  B(-1.45, 0, 0.5, 0.55, 0.34, 1.78, col);              // bonnet step
+  B(1.55, 0, 0.55, 0.5, 0.4, 1.78, col);                // boot step
+  // wheels: four dark blocks tucked under the arches, the single biggest "this is a car" cue
+  for (const a of [-1.35, 1.35]) for (const c of [-0.86, 0.86]) {
+    B(a, c, 0.34, 0.78, 0.66, 0.22, 0x15181b);
+    B(a, c, 0.34, 0.34, 0.3, 0.24, 0x4a5158);           // hub
+  }
+  B(-2.13, 0, 0.58, 0.16, 0.32, 1.7, trim);             // front bumper
+  B(2.13, 0, 0.58, 0.16, 0.32, 1.7, trim);              // rear bumper
+  for (const c of [-0.62, 0.62]) {
+    B(-2.1, c, 0.78, 0.12, 0.2, 0.42, 0xdfe4dc, false); // headlights
+    B(2.12, c, 0.8, 0.1, 0.18, 0.4, 0x7a2320, false);   // tail lights
+  }
+  B(0.15, -0.92, 0.95, 1.9, 0.06, 0.06, trim);          // side rubbing strips
+  B(0.15, 0.92, 0.95, 1.9, 0.06, 0.06, trim);
+  return out;
+}
+
+// Marked unit. Same shell, black-and-white livery, push bar, and a light bar whose lenses are
+// registered as animated beacons — the flashing itself cannot live in the merged static mesh,
+// so world.js collects the positions and main.js drives real lights over them.
+export function policeCar(x, z, rotZAxis = false, beacons = null) {
+  const out = car(x, z, rotZAxis, 0x1b1e22, { glass: 0x10161c });
+  const B = (a, c, y, la, h, lc, colour) => out.push(rotZAxis
+    ? [x + c, y, z + a, lc, h, la, colour, false]
+    : [x + a, y, z + c, la, h, lc, colour, false]);
+  // white doors and roof over the dark shell
+  B(0.15, -0.93, 0.66, 2.5, 0.5, 0.04, 0xe8ecef);
+  B(0.15, 0.93, 0.66, 2.5, 0.5, 0.04, 0xe8ecef);
+  B(0.15, 0, 1.46, 2.0, 0.04, 1.5, 0xe8ecef);
+  B(-2.28, 0, 0.72, 0.14, 0.62, 1.5, 0x3a4147);          // push bar
+  B(-2.28, -0.5, 0.95, 0.2, 0.9, 0.1, 0x3a4147);
+  B(-2.28, 0.5, 0.95, 0.2, 0.9, 0.1, 0x3a4147);
+  // Light bar: a low plinth with the lenses sitting ON TOP of it. The first version made the
+  // housing a 0.16m-tall box and put the lenses at its centre height, which buried them inside
+  // it — the lights were driving correctly the whole time and nothing was visible.
+  B(0.1, 0, 1.5, 0.3, 0.08, 1.45, 0x24282c);             // plinth
+  B(0.1, 0, 1.62, 0.26, 0.15, 0.34, 0x2a2f34);           // centre divider between the halves
+  if (beacons) {
+    // lens centres, in world space, tagged with which half of the bar they are
+    beacons.push({ pos: rotZAxis ? [x - 0.52, 1.62, z + 0.1] : [x + 0.1, 1.62, z - 0.52], hue: 'red' });
+    beacons.push({ pos: rotZAxis ? [x + 0.52, 1.62, z + 0.1] : [x + 0.1, 1.62, z + 0.52], hue: 'blue' });
+  }
+  return out;
 }
