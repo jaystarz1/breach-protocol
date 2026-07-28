@@ -338,7 +338,7 @@ export class Civilian {
     if (moved < s * dt * 0.35) this.panicTimer = 0;
     this.mesh.rotation.y = this.panicDir;
     this.walkPhase += s * dt * 5.5;
-    animateRig(this.mesh, this.walkPhase, true);
+    animateRig(this.mesh, this.walkPhase, true, 0, true);
     const g = groundHeight(world.solids, p.x, p.z, 0.25, p.y + 0.75);
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.baseY = p.y;

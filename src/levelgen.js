@@ -8,6 +8,7 @@ import {
   createAuthoredCharacter,
   createCivilianCharacter,
   kneelAuthoredCharacter,
+  poseAuthoredCivilianPanic,
   releaseAuthoredHostage,
   stopAuthoredCharacter,
 } from './character-assets.js';
@@ -564,11 +565,12 @@ export function revealWeaponRig(g) {
 
 // Walk cycle plus hit reaction. phase advances with distance moved; flinch is 0..~0.32s
 // remaining, which jerks the upper body back so bullets visibly land.
-export function animateRig(g, phase, moving, flinch = 0) {
+export function animateRig(g, phase, moving, flinch = 0, panic = false) {
   const r = g.userData.rig;
   if (!r) return;
   if (r.authored) {
     animateAuthoredCharacter(g, moving, flinch);
+    if (panic) poseAuthoredCivilianPanic(g, phase);
     return;
   }
   const swing = moving ? Math.sin(phase) * 0.55 : 0;

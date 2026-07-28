@@ -48,6 +48,28 @@ def main():
             signatures.append(market_signature())
 
         page.screenshot(path=str(output / "market-covert.png"))
+        page.evaluate(
+            """() => {
+              BP.player.pos.set(0, 0, 27);
+              const subject = BP.world.civilians.reduce((best, civilian) =>
+                Math.hypot(civilian.pos.x, civilian.pos.z - 24)
+                  < Math.hypot(best.pos.x, best.pos.z - 24) ? civilian : best);
+              subject.mesh.rotation.y = Math.PI / 2;
+              const target = { x: 0, y: 1.15, z: 24 };
+              BP.player.yaw = Math.atan2(
+                -(target.x - BP.player.pos.x), -(target.z - BP.player.pos.z));
+              BP.player.pitch = Math.atan2(
+                target.y - 1.6,
+                Math.hypot(target.x - BP.player.pos.x, target.z - BP.player.pos.z));
+            }"""
+        )
+        page.wait_for_timeout(180)
+        page.screenshot(path=str(output / "market-civilian-close.png"))
+        page.evaluate("""() => {
+          BP.player.pos.set(0, 0, 34);
+          BP.player.yaw = 0;
+          BP.player.pitch = 0;
+        }""")
         reaction = page.evaluate(
             """() => {
               const before = BP.world.civilians.map(c => ({ x: c.pos.x, z: c.pos.z }));
@@ -68,18 +90,37 @@ def main():
                       c.pos.z - before[i].z
                     ) > 0.3
                   ).length,
+                panicPosed: BP.world.civilians.filter(c =>
+                  !!c.mesh.userData.rig?.panicBones).length,
+                panicStyles: [...new Set(BP.world.civilians.map(c =>
+                  c.mesh.userData.rig?.panicStyle).filter(Number.isFinite))].sort(),
+                bodyScales: [...new Set(BP.world.civilians.map(c => {
+                  const scale = c.mesh.userData.rig?.bodyScale;
+                  return scale ? `${scale.height}:${scale.width}` : null;
+                }).filter(Boolean))].sort(),
               };
             }"""
         )
         rig_coverage = page.evaluate(
             """() => BP.world.civilians.reduce((coverage, civilian) => {
               const rig = civilian.mesh.userData.rig;
+              const skin = rig?.mergedSkin;
+              const countMask = name => {
+                const values = skin?.geometry?.attributes?.[name]?.array;
+                return values ? Array.from(values).filter(value => value > 0.5).length : 0;
+              };
               const key = String(rig?.civilianSource);
               coverage[key] ||= {
                 authored: !!rig?.authored,
                 hasIdle: !!rig?.actions?.idle,
                 hasWalk: !!rig?.actions?.walk,
                 hasRun: !!rig?.actions?.run,
+                material: skin?.material?.name,
+                fabricVertices: countMask('fabricMask'),
+                skinVertices: countMask('skinMask'),
+                hairVertices: countMask('hairMask'),
+                fabricNormal: !!skin?.material?.normalMap,
+                fabricRoughness: !!skin?.material?.roughnessMap,
               };
               return coverage;
             }, {})"""
@@ -210,7 +251,8 @@ def main():
             "civilianDeath": civilian_death,
             "escort": escort,
             "screenshots": [
-                "market-covert.png", "market-contact.png", "market-stall-close.png"
+                "market-covert.png", "market-civilian-close.png",
+                "market-contact.png", "market-stall-close.png"
             ],
             "errors": errors[:8],
         }
@@ -222,6 +264,9 @@ def main():
         assert reaction["crossers"] > 0
         assert reaction["panicked"] >= reaction["total"] - 2
         assert reaction["moved"] >= reaction["total"] - 2
+        assert reaction["panicPosed"] == reaction["total"]
+        assert reaction["panicStyles"] == [0, 1, 2]
+        assert len(reaction["bodyScales"]) == 6
         expected_market_art = {
             "stall-counter-tops": 16,
             "stall-counter-aprons": 32,
@@ -269,6 +314,15 @@ def main():
         assert sorted(rig_coverage.keys()) == ["0", "1", "2"]
         assert all(
             rig["authored"] and rig["hasIdle"] and rig["hasWalk"] and rig["hasRun"]
+            for rig in rig_coverage.values()
+        )
+        assert all(
+            rig["material"] == "civilian-layered-surface"
+            and rig["fabricVertices"] > 0
+            and rig["skinVertices"] > 0
+            and rig["hairVertices"] > 0
+            and rig["fabricNormal"]
+            and rig["fabricRoughness"]
             for rig in rig_coverage.values()
         )
         assert reveal and not reveal["concealed"] and reveal["state"] == "alert"

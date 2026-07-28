@@ -78,6 +78,10 @@ const factionMaterials = new Map();
 const CIVILIAN_PANTS = [0x29333d, 0x31382f, 0x40382f, 0x283345, 0x373a33, 0x37352d];
 const CIVILIAN_TOPS = [0x43505a, 0x4a584c, 0x5e5042, 0x38475a, 0x545044, 0x4f463b];
 const CIVILIAN_SHOES = [0x24282b, 0x302924, 0x232a30, 0x362b27, 0x27282a, 0x312f2b];
+const CIVILIAN_SKIN = [0xc18c70, 0x9f6f55, 0xd0a083, 0x7f5945, 0xb47d61, 0xd6ad92];
+const CIVILIAN_HAIR = [0x2a201a, 0x4a3527, 0x756044, 0x191919, 0x5d4030, 0x9a835f];
+const CIVILIAN_HEIGHT = [0.97, 1.025, 0.99, 1.045, 0.955, 1.01];
+const CIVILIAN_WIDTH = [0.94, 1.035, 0.98, 1.07, 0.965, 1.01];
 function factionMaterial(original, faction, silhouette, objectName = '') {
   if (silhouette) {
     const key = `silhouette:${original.uuid}`;
@@ -99,7 +103,13 @@ function factionMaterial(original, faction, silhouette, objectName = '') {
       // Preserve anatomical materials. Only clothes are recolored, by garment rather than
       // globally, so a variant retains skin, hair, eyes and brows instead of becoming a
       // monochrome faction pawn.
-      if (!/(skin|eye|eyebrow|hair)/.test(label)) {
+      if (label.includes('skin')) {
+        out.color.set(CIVILIAN_SKIN[variant % CIVILIAN_SKIN.length]);
+        out.roughness = 0.62;
+      } else if (/(hair|eyebrow|brow)/.test(label)) {
+        out.color.set(CIVILIAN_HAIR[variant % CIVILIAN_HAIR.length]);
+        out.roughness = 0.5;
+      } else if (!label.includes('eye')) {
         if (/(feet|shoe|sock)/.test(label)) tint = CIVILIAN_SHOES[variant % CIVILIAN_SHOES.length];
         else if (/(legs|pants|trouser)/.test(label)) tint = CIVILIAN_PANTS[variant % CIVILIAN_PANTS.length];
         else tint = CIVILIAN_TOPS[variant % CIVILIAN_TOPS.length];
@@ -127,7 +137,10 @@ function factionMaterial(original, faction, silhouette, objectName = '') {
       out.color.set(tint);
     }
   }
-  if (!/(visor)/i.test(`${objectName} ${original.name || ''}`)) {
+  const finalLabel = `${objectName} ${original.name || ''}`.toLowerCase();
+  const civilianAnatomy = faction.startsWith('civilian-')
+    && /(skin|hair|eyebrow|brow)/.test(finalLabel);
+  if (!finalLabel.includes('visor') && !civilianAnatomy) {
     out.roughness = Math.max(0.78, out.roughness ?? 0.84);
     out.metalness = Math.min(0.06, out.metalness ?? 0);
   }
@@ -137,10 +150,56 @@ function factionMaterial(original, faction, silhouette, objectName = '') {
 
 const mergedCivilianGeometries = new Map();
 const MERGED_CIVILIAN_MATERIAL = new THREE.MeshStandardMaterial({
+  name: 'civilian-layered-surface',
   vertexColors: true,
   roughness: 0.86,
   metalness: 0.01,
+  normalMap: combatantFabricNormal,
+  normalScale: new THREE.Vector2(0.24, 0.24),
+  roughnessMap: combatantFabricRoughness,
 });
+MERGED_CIVILIAN_MATERIAL.onBeforeCompile = shader => {
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      '#include <common>',
+      `#include <common>
+attribute float fabricMask;
+attribute float skinMask;
+attribute float hairMask;
+varying float vFabricMask;
+varying float vSkinMask;
+varying float vHairMask;`,
+    )
+    .replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+vFabricMask = fabricMask;
+vSkinMask = skinMask;
+vHairMask = hairMask;`,
+    );
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      '#include <common>',
+      `#include <common>
+varying float vFabricMask;
+varying float vSkinMask;
+varying float vHairMask;`,
+    )
+    .replace(
+      '#include <roughnessmap_fragment>',
+      `#include <roughnessmap_fragment>
+roughnessFactor = mix(0.72, roughnessFactor, vFabricMask);
+roughnessFactor = mix(roughnessFactor, 0.62, vSkinMask);
+roughnessFactor = mix(roughnessFactor, 0.5, vHairMask);`,
+    )
+    .replace(
+      '#include <normal_fragment_maps>',
+      `vec3 bpBaseNormal = normal;
+#include <normal_fragment_maps>
+normal = normalize(mix(bpBaseNormal, normal, vFabricMask));`,
+    );
+};
+MERGED_CIVILIAN_MATERIAL.customProgramCacheKey = () => 'bp-civilian-surface-v1';
 const MERGED_COMBATANT_MATERIAL = new THREE.MeshStandardMaterial({
   name: 'combatant-scanned-fabric',
   vertexColors: true,
@@ -199,14 +258,21 @@ function bakeVertexColor(geometry, material, surfaceRoles = false) {
   const count = geometry.attributes.position.count;
   const values = new Float32Array(count * 3);
   const fabricValues = surfaceRoles ? new Float32Array(count) : null;
-  const visorValues = surfaceRoles ? new Float32Array(count) : null;
+  const visorValues = surfaceRoles === 'combatant' ? new Float32Array(count) : null;
+  const skinValues = surfaceRoles === 'civilian' ? new Float32Array(count) : null;
+  const hairValues = surfaceRoles === 'civilian' ? new Float32Array(count) : null;
   const fill = (start, length, source) => {
     const color = source?.color || new THREE.Color(0xffffff);
     const label = source?.name?.toLowerCase() || '';
-    const fabric = label.includes('skin') || label.includes('visor')
-      ? 0
-      : label.includes('black') ? 0.38 : 1;
-    const visor = label.includes('visor') ? 1 : 0;
+    const skin = surfaceRoles === 'civilian' && label.includes('skin') ? 1 : 0;
+    const hair = surfaceRoles === 'civilian'
+      && /(hair|eyebrow|brow)/.test(label) ? 1 : 0;
+    const fabric = surfaceRoles === 'civilian'
+      ? (/(skin|eye|hair|eyebrow|brow)/.test(label) ? 0 : 1)
+      : (label.includes('skin') || label.includes('visor')
+        ? 0
+        : label.includes('black') ? 0.38 : 1);
+    const visor = surfaceRoles === 'combatant' && label.includes('visor') ? 1 : 0;
     const end = Math.min(count, start + length);
     for (let i = start; i < end; i++) {
       values[i * 3] = color.r;
@@ -214,7 +280,9 @@ function bakeVertexColor(geometry, material, surfaceRoles = false) {
       values[i * 3 + 2] = color.b;
       if (surfaceRoles) {
         fabricValues[i] = fabric;
-        visorValues[i] = visor;
+        if (visorValues) visorValues[i] = visor;
+        if (skinValues) skinValues[i] = skin;
+        if (hairValues) hairValues[i] = hair;
       }
     }
   };
@@ -228,7 +296,13 @@ function bakeVertexColor(geometry, material, surfaceRoles = false) {
   geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
   if (surfaceRoles) {
     geometry.setAttribute('fabricMask', new THREE.BufferAttribute(fabricValues, 1));
-    geometry.setAttribute('visorMask', new THREE.BufferAttribute(visorValues, 1));
+    if (visorValues) {
+      geometry.setAttribute('visorMask', new THREE.BufferAttribute(visorValues, 1));
+    }
+    if (skinValues) {
+      geometry.setAttribute('skinMask', new THREE.BufferAttribute(skinValues, 1));
+      geometry.setAttribute('hairMask', new THREE.BufferAttribute(hairValues, 1));
+    }
   }
 }
 
@@ -306,7 +380,7 @@ function mergeCivilianVisual(visual, cacheKey, {
             geometry.deleteAttribute(name);
           }
         }
-        bakeVertexColor(geometry, piece.material, !civilian);
+        bakeVertexColor(geometry, piece.material, civilian ? 'civilian' : 'combatant');
         geometries.push(geometry);
       }
       const geometry = mergeGeometries(geometries, false);
@@ -736,8 +810,14 @@ export function createCivilianCharacter({
     : civilianSources[Math.abs(sequence) % civilianSources.length];
   const visual = cloneSkeleton(source.scene);
   const faction = `civilian-${variant}`;
-  visual.scale.setScalar(source.scale);
-  visual.position.y = -source.floor * source.scale;
+  const heightScale = CIVILIAN_HEIGHT[variant];
+  const widthScale = CIVILIAN_WIDTH[variant];
+  visual.scale.set(
+    source.scale * widthScale,
+    source.scale * heightScale,
+    source.scale * (0.98 + (widthScale - 1) * 0.45),
+  );
+  visual.position.y = -source.floor * source.scale * heightScale;
   visual.traverse(object => {
     if (!object.isMesh) return;
     object.castShadow = object.receiveShadow = quality.shadows;
@@ -783,6 +863,8 @@ export function createCivilianCharacter({
     friendly: false,
     civilian: true,
     civilianSource: sourceIndex,
+    panicStyle: Math.abs(sequence) % 3,
+    bodyScale: { height: heightScale, width: widthScale },
     mergedSkin,
     concealed,
     hostage,
@@ -818,6 +900,45 @@ export function animateAuthoredCharacter(root, moving, flinch = 0) {
   rig.visual.rotation.x = -hit * 0.12;
   rig.visual.rotation.z = hit * 0.07;
   root.userData.bob = 0;
+}
+
+export function poseAuthoredCivilianPanic(root, phase = 0) {
+  const rig = root.userData.rig;
+  if (!rig?.authored || !rig.civilian || rig.hostage) return false;
+  if (!rig.panicBones) {
+    const node = name => findRigObject(rig.visual, name);
+    rig.panicBones = {
+      upperL: node('UpperArm.L'), lowerL: node('LowerArm.L'), wristL: node('Wrist.L'),
+      upperR: node('UpperArm.R'), lowerR: node('LowerArm.R'), wristR: node('Wrist.R'),
+      head: node('Head'),
+    };
+  }
+  const b = rig.panicBones;
+  const pulse = Math.sin(phase * 0.62);
+  const style = rig.panicStyle || 0;
+  const arms = style === 0
+    ? {
+      left: [[-0.38, 1.43, 0.12], [-0.2, 1.62 + pulse * 0.025, 0.18]],
+      right: [[0.38, 1.43, 0.12], [0.2, 1.62 - pulse * 0.025, 0.18]],
+    }
+    : style === 1
+      ? {
+        left: [[-0.42, 1.34, 0.17], [-0.34, 1.52 + pulse * 0.035, 0.27]],
+        right: [[0.42, 1.34, 0.17], [0.34, 1.52 - pulse * 0.035, 0.27]],
+      }
+      : {
+        left: [[-0.38, 1.42, 0.12], [-0.17, 1.6 + pulse * 0.03, 0.19]],
+        right: [[0.44, 1.22, 0.12], [0.5, 1.38 - pulse * 0.04, 0.31]],
+      };
+  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(...arms.left[0]));
+  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(...arms.left[1]));
+  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(...arms.right[0]));
+  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(...arms.right[1]));
+  if (b.head) {
+    b.head.rotation.y += pulse * 0.08;
+    b.head.rotation.z += (style - 1) * 0.035;
+  }
+  return true;
 }
 
 export function releaseAuthoredHostage(root) {
