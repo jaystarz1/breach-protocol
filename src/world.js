@@ -270,7 +270,7 @@ export function facade(x1, z1, x2, z2, yBase, height, seed, opts = {}) {
     window.__bpVisualProps.push({
       kind: 'facade', x1, z1, x2, z2, yBase, height, seed,
       away: opts.away, out: opts.out, step: opts.step, floorH: opts.floorH,
-      lit: opts.lit, skip: opts.skip,
+      lit: opts.lit, skip: opts.skip, damage: opts.damage,
     });
     return [];
   }

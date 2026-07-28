@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v34-authored-hostages';
+const CACHE = 'breach-protocol-v35-degraded-facades';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

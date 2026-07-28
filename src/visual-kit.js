@@ -169,6 +169,18 @@ const SHARD_GEO = (() => {
   geometry.computeVertexNormals();
   return geometry;
 })();
+const FACADE_SCAR_GEO = (() => {
+  const points = [
+    [-0.68, -0.18], [-0.5, -0.54], [-0.08, -0.72], [0.3, -0.56],
+    [0.71, -0.2], [0.58, 0.18], [0.31, 0.62], [-0.1, 0.74],
+    [-0.51, 0.48], [-0.76, 0.11],
+  ];
+  const shape = new THREE.Shape();
+  shape.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) shape.lineTo(points[i][0], points[i][1]);
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
+})();
 const DRAIN_GEO = new THREE.CylinderGeometry(0.055, 0.065, 1, 8);
 const AC_FAN_GEO = new THREE.CylinderGeometry(0.22, 0.22, 0.035, 12);
 const ROOF_CAP_GEO = (() => {
@@ -386,6 +398,9 @@ function addFacade(batcher, def) {
   const floorH = def.floorH ?? 3;
   const step = def.step ?? 3;
   const litChance = def.lit ?? 0.34;
+  // This district has been on the contact line for weeks. A mostly pristine repeated grid
+  // reads as an office-park generator even when the masonry beneath it is excellent.
+  const damageChance = def.damage ?? 0.42;
   const warmRoom = material('window-room-warm', () => new THREE.MeshStandardMaterial({
     color: 0xffbd78, emissive: 0xffbd78, emissiveIntensity: 0.18, roughness: 0.92,
   }));
@@ -404,6 +419,10 @@ function addFacade(batcher, def) {
   const blindMat = standard('blind', 0xb9ae9d, 0.9, 0);
   const boardMat = standard('window-boards', 0x5a4533, 0.94, 0);
   const brokenMat = standard('window-void', 0x030506, 1, 0);
+  const sootMat = material('facade-soot', () => new THREE.MeshBasicMaterial({
+    color: 0x0a0b0b, transparent: true, opacity: 0.66,
+    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
+  }));
   const shardMat = material('window-shards', () => new THREE.MeshPhysicalMaterial({
     color: 0x7892a1, roughness: 0.18, metalness: 0.08,
     transparent: true, opacity: 0.58, side: THREE.DoubleSide,
@@ -457,39 +476,64 @@ function addFacade(batcher, def) {
         new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
         new THREE.Vector3(1, 1, 1),
       );
-      const lit = R() < litChance;
+      const damageRoll = R();
+      const destroyed = damageRoll < damageChance * 0.38;
+      const boarded = !destroyed && damageRoll < damageChance * 0.68;
+      const cracked = !destroyed && !boarded && damageRoll < damageChance;
+      const lit = !destroyed && !boarded && R() < litChance;
       const warm = R() < 0.72;
-      const damaged = R();
       const roomMat = lit ? (warm ? warmRoom : coolRoom) : recessMat;
-      const paneMat = damaged < 0.18 ? brokenMat : (lit ? (warm ? warmPane : coolPane) : glassDark);
+      const paneMat = destroyed || boarded
+        ? brokenMat
+        : (lit ? (warm ? warmPane : coolPane) : glassDark);
       batcher.add(
         lit ? (warm ? 'recess-warm' : 'recess-cool') : 'recess-dark',
         UNIT_BOX, roomMat, instanceMatrix(parent, 0, 0, -0.12, 1.96, 1.74, 0.18));
-      batcher.add(
-        lit ? (warm ? 'pane-warm' : 'pane-cool') : 'pane-dark',
-        UNIT_PLANE, paneMat, instanceMatrix(parent, 0, 0, 0.025, 1.68, 1.45, 1));
-      for (const [w, h, x, y] of [
+      if (!boarded) {
+        batcher.add(
+          lit ? (warm ? 'pane-warm' : 'pane-cool') : 'pane-dark',
+          UNIT_PLANE, paneMat, instanceMatrix(parent, 0, 0, 0.025, 1.68, 1.45, 1));
+      }
+      const frameParts = [
         [1.98, 0.09, 0, -0.81], [1.98, 0.09, 0, 0.81],
         [0.09, 1.7, -0.94, 0], [0.09, 1.7, 0.94, 0],
-        [0.065, 1.52, 0, 0], [1.78, 0.055, 0, 0.18],
-      ]) {
+      ];
+      if (!destroyed && !boarded) {
+        const frameStyle = Math.floor(R() * 3);
+        if (frameStyle !== 1) frameParts.push([0.065, 1.52, 0, 0]);
+        if (frameStyle !== 2) frameParts.push([1.78, 0.055, 0, frameStyle ? 0 : 0.18]);
+      }
+      for (const [w, h, x, y] of frameParts) {
         batcher.add('window-frames', UNIT_BOX, frameMat,
           instanceMatrix(parent, x, y, 0.08, w, h, 0.09));
       }
       batcher.add('window-sills', UNIT_BOX, sillMat,
         instanceMatrix(parent, 0, -0.88, 0.1, 2.16, 0.11, 0.32));
-      if (damaged < 0.09) {
-        for (const offset of [-0.36, 0.36]) {
+      if (boarded) {
+        for (const [offset, angle] of [[-0.42, 0.1], [0, -0.06], [0.42, 0.14]]) {
           batcher.add('window-boards', UNIT_BOX, boardMat,
             instanceMatrix(parent, 0, offset, 0.14, 1.88, 0.14, 0.09,
-              0, 0, offset < 0 ? 0.13 : -0.09));
+              0, 0, angle));
         }
-      } else if (damaged < 0.18) {
+      } else if (destroyed || cracked) {
         for (const [x, y, rz, sx] of [
           [-0.54, -0.45, 0.18, 0.55], [0.5, -0.52, -0.12, 0.62], [0.56, 0.45, 0.2, 0.42],
         ]) {
+          if (cracked && x > 0) continue;
           batcher.add('window-shards', SHARD_GEO, shardMat,
             instanceMatrix(parent, x, y, 0.13, sx, 0.48, 1, 0, 0, rz));
+        }
+        if (destroyed) {
+          // One bent mullion and a soot bloom stop a blown opening from reading as the same
+          // pristine kit with its glass material merely switched to black.
+          batcher.add('window-bent-frames', UNIT_BOX, frameMat,
+            instanceMatrix(parent, -0.2, 0.12, 0.13, 0.065, 1.28, 0.09,
+              0, 0, -0.24));
+          if (R() < 0.74) {
+            batcher.add('facade-soot', FACADE_SCAR_GEO, sootMat,
+              instanceMatrix(parent, R() * 0.34 - 0.17, 0.95, 0.012,
+                1.15 + R() * 0.5, 0.82 + R() * 0.46, 1, 0, 0, R() * 0.4 - 0.2));
+          }
         }
       } else if (lit && R() < 0.58) {
         const partial = R() < 0.5;
