@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from '../lib/GLTFLoader.js';
 import { clone as cloneSkeleton } from '../lib/SkeletonUtils.js';
+import { mergeGeometries } from '../lib/BufferGeometryUtils.js';
 import { quality } from './quality.js';
 
 let soldierSource = null;
@@ -79,6 +80,94 @@ function factionMaterial(original, faction, silhouette, objectName = '') {
   out.metalness = Math.min(0.08, out.metalness ?? 0);
   factionMaterials.set(key, out);
   return out;
+}
+
+const mergedCivilianGeometries = new Map();
+const MERGED_CIVILIAN_MATERIAL = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.86,
+  metalness: 0.01,
+});
+
+function bakeVertexColor(geometry, material) {
+  const source = Array.isArray(material) ? material[0] : material;
+  const color = source?.color || new THREE.Color(0xffffff);
+  const count = geometry.attributes.position.count;
+  const values = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    values[i * 3] = color.r;
+    values[i * 3 + 1] = color.g;
+    values[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+}
+
+// Quaternius' civilians are authored as 7–10 skinned garment/anatomy pieces that all use
+// the same skeleton and transform. They animate correctly but each piece is a draw call:
+// twenty people in the market cost 163 draws before props, enemies or the squad. Bake each
+// piece's flat material colour into vertices and merge the compatible skin streams. The
+// silhouette, bones and clips remain untouched; a crowd member becomes one skinned draw.
+function mergeCivilianVisual(visual, cacheKey) {
+  visual.updateMatrixWorld(true);
+  const pieces = [];
+  visual.traverse(object => {
+    if (object.isSkinnedMesh && object.geometry?.attributes?.skinIndex
+      && object.geometry?.attributes?.skinWeight) pieces.push(object);
+  });
+  if (pieces.length < 2) return null;
+
+  const first = pieces[0];
+  const boneNames = first.skeleton.bones.map(bone => bone.name).join('|');
+  if (!pieces.every(piece =>
+    piece.skeleton.bones.map(bone => bone.name).join('|') === boneNames)) return null;
+
+  let cached = mergedCivilianGeometries.get(cacheKey);
+  if (!cached) {
+    const geometries = [];
+    try {
+      for (const piece of pieces) {
+        const geometry = piece.geometry.index
+          ? piece.geometry.toNonIndexed()
+          : piece.geometry.clone();
+        // Keep one stable attribute contract across the three source models. Extra exporter
+        // UV channels are irrelevant because these CC0 characters use flat material colours.
+        for (const name of Object.keys(geometry.attributes)) {
+          if (!['position', 'normal', 'uv', 'skinIndex', 'skinWeight'].includes(name)) {
+            geometry.deleteAttribute(name);
+          }
+        }
+        bakeVertexColor(geometry, piece.material);
+        geometries.push(geometry);
+      }
+      const geometry = mergeGeometries(geometries, false);
+      for (const source of geometries) source.dispose();
+      if (!geometry) return null;
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
+      cached = { geometry, sourceMeshes: pieces.length };
+      mergedCivilianGeometries.set(cacheKey, cached);
+    } catch (error) {
+      for (const geometry of geometries) geometry.dispose();
+      console.warn('[bp] civilian skin merge unavailable; keeping source meshes', error);
+      return null;
+    }
+  }
+
+  // Although the exported pieces live below different named groups, their final transform
+  // relative to `visual` is identical. Recreate that transform once on the merged skin.
+  const relative = visual.matrixWorld.clone().invert().multiply(first.matrixWorld);
+  const merged = new THREE.SkinnedMesh(cached.geometry, MERGED_CIVILIAN_MATERIAL);
+  relative.decompose(merged.position, merged.quaternion, merged.scale);
+  merged.bindMode = first.bindMode;
+  merged.bind(first.skeleton, first.bindMatrix);
+  merged.name = 'civilian-merged-skinned';
+  merged.castShadow = merged.receiveShadow = quality.shadows;
+  merged.frustumCulled = false;
+  merged.userData.mergedCivilian = true;
+  merged.userData.sourceMeshes = cached.sourceMeshes;
+  for (const piece of pieces) piece.parent?.remove(piece);
+  visual.add(merged);
+  return merged;
 }
 
 function mergedBoxGeometry(parts) {
@@ -330,6 +419,8 @@ export function createCivilianCharacter({
         object.material, faction, false, `${object.name}:${object.material?.name || ''}`);
     }
   });
+  const sourceIndex = civilianSources.indexOf(source);
+  const mergedSkin = mergeCivilianVisual(visual, `${sourceIndex}:${variant}`);
   root.add(visual);
 
   // Concealed shooters use this exact civilian presentation—same source model, palette and
@@ -370,7 +461,8 @@ export function createCivilianCharacter({
     hostile: false,
     friendly: false,
     civilian: true,
-    civilianSource: civilianSources.indexOf(source),
+    civilianSource: sourceIndex,
+    mergedSkin,
     concealed,
     hostage,
     baseVisualY: visual.position.y,
