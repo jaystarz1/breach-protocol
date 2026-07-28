@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v21-visual';
+const CACHE = 'breach-protocol-v23-frontline';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js',
@@ -7,6 +7,8 @@ const ASSETS = [
   'src/levelgen.js', 'src/difficulty.js', 'src/save.js', 'src/levels/index.js', 'src/navgrid.js',
   'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js', 'src/street-sweep-art.js',
   'src/visual-kit.js',
+  'src/frontline-art.js',
+  'src/drone.js',
   'src/campaign.js', 'src/renderer/capabilities.js', 'src/renderer/render-pipeline.js',
   'src/renderer/telemetry.js',
   'assets/street-sweep/asphalt.jpg', 'assets/street-sweep/asphalt-height.jpg',

@@ -441,19 +441,16 @@ export class Grenade {
 }
 
 export function explosionEffect(scene, pos) {
-  const light = new THREE.PointLight(0xffaa44, 8, 25);
-  light.position.copy(pos); light.position.y += 0.5;
-  scene.add(light);
   const ball = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffbb55, transparent: true, opacity: 0.9 }));
-  ball.position.copy(light.position);
+  ball.position.copy(pos);
+  ball.position.y += 0.5;
   scene.add(ball);
   let age = 0;
   return function update(dt) {
     age += dt;
     ball.scale.setScalar(1 + age * 14);
     ball.material.opacity = Math.max(0, 0.9 - age * 2.2);
-    light.intensity = Math.max(0, 8 - age * 20);
-    if (age > 0.5) { scene.remove(ball, light); ball.geometry.dispose(); return true; }
+    if (age > 0.5) { scene.remove(ball); ball.geometry.dispose(); ball.material.dispose(); return true; }
     return false;
   };
 }

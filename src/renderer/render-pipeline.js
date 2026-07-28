@@ -12,12 +12,14 @@ export function createRenderPipeline(canvas, settings) {
   renderer.shadowMap.enabled = settings.shadows;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.info.autoReset = false;
 
   const telemetry = createTelemetry(settings.rendererMode);
   let target = null;
   let postScene = null;
   let postCamera = null;
   let postMaterial = null;
+  let lastRender = { calls: 0, triangles: 0, lines: 0, points: 0 };
 
   if (settings.desktop) {
     target = new THREE.WebGLRenderTarget(1, 1, {
@@ -99,6 +101,7 @@ export function createRenderPipeline(canvas, settings) {
       }
     },
     render(scene, camera) {
+      renderer.info.reset();
       if (target) {
         renderer.setRenderTarget(target);
         renderer.render(scene, camera);
@@ -108,7 +111,50 @@ export function createRenderPipeline(canvas, settings) {
       } else {
         renderer.render(scene, camera);
       }
-      telemetry.frame(renderer);
+      lastRender = {
+        calls: renderer.info.render.calls,
+        triangles: renderer.info.render.triangles,
+        lines: renderer.info.render.lines,
+        points: renderer.info.render.points,
+      };
+      telemetry.frame(renderer, lastRender);
+    },
+    async prewarm(scene, camera) {
+      const started = performance.now();
+      const before = renderer.info.programs?.length || 0;
+      const previousTarget = renderer.getRenderTarget();
+      try {
+        if (target) renderer.setRenderTarget(target);
+        if (typeof renderer.compileAsync === 'function') await renderer.compileAsync(scene, camera);
+        else renderer.compile(scene, camera);
+        // compileAsync does not force shadow-map and render-target variants on every browser.
+        // One off-screen real render closes that gap before control is handed to the player.
+        renderer.render(scene, camera);
+      } catch {
+        try { renderer.compile(scene, camera); } catch { /* gameplay may still continue */ }
+      } finally {
+        renderer.setRenderTarget(previousTarget);
+      }
+      const after = renderer.info.programs?.length || 0;
+      telemetry.resetPrograms(renderer);
+      return {
+        ok: true,
+        ms: +(performance.now() - started).toFixed(1),
+        programsBefore: before,
+        programsAfter: after,
+        compiled: after - before,
+        parallel: !!renderer.getContext().getExtension('KHR_parallel_shader_compile'),
+      };
+    },
+    performanceSnapshot() {
+      const gl = renderer.getContext();
+      return {
+        ...telemetry.snapshot(renderer),
+        render: { ...lastRender },
+        drawingBuffer: [gl.drawingBufferWidth, gl.drawingBufferHeight],
+        megapixels: +((gl.drawingBufferWidth * gl.drawingBufferHeight) / 1e6).toFixed(2),
+        pixelRatio: renderer.getPixelRatio(),
+      };
     },
     dispose() {
       telemetry.dispose();

@@ -18,9 +18,11 @@ import { environment, environmentFrom } from './textures.js';
 import { skyDome, groundPlate, skyline, takeLights } from './world.js';
 import { spawnSquad, spawnRouteTeam } from './squad.js';
 import { addStreetSweepArt } from './street-sweep-art.js';
+import { addFrontlineAmbientArt, addFrontlineStreetArt } from './frontline-art.js';
 import { addVisualProps } from './visual-kit.js';
 import { createRenderPipeline } from './renderer/render-pipeline.js';
 import { CAMPAIGN, briefingText, campaignSnapshot } from './campaign.js';
+import { DroneController } from './drone.js';
 
 const $ = id => document.getElementById(id);
 
@@ -55,6 +57,7 @@ let player = null;
 let weapons = null;
 let currentLevel = 1;
 const missionRuns = new Uint16Array(11);
+let levelLoadId = 0;
 let flashlight = null;
 let lastTime = performance.now();
 // Goggles are player-controlled equipment now, not a level property, so the lights they swap
@@ -215,6 +218,11 @@ function killPower() {
 }
 
 function startLevel(id) {
+  if (world?.drone) {
+    world.drone.dispose();
+    world.drone = null;
+  }
+  const loadId = ++levelLoadId;
   currentLevel = id;
   const L = LEVELS[id - 1];
   const diff = DIFFICULTIES[S.difficulty];
@@ -338,7 +346,11 @@ function startLevel(id) {
 
   const { solids, litMesh } = buildStaticGeometry(scene, geo);
   addVisualProps(scene, visualProps);
-  if (L.id === 2) addStreetSweepArt(scene);
+  if (!indoor) addFrontlineAmbientArt(scene, L.id, bounds);
+  if (L.id === 2) {
+    addStreetSweepArt(scene);
+    addFrontlineStreetArt(scene);
+  }
 
   // Emergency beacons. These cannot ride in the merged static mesh — that whole design is one
   // draw call precisely because nothing in it animates — so each lens is its own tiny unlit
@@ -416,10 +428,7 @@ function startLevel(id) {
     // Friendly muzzle flash and tracers are BLUE-white, not the hostiles' orange. In a dark
     // firefight the colour of the tracer is how you know which direction is a threat.
     allyFlash(pos) {
-      const l = new THREE.PointLight(0xcfe4ff, 2.2, 9);
-      l.position.set(pos.x, pos.y + 1.4, pos.z);
-      scene.add(l);
-      this.effects.push((dt) => { l.intensity -= dt * 25; if (l.intensity <= 0) { scene.remove(l); return true; } return false; });
+      flashAt(pos, 0xcfe4ff);
     },
     allyTracer(a, t) {
       const from = new THREE.Vector3(a.pos.x, a.pos.y + 1.35, a.pos.z);
@@ -448,10 +457,7 @@ function startLevel(id) {
       }
     },
     enemyFlash(pos) {
-      const l = new THREE.PointLight(0xffcc66, 2.5, 10);
-      l.position.set(pos.x, pos.y + 1.4, pos.z);
-      scene.add(l);
-      this.effects.push((dt) => { l.intensity -= dt * 25; if (l.intensity <= 0) { scene.remove(l); return true; } return false; });
+      flashAt(pos, 0xffa640);
     },
     // incoming rounds you can SEE, so a firefight reads as directional
     enemyTracer(e, target) {
@@ -566,9 +572,16 @@ function startLevel(id) {
   hud.swapBtn(L.weapons.length > 1);
   hud.breathBtn(!!L.sniper);
   hud.health(player.health, player.maxHealth);
-  setObjective();
-  mode = 'playing';
-  sfx.objective();
+  mode = 'loading';
+  hud.objective('PREPARING TACTICAL SHADERS…');
+  const warmWorld = world;
+  renderPipeline.prewarm(scene, camera).then(result => {
+    if (loadId !== levelLoadId || world !== warmWorld) return;
+    world.prewarm = result;
+    setObjective();
+    mode = 'playing';
+    sfx.objective();
+  });
 }
 
 function setObjective() {
@@ -580,6 +593,11 @@ function setObjective() {
   if (world.objMarkers) { for (const m of world.objMarkers) scene.remove(m); world.objMarkers = []; }
   // beacon at reach zones: glowing column visible through walls
   if (world.beacon) { scene.remove(world.beacon); world.beacon = null; }
+  if (world.drone && !world.drone.complete) {
+    world.drone.dispose();
+    world.drone = null;
+    player.locked = !!world.level.lockPlayer;
+  }
   // Hostiles are identified by sight, behavior and weapon presentation—not supernatural UI.
   // Rescue markers remain a navigation aid, but are depth-tested and LOS-gated below.
   if (obj && obj.type === 'rescue') {
@@ -596,6 +614,12 @@ function setObjective() {
     col.renderOrder = 999;
     scene.add(col);
     world.beacon = col;
+  } else if (obj && obj.type === 'drone') {
+    player.locked = true;
+    world.drone = new DroneController(scene, camera, obj, () => {
+      if (!world?.drone) return;
+      world.drone.complete = true;
+    });
   }
 }
 
@@ -804,14 +828,30 @@ function tracer(a, b, color = 0xffe0a0, fade = 4, opacity = 0.85) {
   world.effects.push(dt => { line.material.opacity -= dt * fade; if (line.material.opacity <= 0) { scene.remove(line); g.dispose(); return true; } return false; });
 }
 
+const COMBAT_FLASH_GEO = new THREE.SphereGeometry(0.13, 8, 6);
+function flashAt(p, color) {
+  const mat = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.88,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const flash = new THREE.Mesh(COMBAT_FLASH_GEO, mat);
+  flash.position.set(p.x, p.y + 1.4, p.z);
+  scene.add(flash);
+  world.effects.push(dt => {
+    mat.opacity -= dt * 12;
+    flash.scale.addScalar(dt * 3.5);
+    if (mat.opacity > 0) return false;
+    scene.remove(flash);
+    mat.dispose();
+    return true;
+  });
+}
+
 // bullet strike on geometry: spark flash + sound, so misses read too
 function impactAt(p) {
   sfx.impact(p);
   if (Math.random() < 0.35) sfx.ricochet(p);
-  const spark = new THREE.PointLight(0xffd090, 1.6, 3.5);
-  spark.position.copy(p);
-  scene.add(spark);
-  world.effects.push(dt => { spark.intensity -= dt * 14; if (spark.intensity <= 0) { scene.remove(spark); return true; } return false; });
+  flashAt({ x: p.x, y: p.y - 1.4, z: p.z }, 0xffd090);
 }
 
 function civilianKilled(civ) {
@@ -898,8 +938,15 @@ function checkObjectives() {
     const [zx, zz, zr, zy] = obj.zone;
     const dy = zy !== undefined ? Math.abs(player.pos.y - zy) : 0;
     done = Math.hypot(player.pos.x - zx, player.pos.z - zz) < zr && dy < 2.5;
+  } else if (obj.type === 'drone') {
+    done = !!world.drone?.complete;
   }
   if (done) {
+    if (obj.type === 'drone' && world.drone) {
+      world.drone.dispose();
+      world.drone = null;
+      player.locked = !!world.level.lockPlayer;
+    }
     world.objectiveIdx++;
     sfx.objective();
     if (world.objectiveIdx >= world.level.objectives.length) winMission();
@@ -938,6 +985,10 @@ function failMission(reason) {
 }
 
 function showDebrief(won, g, t, acc, timeBonus, reason) {
+  if (world?.drone) {
+    world.drone.dispose();
+    world.drone = null;
+  }
   setTimeout(() => {
     mode = 'debrief';
     stopAmbient();
@@ -998,6 +1049,14 @@ function frame() {
   world.combatHeat = Math.max(0, world.combatHeat - sdt);
   swayPhase += dt * (input.breath ? 0.25 : 1);
   resetPathBudget();
+
+  if (world.drone?.active) {
+    world.drone.update(dt, input, world.solids);
+    checkObjectives();
+    renderPipeline.render(scene, camera);
+    clearEdges();
+    return;
+  }
 
   // flashbang blindness decays
   if (world.blind > 0) {
@@ -1231,6 +1290,7 @@ window.BP = {
   get weapons() { return weapons; },
   get mode() { return mode; },
   get rendererMode() { return renderPipeline.mode; },
+  get performance() { return renderPipeline.performanceSnapshot(); },
   startLevel, LEVELS, S, input,
   CAMPAIGN,
   get campaign() { return campaignSnapshot(currentLevel, S); },

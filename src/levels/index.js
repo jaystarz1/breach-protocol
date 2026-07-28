@@ -147,8 +147,8 @@ const GROUND = (w = 200, d = 200, color = C.street) => floorSlab(0, 0, w, d, 0, 
 export const LEVELS = [
   // ---------------------------------------------------------------- 1
   {
-    id: 1, name: 'FIRST DOOR',
-    brief: 'Kill-house shakedown. Clear three rooms. Armed targets only — anyone with their hands up walks out alive. Pistol discipline: controlled pairs. Instructors will cut the lights partway through: goggles are on your helmet, press N.',
+    id: 1, name: 'FORWARD COMMAND',
+    brief: 'A Vektor command post has taken direct fire during a readiness drill. Clear the three connected rooms and identify the infiltrators who carried BASTION’s launch-corridor map. Armed targets only; anyone with hands up walks out. The backup circuit may fail, so keep night vision ready.',
     weapons: ['pistol'], grenades: 0, squad: 1,
     sky: 0x27313d, fog: [0x27313d, 40, 130], ambient: 0.95, sun: 1.25,
     // roofed kill-house: the sun never reaches the rooms, so let the ceiling strips light them
@@ -255,7 +255,7 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 2
   {
     id: 2, name: 'STREET SWEEP',
-    brief: 'Night sweep through an occupied block. Hostiles hold the storefronts and the street. M4 authorized. Civilians are still on the block — check your targets.',
+    brief: 'A shell-damaged main street is the battery and warhead corridor for Observation Post Alpha. Russian assault troops hold the storefronts, civilians remain trapped on the block, and a direction-finding team is listening for drone-control traffic. Clear the route, then reach the launch table at the southern barricade.',
     weapons: ['pistol', 'm4'], grenades: 0, squad: 2,
     sky: 0x1b2634, fog: [0x1b2634, 40, 160], ambient: 0.85, sun: 1.1,
     start: [0, 0, 40, 0],
@@ -335,14 +335,22 @@ export const LEVELS = [
       at: [[0, 0, 50], [-8, 0, -46], [8, 0, -46]] },
     objectives: [
       { type: 'clear', zone: null, text: 'SWEEP THE BLOCK — ELIMINATE ALL HOSTILES' },
+      { type: 'reach', zone: [-11.2, -41.6, 3], text: 'ESTABLISH OBSERVATION POST ALPHA' },
+      {
+        type: 'drone',
+        text: 'RECON EASTERN APPROACHES — MARK THREE ASSAULT ROUTES',
+        launch: [-11.2, 1.25, -41.6],
+        yaw: Math.PI,
+        targets: [[-5, 0.1, -32], [8, 0.1, -19], [-9, 0.1, -5]],
+      },
       { type: 'reach', zone: [0, -52, 3], text: 'PUSH THROUGH THE BARRICADE' },
     ],
   },
 
   // ---------------------------------------------------------------- 3
   {
-    id: 3, name: 'STACK UP',
-    brief: 'Apartment block, three floors, hostiles holding hostages on each. Flashbangs are the tool here: bang the room, then enter. Walk up to a bound hostage to cut them loose. A dead hostage ends the op.',
+    id: 3, name: 'OP ALPHA',
+    brief: 'The apartment block above OP Alpha is being cleared room by room by a 37th assault team. Recover the observers and hold all three floors so the launch corridor keeps its eastern view. Flash the rooms before entry and walk up to each bound observer to release them.',
     weapons: ['pistol', 'm4'], grenades: 0, flashes: 3, squad: 2,
     sky: 0x232e3a, fog: [0x232e3a, 35, 120], ambient: 0.9, sun: 1.15,
     start: [0, 0, 16, 0],
@@ -385,8 +393,8 @@ export const LEVELS = [
 
   // ---------------------------------------------------------------- 4
   {
-    id: 4, name: 'THE CHASE',
-    brief: 'The cell leader is running and he does not stop. Chase him through the alleys and the parking structure and put him down before he reaches the far gate. His guards will try to buy him time.',
+    id: 4, name: 'DIRECTION FINDER',
+    brief: 'A 37th signals officer is running BASTION’s direction-finding log through the alleys and parking structure. Stop him before the far gate. His escort will trade ground for time while a vehicle waits beyond the cordon.',
     weapons: ['pistol', 'm4'], grenades: 3, flashes: 2, squad: 2,
     sky: 0x1e2836, fog: [0x1e2836, 38, 150], ambient: 0.85, sun: 1.1,
     start: [0, 0, 45, 0],
@@ -450,8 +458,8 @@ export const LEVELS = [
 
   // ---------------------------------------------------------------- 5
   {
-    id: 5, name: 'MARKET PANIC',
-    brief: 'Shooters embedded in a crowded night market. The crowd will bolt when the first shot lands. Weapons tight: a single civilian casualty at this range is a career, at Veteran it is the mission.',
+    id: 5, name: 'MARKET INFILTRATION',
+    brief: 'Armed infiltrators are blending into the crowded aid market beside the launch route. They will present weapons only when the signal is given and the crowd will bolt at the first shot. Identify before firing; on Veteran, one civilian casualty ends the mission.',
     weapons: ['pistol', 'm4'], grenades: 0, squad: 2,
     sky: 0x2a2230, fog: [0x2a2230, 40, 140], ambient: 0.9, sun: 1.1,
     start: [0, 0, 34, 0],
@@ -509,8 +517,8 @@ export const LEVELS = [
 
   // ---------------------------------------------------------------- 6
   {
-    id: 6, name: 'OVERWATCH',
-    brief: 'Barrett M82 on the rooftop. An assault element in black is crossing the plaza on foot to cut three hostages loose, and they live or die on your marksmanship. Hold breath to steady. Riflemen are working the windows of the two near blocks down onto the team, but there are residents at those same windows, so read every opening before you fire. One more thing: there is a sniper in the unlit centre block, he is shooting at YOU, and the only thing that will ever show you where he is is his muzzle flash. He moves rooms after every second round.',
+    id: 6, name: 'RELAY CROSSING',
+    brief: 'Cover Vektor’s black-clad assault element as it crosses the plaza to seize a 37th relay and release three detained technicians. Riflemen occupy windows beside civilians, so read every opening. A sniper in the unlit centre block is hunting you; only his muzzle flash reveals the room, and he relocates after two rounds.',
     weapons: ['barrett'], grenades: 0, sniper: true, lockPlayer: true,
     sky: 0x1a2432, fog: [0x1a2432, 120, 500], ambient: 0.9, sun: 1.2,
     start: [0, 24, 61.2, 0],
@@ -650,8 +658,8 @@ export const LEVELS = [
 
   // ---------------------------------------------------------------- 7
   {
-    id: 7, name: 'VERTICAL ASSAULT',
-    brief: 'Helicopter drops you on the roof of their safehouse tower. Fight DOWN four floors to the street. They know you are coming, so bang the stairwells before you take them.',
+    id: 7, name: 'OP BRAVO',
+    brief: 'A rooftop insertion puts you above the tower selected for OP Bravo. Fight down four occupied floors, clear the street access, and reopen the roof for the next drone crew. The 37th knows the aircraft is coming, so flash every stairwell before committing.',
     weapons: ['pistol', 'm4'], grenades: 3, flashes: 3, squad: 2,
     sky: 0x1d2734, fog: [0x1d2734, 40, 160], ambient: 0.85, sun: 1.1,
     start: [3, 12.3, -2, 180],
@@ -691,8 +699,8 @@ export const LEVELS = [
 
   // ---------------------------------------------------------------- 8
   {
-    id: 8, name: 'BLACKOUT',
-    brief: 'They cut the power to the records office. Night vision goggles on. Clear the floor and reach the server room. They are blind in the dark — you are not.',
+    id: 8, name: 'ELECTRONIC ATTACK',
+    brief: 'BASTION’s electronic-warfare team killed the district power and brought a mobile jammer into the records office. Use night vision, clear the floor, and reach the control room before they erase the captured spectrum data.',
     weapons: ['pistol', 'm4'], grenades: 2, flashes: 3, nvg: true, squad: 2,
     sky: 0x030a05, fog: [0x061510, 14, 60], ambient: 0.6, sun: 0.0,
     start: [0, 0, 24, 0],
@@ -758,8 +766,8 @@ export const LEVELS = [
 
   // ---------------------------------------------------------------- 9
   {
-    id: 9, name: 'UNDERGROUND',
-    brief: 'They pulled the hostages into the metro. Platform level, then the tunnels. Frags bounce far down here, so mind the overpressure. Every hostage taped to a column comes home: walk up to each one and cut them free.',
+    id: 9, name: 'REAR INFILTRATION',
+    brief: 'A 37th detachment is using the metro and utility tunnels to pass behind the observation posts with detained engineers and drone components. Clear the platform and tunnels. Frags travel far underground; recover every hostage taped to a column.',
     weapons: ['pistol', 'm4'], grenades: 4, flashes: 2, squad: 2,
     sky: 0x0d1116, fog: [0x0d1116, 22, 90], ambient: 0.55, sun: 0.25,
     start: [0, 6, 40, 0],
@@ -834,8 +842,8 @@ export const LEVELS = [
 
   // ---------------------------------------------------------------- 10
   {
-    id: 10, name: 'THE CELL',
-    brief: 'Endgame. Breach the compound, take the tower, then go down into the bunker where the cell leader is holed up behind human shields. Bang the room, drop him, cut them loose. Everything you have learned, every layer of the city.',
+    id: 10, name: 'HOLD DISTRICT',
+    brief: 'The main assault has begun. Breach the forward compound, take the fire-control tower, and clear the bunker coordinating repeated waves into the launch district. BASTION is using detained civilians as a last screen. Hold the corridor and isolate his command.',
     weapons: ['pistol', 'm4'], grenades: 4, flashes: 4, squad: 3,
     sky: 0x1e2835, fog: [0x1e2835, 40, 170], ambient: 0.85, sun: 1.15,
     start: [0, 0, 42, 0],

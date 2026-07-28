@@ -1,135 +1,103 @@
-# Breach Protocol — Campaign and Gameplay Direction
+# Breach Protocol — Frontline Campaign Direction
 
-Status: approved direction  
-Campaign antagonist: Adrian Vale  
-Hostile organization: The Calder Group
+Status: approved direction
+Player unit: Vektor Group
+Enemy formation: fictional 37th Assault Group
+Campaign antagonist: Anton Morozov, callsign BASTION
 
-## Campaign premise
+## Premise
 
-Breach Protocol is a citywide counterterror manhunt unfolding over one night.
+Breach Protocol is a ground-combat campaign in a degraded town on the edge of a fictional
+Eastern European frontline. Vektor has better reconnaissance, communications, optics, and
+FPV capability. The 37th has more infantry, more replacement equipment, and enough electronic
+warfare to keep forcing the fight back into the streets.
 
-Adrian Vale was a tactical-intelligence planner who helped develop the entry, containment,
-and response doctrine now being used to pursue him. He defected to the Calder Group, a
-transnational criminal organization operating behind a legitimate logistics and private
-security company.
+The player's job is not to conquer the map. It is to keep a narrow launch corridor alive:
+clear infiltration routes, establish observation posts, protect drone crews, locate jammers,
+and prevent assault waves from reaching the district. Successful ground action enables the
+next drone operation.
 
-Calder supplies transportation, surveillance, weapons, intelligence, and deniable personnel
-to criminal networks. Its city operation includes former military contractors, organized
-crime crews, smugglers, corrupt officials, snipers, and disposable local recruits. Vale is not
-a lone mastermind. He is the planner directing Calder's cleanup after its network is exposed.
+BASTION is a former liaison who understands Vektor's drone doctrine and defected to the 37th.
+He directs its assault and electronic-warfare cells, abandons each position before Vektor
+arrives, and leaves enough evidence to drive the next mission. He is the thread connecting the
+ten levels, not a supernatural boss or a one-man army.
 
-Vale stays ahead by destroying records, moving witnesses, evacuating personnel, and forcing
-the counterterror team to choose between pursuit and civilian protection. Each mission
-dismantles another part of Calder's city operation and produces the lead for the next.
+## Ten connected missions
 
-## Ten-mission pursuit
+1. **Forward Command** — A live contact identifies BASTION's first launch-corridor attack.
+2. **Launch Corridor** — Clear the main street, establish OP Alpha, and fly a route-marking sortie.
+3. **OP Alpha** — Recover observers and protect the building that controls the corridor.
+4. **Direction Finder** — Chase a 37th signals team carrying BASTION's relocation order.
+5. **Market Infiltration** — Find armed infiltrators concealed among civilians near the aid market.
+6. **Relay Crossing** — Cover an assault that seizes a relay and maps incoming formations.
+7. **OP Bravo** — Reopen a rooftop observation post above the eastern approach.
+8. **Electronic Attack** — Fight through a blackout and destroy the jammer masking BASTION's route.
+9. **Rear Infiltration** — Intercept a hostage and equipment transfer through the service tunnels.
+10. **Hold District** — Defend the launch corridor against the main assault and isolate BASTION.
 
-1. **First Door** — A training exercise is interrupted by a live Calder lead.
-2. **Street Sweep** — The team searches a Calder-controlled block for a courier and relay.
-3. **Stack Up** — A safe apartment contains witnesses and the next part of Vale's route.
-4. **The Chase** — The first direct pursuit; Vale's guards delay the team while he escapes.
-5. **Market Panic** — Calder uses a crowded market as concealment and a diversion.
-6. **Overwatch** — The player covers an assault on a Calder meeting and hostage transfer.
-7. **Vertical Assault** — A rooftop insertion hits Vale's safehouse moments after evacuation.
-8. **Blackout** — Vale cuts power while the team recovers Calder's operational archive.
-9. **Underground** — A hostage transfer through the metro reveals the final command site.
-10. **The Cell** — The team breaches Calder's compound and resolves the pursuit.
+Every briefing states what was learned, why the location matters, what the 37th is doing, and
+BASTION's current status. Story delivery stays terse: briefings, recovered intelligence, radio,
+and the intelligence panel instead of cutscenes.
 
-Mission briefings must state what was learned, why the next location matters, what Calder is
-doing there, and Vale's current status. The story should be delivered through concise
-briefings, debriefs, recovered intelligence, and radio traffic rather than long cutscenes.
+## Performance and visual contract
 
-## Visual factions
+The game remains a fast desktop web build. The Claude-of-Duty repository is a reference for
+profiling and shader preparation, not a codebase to merge or a second product to maintain.
 
-Counterterror personnel wear consistent matte-black assault equipment:
+- Prewarm shaders during the mission loading state; compile nothing new in live combat.
+- Track p50, p95, p99, worst frame, draw calls, triangles, and shader-program deltas.
+- Instance repeated windows, vehicle parts, rubble, sandbags, and market props.
+- Spend polygons on silhouettes, close weapons, vehicles, and readable cover.
+- Use layered roughness, grime, cracks, scorch, broken edges, debris, and decals to remove the
+  clean blockout look without covering every surface in expensive unique textures.
+- Prefer authored level modules and fixed material families over unbounded procedural geometry.
+- Add LODs or impostors before increasing distant detail.
 
-- Black helmets, uniforms, plate carriers, and pouches.
-- Blue/cyan identification panels and unit markings.
-- Professional weapons, optics, and communications equipment.
+The desired visual read is grounded and war-worn, not photorealism at any cost. Stable frame
+pacing is part of the art direction.
 
-Calder's professional wing wears olive, charcoal, and mismatched contractor equipment. Local
-crews wear civilian clothing with visible tactical equipment once committed to a fight.
+## Factions and identification
 
-Vale wears understated civilian-cut field clothing and light armor. He must be recognizable
-through appearance, voice, and behavior rather than a floating marker or boss costume.
+Vektor personnel wear matte-black assault equipment with restrained blue/cyan identification.
+The 37th mixes olive and charcoal field kit with locally sourced civilian clothing.
 
-## Threat identification
+No hostile receives a wall-penetrating marker. Some infiltrators begin apparently civilian:
 
-No enemy is identified through walls. Objective and watchdog systems must not draw
-wall-penetrating diamonds over hostiles.
+1. blend into the crowd;
+2. observe or reposition;
+3. present a weapon with a readable animation;
+4. become valid combatants and may fire;
+5. flee or surrender when isolated or stunned.
 
-Some Calder operatives begin in civilian clothing:
+They cannot damage the player before the draw tell completes. Difficulty comes from
+identification and pressure, not hidden rules.
 
-1. **Blended** — no visible weapon and civilian behavior.
-2. **Observing** — watches or repositions without attacking.
-3. **Drawing** — presents a weapon through a clear, readable animation.
-4. **Hostile** — may aim and fire only after the weapon is visible.
-5. **Surrendering or fleeing** — possible when stunned, isolated, or overmatched.
+## Controlled chaos
 
-A concealed operative cannot damage the player before completing the draw tell. Shooting one
-before a weapon is presented is treated as shooting an apparently unarmed person.
+Crowded spaces should actually feel crowded. Gunfire produces deterministic, debuggable
+reactions: recognition, decision, movement to authored cover or exits, and reassessment.
+Civilians can cross firing lanes when their escape route plausibly requires it, but do not
+zigzag randomly.
 
-## Controlled civilian chaos
+Freed hostages remain a complication. They can follow too closely, freeze in doorways, get
+down under fire, or need simple FOLLOW, STAY, and GET DOWN commands.
 
-Crowded locations must contain meaningful crowds, but civilian behavior is never arbitrary.
-Gunfire drives a readable state sequence:
+Replay variation is seeded at mission load. Buildings swap only among validated modules;
+props use authored sockets; enemies, civilians, patrols, and reinforcement routes use safe
+spawn sets. Generation adds no recurring GPU workload.
 
-1. Recognition delay: flinch, orient, or hesitate.
-2. Decision: freeze, get down, find cover, seek an exit, or follow a nearby group.
-3. Movement: use a valid authored destination and navigation route.
-4. Reassessment: change behavior only when blocked or exposed to a new threat.
+## Trustworthy combat and AI
 
-Seeded profiles vary reaction timing and choice between attempts while remaining deterministic
-for debugging. Civilians may cross the player's firing lane when a believable escape route
-requires it. They do not zigzag randomly or deliberately sabotage a shot.
+The reticle is authoritative. Aimed shots begin on the camera center ray, visible sway and
+ballistic sway agree, held-breath sniper shots have no random spread, and hit volumes follow
+visible anatomy.
 
-Freed hostages remain a tactical responsibility. They may follow too closely, freeze in
-doorways, panic under fire, or require simple FOLLOW, STAY, and GET DOWN commands before
-reaching safety.
-
-## Trustworthy weapons
-
-The visible reticle is authoritative:
-
-- Every aimed shot begins on the camera's actual center ray.
-- Visual scope sway and ballistic sway are the same movement.
-- A held-breath scoped Barrett shot has zero random spread.
-- Recoil and sustained-fire dispersion may move later shots, but the first aimed shot is
-  trustworthy.
-- Actor hit volumes should match visible anatomy rather than generous proximity spheres.
-- Difficulty comes from identification, movement, recoil, civilians, and hostile tactics—not
-  a dishonest reticle.
-
-## Controlled variation
-
-Replay variation uses seeded authored choices rather than unrestricted procedural generation:
-
-- Buildings occupy validated lots and swap compatible facade or interior modules.
-- Props and cover use authored placement sockets.
-- Enemies and hostages select from validated spawn zones.
-- Patrols and reinforcements select compatible routes and entrances.
-- Vale selects among authored escape routes based on the mission seed and player pressure.
-- The seed is retained for replay and bug reproduction.
-
-Generation occurs during mission loading and must not add ongoing GPU cost.
-
-## NPC intelligence
-
-Combat and crowd decisions remain local, deterministic game systems. The local LLM is not part
-of the initial build.
-
-Enemy intelligence should grow through utility and behavior systems:
-
-- Sound investigation and last-known-position search.
-- Suppression, flanking, retreat, reinforcement, and escape-route defense.
-- Limited information sharing rather than perfect faction awareness.
-- Moving or guarding hostages.
-- Different morale and surrender behavior by Calder role.
-
-The intelligence panel is initially authored and programmatic. An optional local-language-model
-adapter may be reconsidered later for between-mission interpretation, never core combat.
+NPC decisions remain local programmatic systems for the initial build: hearing, last-known
+position, suppression, flanking, retreat, reinforcement, limited information sharing, and
+hostage control. The local LLM remains out of the runtime. A later optional intelligence-panel
+adapter may summarize between-mission evidence, never control combat.
 
 ## Core identity
 
-Calder creates confusion. Vale exploits response doctrine. The player succeeds through
-observation, disciplined force, and a weapon that hits where it is aimed.
+Vektor has information and precision. The 37th has mass and repeated pressure. Each ground
+mission earns the air picture needed to survive the next attack.
