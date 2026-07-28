@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop vehicle-fidelity visual and batching regression."""
+"""Desktop authored-vehicle fidelity, collision, and batching regression."""
 import argparse
 import json
 from pathlib import Path
@@ -62,39 +62,50 @@ def main():
         page.wait_for_timeout(250)
         page.screenshot(path=str(output / "police-vehicle-close.png"))
 
+        page.evaluate("""() => {
+          BP.player.pos.set(-8, 0, -12);
+          BP.player.yaw = -0.785;
+          BP.player.pitch = -0.04;
+        }""")
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(output / "shell-struck-wreck.png"))
+
         coverage = page.evaluate("""() => {
           const meshes = {};
-          const localBounds = {};
-          const widthStations = {};
+          const police = {};
           const vertexCounts = {};
+          const authored = [];
           for (const object of BP.world.staticMesh.parent.children) {
-            if (!object.isInstancedMesh || !object.name.startsWith('vehicle-')) continue;
+            if (!object.isInstancedMesh) continue;
+            if (object.name.startsWith('police-')) {
+              police[object.name] = object.userData.instanceCount;
+              continue;
+            }
+            if (!object.name.startsWith('vehicle-')) continue;
             meshes[object.name] = object.userData.instanceCount;
             vertexCounts[object.name] = object.geometry.attributes.position.count;
-            if (/-(lower|cabin|side-glass)$/.test(object.name)) {
+            if (object.geometry.userData.authoredVehicle) {
               object.geometry.computeBoundingBox();
               const box = object.geometry.boundingBox;
-              localBounds[object.name] = {
-                x: +(box.max.x - box.min.x).toFixed(3),
-                y: +(box.max.y - box.min.y).toFixed(3),
-                z: +(box.max.z - box.min.z).toFixed(3),
-              };
-              if (object.name.endsWith('-lower')) {
-                const positions = object.geometry.attributes.position;
-                const widths = new Map();
-                for (let i = 0; i < positions.count; i++) {
-                  const x = positions.getX(i).toFixed(3);
-                  widths.set(x, Math.max(widths.get(x) || 0, Math.abs(positions.getZ(i))));
-                }
-                widthStations[object.name] = new Set(
-                  [...widths.values()].map(width => width.toFixed(3))).size;
-              }
+              authored.push({
+                name: object.name,
+                kind: object.geometry.userData.kind,
+                instances: object.userData.instanceCount,
+                sourceParts: object.geometry.userData.sourceParts,
+                vertices: object.geometry.attributes.position.count,
+                vertexColors: object.geometry.attributes.color?.count || 0,
+                bounds: [
+                  box.max.x - box.min.x,
+                  box.max.y - box.min.y,
+                  box.max.z - box.min.z,
+                ].map(value => +value.toFixed(3)),
+              });
             }
           }
           return {
-            meshes, localBounds, widthStations, vertexCounts,
-            bodyTypes: ['sedan', 'hatch', 'suv'].filter(type =>
-              Object.keys(meshes).some(name => name === `vehicle-${type}-lower`)),
+            meshes, police, vertexCounts, authored,
+            authoredInstances: authored.reduce((sum, item) => sum + item.instances, 0),
+            bodyTypes: [...new Set(authored.map(item => item.kind))].sort(),
             calls: BP.performance.render.calls,
             triangles: BP.performance.render.triangles,
           };
@@ -130,28 +141,26 @@ def main():
                 "regular-suv-three-quarter.png",
                 "regular-hatch-three-quarter.png",
                 "police-vehicle-close.png",
+                "shell-struck-wreck.png",
             ],
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
         assert not errors
-        assert len(coverage["bodyTypes"]) >= 2
-        assert coverage["meshes"].get("vehicle-tyres", 0) >= 20
-        assert coverage["meshes"].get("vehicle-wheel-wells", 0) == 0
-        assert coverage["meshes"].get("vehicle-contact-shadows", 0) == 0
-        assert coverage["meshes"].get("vehicle-rim-spokes", 0) >= 100
-        assert coverage["meshes"].get("vehicle-windscreen", 0) == 0  # variant-keyed only
-        assert any(name.endswith("-windscreen") for name in coverage["meshes"])
-        assert all(count >= 15 for count in coverage["widthStations"].values())
+        assert set(("sedan", "hatch", "suv", "wreck")).issubset(coverage["bodyTypes"])
+        assert coverage["authoredInstances"] >= 6
+        assert len(coverage["authored"]) >= 5  # colour variants stay batched independently
+        assert all(item["sourceParts"] >= 4 for item in coverage["authored"])
+        assert all(item["vertices"] > 9_000 for item in coverage["authored"])
         assert all(
-            coverage["vertexCounts"][name] >= 18
-            for name in coverage["meshes"] if name.endswith("-windscreen")
+            item["vertexColors"] == item["vertices"] for item in coverage["authored"]
         )
-        assert coverage["vertexCounts"]["vehicle-headlights"] > 100
-        assert coverage["vertexCounts"]["vehicle-bumpers"] > 50
-        assert coverage["vertexCounts"]["vehicle-grilles"] > 40
-        assert coverage["meshes"].get("vehicle-grille-slats", 0) == 0
-        assert coverage["meshes"].get("vehicle-bumpers", 0) == 12
+        assert all(item["bounds"][0] > 4 and item["bounds"][2] > 1.8
+                   for item in coverage["authored"])
+        assert coverage["calls"] < 250
+        assert coverage["triangles"] < 420_000
+        assert coverage["police"].get("police-doors", 0) == 4
+        assert coverage["meshes"].get("vehicle-contact-shadows", 0) == 0
         assert all(
             item["found"]
             and item["actual"]["w"] == item["w"]

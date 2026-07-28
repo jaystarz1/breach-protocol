@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v72-authored-carried-rifle';
+const CACHE = 'breach-protocol-v73-authored-vehicle-fleet';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -27,6 +27,10 @@ const ASSETS = [
   'assets/characters/NOTICE.md',
   'assets/weapons/AssaultRifleWest.glb',
   'assets/weapons/NOTICE.md',
+  'assets/vehicles/CarSedan.glb',
+  'assets/vehicles/CarSUV.glb',
+  'assets/vehicles/BrokenCar.glb',
+  'assets/vehicles/NOTICE.md',
   'icons/icon-192.png', 'icons/icon-512.png',
 ];
 

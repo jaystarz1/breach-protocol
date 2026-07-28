@@ -1,8 +1,53 @@
 // Desktop visual replacements for authored collision/blockout props.
 import * as THREE from 'three';
+import { GLTFLoader } from '../lib/GLTFLoader.js';
+import { mergeGeometries, toCreasedNormals } from '../lib/BufferGeometryUtils.js';
 import { quality } from './quality.js';
 import { rng } from './world.js';
 import { photoSurfaces } from './textures.js';
+
+let authoredVehicleSources = null;
+if (quality.desktop) {
+  try {
+    const loader = new GLTFLoader();
+    const [sedan, suv, wreck] = await Promise.all([
+      loader.loadAsync('./assets/vehicles/CarSedan.glb'),
+      loader.loadAsync('./assets/vehicles/CarSUV.glb'),
+      loader.loadAsync('./assets/vehicles/BrokenCar.glb'),
+    ]);
+    authoredVehicleSources = {
+      sedan: {
+        scene: sedan.scene,
+        bodyMaterials: new Set(['LightBlue']),
+        scale: new THREE.Vector3(1.39, 1.42, 1.18),
+      },
+      hatch: {
+        // The intact sedan and SUV cover ordinary traffic. A shell-struck hatch is supplied
+        // separately below, so the former procedural hatch silhouette does not survive merely
+        // to create a third nominal body type.
+        scene: sedan.scene,
+        bodyMaterials: new Set(['LightBlue']),
+        scale: new THREE.Vector3(1.3, 1.39, 1.16),
+      },
+      suv: {
+        scene: suv.scene,
+        bodyMaterials: new Set(['White']),
+        scale: new THREE.Vector3(1.13, 1.2, 0.976),
+      },
+      wreck: {
+        scene: wreck.scene,
+        bodyMaterials: new Set(),
+        scale: new THREE.Vector3(0.775, 0.955, 0.731),
+      },
+    };
+    for (const source of Object.values(authoredVehicleSources)) {
+      source.scene.updateMatrixWorld(true);
+      source.cache = new Map();
+    }
+  } catch (error) {
+    console.warn('[bp] authored vehicle assets unavailable; using procedural fleet', error);
+  }
+}
 
 const mats = {};
 const material = (key, make) => mats[key] || (mats[key] = make());
@@ -89,6 +134,79 @@ function mesh(geometry, mat, shadows = true) {
   out.castShadow = shadows && quality.shadows;
   out.receiveShadow = quality.shadows;
   return out;
+}
+
+function bakeVehicleVertexColors(geometry, sourceMaterial, bodyMaterials, tint) {
+  const position = geometry.attributes.position;
+  const values = new Float32Array(position.count * 3);
+  const materials = Array.isArray(sourceMaterial) ? sourceMaterial : [sourceMaterial];
+  const tintColor = new THREE.Color(tint).lerp(new THREE.Color(0xffffff), 0.08);
+  const fill = (start, count, source) => {
+    const colour = bodyMaterials.has(source?.name)
+      ? tintColor
+      : source?.color || new THREE.Color(0xffffff);
+    const end = Math.min(position.count, start + count);
+    for (let i = start; i < end; i++) {
+      values[i * 3] = colour.r;
+      values[i * 3 + 1] = colour.g;
+      values[i * 3 + 2] = colour.b;
+    }
+  };
+  if (geometry.groups?.length) {
+    for (const group of geometry.groups) {
+      fill(group.start, group.count, materials[group.materialIndex] || materials[0]);
+    }
+  } else {
+    fill(0, position.count, materials[0]);
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+}
+
+function authoredVehicleGeometry(kind, tint) {
+  const source = authoredVehicleSources?.[kind];
+  if (!source) return null;
+  const key = source.bodyMaterials.size ? new THREE.Color(tint).getHexString() : 'fixed';
+  if (source.cache.has(key)) return source.cache.get(key);
+
+  const geometries = [];
+  let sourceParts = 0;
+  source.scene.traverse(object => {
+    if (!object.isMesh || !object.geometry) return;
+    const geometry = object.geometry.index
+      ? object.geometry.toNonIndexed()
+      : object.geometry.clone();
+    for (const name of Object.keys(geometry.attributes)) {
+      if (!['position', 'normal', 'uv'].includes(name)) geometry.deleteAttribute(name);
+    }
+    bakeVehicleVertexColors(
+      geometry, object.material, source.bodyMaterials, tint);
+    geometry.applyMatrix4(object.matrixWorld);
+    geometries.push(geometry);
+    sourceParts += Array.isArray(object.material)
+      ? Math.max(1, object.geometry.groups?.length || object.material.length)
+      : 1;
+  });
+  if (!geometries.length) return null;
+  let geometry = mergeGeometries(geometries, false);
+  for (const part of geometries) part.dispose();
+  if (!geometry) return null;
+
+  // Source vehicles face -Z; the game's local vehicle convention faces -X. Non-uniform scale
+  // fits the existing authoritative collision dimensions without making the wheels or cabin
+  // unnaturally wide simply to reach the correct bumper-to-bumper length.
+  geometry.applyMatrix4(new THREE.Matrix4().makeRotationY(-Math.PI / 2));
+  geometry.scale(source.scale.x, source.scale.y, source.scale.z);
+  geometry.computeBoundingBox();
+  geometry.translate(0, -geometry.boundingBox.min.y, 0);
+  if (kind !== 'wreck') geometry = toCreasedNormals(geometry, Math.PI * 0.25);
+  geometry.clearGroups();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  geometry.userData.authoredVehicle = true;
+  geometry.userData.sourceParts = sourceParts;
+  geometry.userData.kind = kind;
+  source.cache.set(key, geometry);
+  return geometry;
 }
 
 function loftedVehicleShell(stations, topWidth = 0.78) {
@@ -441,6 +559,63 @@ const ROOF_CAP_GEO = (() => {
   return geometry;
 })();
 
+function addPoliceVehicleDetails(batcher, parent, type) {
+  const trim = standard('vehicle-trim', 0x11161a, 0.54, 0.16);
+  const white = standard('police-white', 0xe5eaed, 0.38, 0.18);
+  for (const side of [-1, 1]) {
+    batcher.add('police-doors', UNIT_PLANE, white,
+      instanceMatrix(parent, 0.15, 0.67, side * 0.998, 1.45, 0.5, 1,
+        0, side < 0 ? Math.PI : 0));
+  }
+  batcher.add('police-lightbar-base', VEHICLE_BUMPER_GEO, trim,
+    instanceMatrix(parent, 0.18, 1.59, 0, 0.52, 0.9, 0.9, Math.PI / 2, 0, 0));
+  for (const y of [0.54, 0.88]) {
+    batcher.add('police-push-bars', POLICE_PUSH_BAR_GEO, trim,
+      instanceMatrix(parent, type.front - 0.16, y, 0, 1.1, 1.9, 1.9,
+        Math.PI / 2, 0, 0));
+  }
+  for (const z of [-0.52, 0.52]) {
+    batcher.add('police-push-bars', POLICE_PUSH_BAR_GEO, trim,
+      instanceMatrix(parent, type.front - 0.14, 0.76, z, 1.1, 0.8, 1.1));
+  }
+  for (const [z, col] of [[-0.38, 0xd51f28], [0.38, 0x245dff]]) {
+    batcher.add(`police-lens-${col}`, POLICE_LIGHTBAR_GEO,
+      material(`police-lens-${col}`, () => new THREE.MeshPhysicalMaterial({
+        color: col, emissive: col, emissiveIntensity: 0.22,
+        roughness: 0.16, metalness: 0.02, transparent: true, opacity: 0.82,
+        clearcoat: 1,
+      })),
+      instanceMatrix(parent, 0.18, 1.68, z, 1.25, 0.78, 0.78,
+        Math.PI / 2, 0, 0));
+  }
+}
+
+function addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked) {
+  if (!authoredVehicleSources) return false;
+  const kind = wrecked ? 'wreck' : type.key;
+  const geometry = authoredVehicleGeometry(kind, bodyColor);
+  if (!geometry) return false;
+  const fixedColour = wrecked ? 'fixed' : new THREE.Color(bodyColor).getHexString();
+  const vehicleMat = material(
+    wrecked ? 'authored-vehicle-wreck' : 'authored-vehicle-finish',
+    () => new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      roughness: wrecked ? 0.78 : 0.42,
+      metalness: wrecked ? 0.16 : 0.12,
+      clearcoat: wrecked ? 0.04 : 0.55,
+      clearcoatRoughness: 0.3,
+      envMapIntensity: wrecked ? 0.62 : 1.05,
+    }),
+  );
+  batcher.add(`vehicle-authored-${kind}-${fixedColour}`, geometry, vehicleMat, parent);
+
+  // A close car is now one coherent authored object, so generic boxes no longer stand in for
+  // doors, wheel openings or glass. Police equipment remains a shared operational hardware kit.
+  if (def.police) addPoliceVehicleDetails(batcher, parent, type);
+  return true;
+}
+
 function addVehicle(batcher, def) {
   const damage = def.damage ?? Math.abs(Math.round(def.x * 17 + def.z * 31)) % 7;
   const type = VEHICLE_TYPES[def.police ? 0 : Math.abs(def.variant ?? 0) % VEHICLE_TYPES.length];
@@ -452,6 +627,7 @@ function addVehicle(batcher, def) {
       new THREE.Vector3(0, 1, 0), def.rotZAxis ? Math.PI / 2 : 0),
     new THREE.Vector3(1, 1, 1),
   );
+  if (addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked)) return;
   const paint = material('vehicle-paint-instanced', () => new THREE.MeshPhysicalMaterial({
     color: 0xffffff, roughness: 0.32, metalness: 0.04,
     clearcoat: 0.68, clearcoatRoughness: 0.24, envMapIntensity: 1.15,
@@ -604,35 +780,7 @@ function addVehicle(batcher, def) {
     }
   }
 
-  if (def.police) {
-    const white = standard('police-white', 0xe5eaed, 0.38, 0.18);
-    for (const side of [-1, 1]) {
-      batcher.add('police-doors', UNIT_PLANE, white,
-        instanceMatrix(parent, 0.15, 0.67, side * 0.998, 1.45, 0.5, 1,
-          0, side < 0 ? Math.PI : 0));
-    }
-    batcher.add('police-lightbar-base', VEHICLE_BUMPER_GEO, trim,
-      instanceMatrix(parent, 0.18, 1.59, 0, 0.52, 0.9, 0.9, Math.PI / 2, 0, 0));
-    for (const y of [0.54, 0.88]) {
-      batcher.add('police-push-bars', POLICE_PUSH_BAR_GEO, trim,
-        instanceMatrix(parent, type.front - 0.16, y, 0, 1.1, 1.9, 1.9,
-          Math.PI / 2, 0, 0));
-    }
-    for (const z of [-0.52, 0.52]) {
-      batcher.add('police-push-bars', POLICE_PUSH_BAR_GEO, trim,
-        instanceMatrix(parent, type.front - 0.14, 0.76, z, 1.1, 0.8, 1.1));
-    }
-    for (const [z, col] of [[-0.38, 0xd51f28], [0.38, 0x245dff]]) {
-      batcher.add(`police-lens-${col}`, POLICE_LIGHTBAR_GEO,
-        material(`police-lens-${col}`, () => new THREE.MeshPhysicalMaterial({
-          color: col, emissive: col, emissiveIntensity: 0.22,
-          roughness: 0.16, metalness: 0.02, transparent: true, opacity: 0.82,
-          clearcoat: 1,
-        })),
-        instanceMatrix(parent, 0.18, 1.68, z, 1.25, 0.78, 0.78,
-          Math.PI / 2, 0, 0));
-    }
-  }
+  if (def.police) addPoliceVehicleDetails(batcher, parent, type);
 }
 
 function addFacade(batcher, def) {
