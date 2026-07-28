@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v36-authored-interiors';
+const CACHE = 'breach-protocol-v37-authored-towers';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

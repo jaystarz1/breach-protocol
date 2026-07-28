@@ -125,6 +125,24 @@ function tower(x, z, w, d, floors, opts = {}) {
     geo.push(...wall(x2, z1, x2, z2, 0.9, C.concrete, [], ry));
     geo.push(...wall(x1, z1, x1, z2, 0.9, C.concrete, [], ry));
   }
+  // The tower is a real traversable shell, but from the street its four uninterrupted wall
+  // runs still read as one giant brick cuboid. Reuse the desktop facade system outside the
+  // collision envelope: dark room recesses, damaged glazing, sills, utilities and cornices
+  // give every floor scale without changing navigation or allowing fake window shots.
+  const facadeOpts = {
+    away: [x, z],
+    step: opts.windowStep ?? 3.2,
+    floorH: fh,
+    lit: opts.windowLit ?? 0.16,
+    damage: opts.facadeDamage ?? 0.5,
+  };
+  geo.push(...facade(x1, z2, x2, z2, 0, floors * fh, 30101 + floors * 17, {
+    ...facadeOpts,
+    skip: opts.door === false ? [] : [{ from: w / 2 - 1.1, to: w / 2 + 1.1 }],
+  }));
+  geo.push(...facade(x2, z1, x1, z1, 0, floors * fh, 30103 + floors * 19, facadeOpts));
+  geo.push(...facade(x2, z2, x2, z1, 0, floors * fh, 30107 + floors * 23, facadeOpts));
+  geo.push(...facade(x1, z1, x1, z2, 0, floors * fh, 30109 + floors * 29, facadeOpts));
   return geo;
 }
 
