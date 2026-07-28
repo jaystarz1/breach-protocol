@@ -35,10 +35,14 @@ def main():
                 counts[object.name] = (counts[object.name] || 0)
                   + object.userData.instanceCount;
               });
+              const photoRooms = Object.entries(counts)
+                .filter(([name]) => name.startsWith('window-room-photo-'))
+                .reduce((sum, [, count]) => sum + count, 0);
               return {
                 windows: (counts['recess-dark'] || 0)
                   + (counts['recess-warm'] || 0)
-                  + (counts['recess-cool'] || 0),
+                  + (counts['recess-cool'] || 0)
+                  + photoRooms,
                 sills: counts['window-sills'] || 0,
                 broken: counts['window-bent-frames'] || 0,
                 boarded: (counts['window-boards'] || 0) / 3,

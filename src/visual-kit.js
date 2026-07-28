@@ -115,6 +115,26 @@ const FACADE_PANEL_GEO = (() => {
   return geometry;
 })();
 const UNIT_PLANE = new THREE.PlaneGeometry(1, 1);
+const FACADE_BREACH_GEO = (() => {
+  // An asymmetric blown-out wall section. A larger masonry copy sits behind the dark copy,
+  // creating a real jagged reveal instead of a circular black "damage decal".
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.48, -0.5);
+  shape.lineTo(0.5, -0.46);
+  shape.lineTo(0.46, 0.08);
+  shape.lineTo(0.34, 0.43);
+  shape.lineTo(0.08, 0.5);
+  shape.lineTo(-0.14, 0.42);
+  shape.lineTo(-0.4, 0.5);
+  shape.lineTo(-0.49, 0.16);
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
+})();
+const FACADE_COLLAPSE_RUBBLE_GEO = (() => {
+  const geometry = new THREE.DodecahedronGeometry(0.5, 0);
+  geometry.scale(1, 0.64, 0.72);
+  return geometry;
+})();
 const WINDOW_INTERIOR_GEOS = Array.from({ length: 4 }, (_, tile) => {
   const geometry = new THREE.PlaneGeometry(1, 1);
   const uv = geometry.attributes.uv;
@@ -907,6 +927,31 @@ function addFacade(batcher, def) {
       metalness: 0,
     });
   });
+  const breachMat = standard('facade-breach-dark', 0x070809, 1, 0);
+  const rebarMat = standard('facade-breach-rebar', 0x242728, 0.7, 0.56);
+  const breachInteriorMat = material('facade-breach-interior-photo', () => {
+    const photo = photoSurfaces()?.plaster;
+    return new THREE.MeshStandardMaterial({
+      color: 0x4b4640,
+      map: photo?.map || null,
+      bumpMap: photo?.height || null,
+      bumpScale: photo?.height ? 0.024 : 0,
+      roughness: 0.98,
+      metalness: 0,
+    });
+  });
+  const slabMat = material('facade-breach-concrete-photo', () => {
+    const photo = photoSurfaces()?.concrete;
+    return new THREE.MeshStandardMaterial({
+      color: 0x66645f,
+      map: photo?.map || null,
+      normalMap: photo?.normalMap || null,
+      normalScale: new THREE.Vector2(0.32, 0.32),
+      roughnessMap: photo?.roughnessMap || null,
+      roughness: 0.95,
+      metalness: 0.01,
+    });
+  });
 
   const facadeParent = new THREE.Matrix4().compose(
     new THREE.Vector3(
@@ -921,20 +966,25 @@ function addFacade(batcher, def) {
   // remains the authoritative collision and photographic skin; these shallow shell pieces
   // create stepped roof massing, party-wall rhythm and damage without changing navigation.
   const lots = [];
+  const breachRoll = rng(def.seed * 7919 + 43);
   let lotStart = -len / 2;
   while (lotStart < len / 2 - 0.25) {
     const remaining = len / 2 - lotStart;
     const preferred = 7.5 + R() * 5.5;
     const width = remaining < preferred + 4 ? remaining : preferred;
+    const rise = 0.52 + R() * 1.08;
+    const damaged = R() < damageChance * 0.62;
     lots.push({
       start: lotStart,
       width,
-      rise: 0.52 + R() * 1.08,
-      damaged: R() < damageChance * 0.62,
+      rise,
+      damaged,
+      breached: damaged && def.height >= 5.8 && width > 7 && breachRoll() < 0.58,
       tone: R() < 0.42 ? 0x697174 : R() < 0.72 ? 0x858681 : 0x6e6861,
     });
     lotStart += width;
   }
+  const breaches = [];
   for (let i = 0; i < lots.length; i++) {
     const lot = lots[i];
     const centre = lot.start + lot.width / 2;
@@ -973,6 +1023,80 @@ function addFacade(batcher, def) {
       batcher.add('facade-exposed-masonry', FACADE_SCAR_GEO, masonryMat,
         instanceMatrix(facadeParent, scarX + (R() - 0.5) * 0.18, scarY - 0.05, 0.025,
           1.13 + R() * 0.52, 0.78 + R() * 0.38, 1, 0, 0, (R() - 0.5) * 0.18));
+    }
+
+    if (lot.breached) {
+      const breachWidth = Math.min(5.2, Math.max(3.2, lot.width * 0.58));
+      const breachBottom = Math.max(2.55, def.height - floorH * 2.05);
+      const breachTop = def.height + lot.rise * 0.28;
+      const breachHeight = breachTop - breachBottom;
+      const breachX = centre + (R() - 0.5) * Math.max(0.3, lot.width - breachWidth - 0.5);
+      breaches.push({
+        x: breachX,
+        width: breachWidth,
+        bottom: breachBottom,
+        top: breachTop,
+      });
+
+      // The outer photographed masonry shape masks the intact collision wall; the smaller
+      // dark shape above it leaves a broken 18–30 cm reveal around the room void.
+      batcher.add('facade-breach-soot-fields', FACADE_BREACH_GEO, sootMat,
+        instanceMatrix(facadeParent, breachX, (breachBottom + breachTop) / 2, 0.095,
+          breachWidth * 1.27, breachHeight * 1.17, 1,
+          0, 0, (R() - 0.5) * 0.025));
+      batcher.add('facade-breach-masonry-rims', FACADE_BREACH_GEO, masonryMat,
+        instanceMatrix(facadeParent, breachX, (breachBottom + breachTop) / 2, 0.105,
+          breachWidth * 1.13, breachHeight * 1.08, 1, 0, 0, (R() - 0.5) * 0.035));
+      batcher.add('facade-breach-recesses', FACADE_BREACH_GEO, breachMat,
+        instanceMatrix(facadeParent, breachX, (breachBottom + breachTop) / 2, 0.125,
+          breachWidth, breachHeight, 1, 0, 0, (R() - 0.5) * 0.025));
+      for (let roomY = breachBottom + floorH * 0.5;
+        roomY < breachTop - 0.25; roomY += floorH) {
+        // Dim photographed back walls stop a large breach becoming a featureless black card.
+        // The offset leaves part of the true dark recess visible around each surviving room.
+        batcher.add('facade-breach-interior-backs', FACADE_BREACH_GEO, breachInteriorMat,
+          instanceMatrix(facadeParent,
+            breachX + (R() < 0.5 ? -1 : 1) * breachWidth * (0.14 + R() * 0.05),
+            roomY + (R() - 0.5) * 0.16, 0.135,
+            breachWidth * (0.38 + R() * 0.12), floorH * (0.54 + R() * 0.12), 1,
+            0, 0, (R() - 0.5) * 0.045));
+      }
+
+      // Floor plates and partition stubs project out of the opening, giving the collapse
+      // parallax at street angles. They remain visual-only; the original wall is collision.
+      for (let y = Math.ceil(breachBottom / floorH) * floorH;
+        y < breachTop - 0.35; y += floorH) {
+        batcher.add('facade-breach-floor-slabs', DAMAGED_PARAPET_GEO, slabMat,
+          instanceMatrix(facadeParent, breachX + (R() - 0.5) * 0.18, y, 0.58,
+            breachWidth * (0.76 + R() * 0.16), 1.12, 0.34,
+            Math.PI / 2, 0, (R() - 0.5) * 0.045), true);
+      }
+      for (const side of [-1, 1]) {
+        batcher.add('facade-breach-party-walls', UNIT_BOX, slabMat,
+          instanceMatrix(facadeParent,
+            breachX + side * breachWidth * (0.43 + R() * 0.025),
+            breachBottom + breachHeight * (0.46 + R() * 0.03), 0.46,
+            0.14, breachHeight * (0.52 + R() * 0.1), 0.58,
+            0, 0, side * (0.025 + R() * 0.025)), true);
+      }
+      for (let bar = 0; bar < 4; bar++) {
+        const x = breachX - breachWidth * 0.32 + bar * breachWidth * 0.21;
+        const length = 0.38 + R() * 0.48;
+        batcher.add('facade-breach-rebar', DRAIN_GEO, rebarMat,
+          instanceMatrix(facadeParent, x, breachBottom - length * 0.28, 0.34,
+            0.42, length, 0.42, 0, 0, (R() - 0.5) * 0.18));
+      }
+      for (let chunk = 0; chunk < 9; chunk++) {
+        const scale = 0.28 + R() * 0.42;
+        batcher.add('facade-breach-collapse-piles', FACADE_COLLAPSE_RUBBLE_GEO,
+          chunk % 3 === 0 ? masonryMat : slabMat,
+          instanceMatrix(facadeParent,
+            breachX + (R() - 0.5) * breachWidth * 0.82,
+            breachBottom - 0.12 + R() * 0.22,
+            0.2 + R() * 0.72,
+            scale * (0.75 + R() * 0.7), scale, scale,
+            R() * Math.PI, R() * Math.PI, R() * Math.PI), true);
+      }
     }
 
     // Real projecting balconies are sparse and deliberately asymmetric. A repeated window
@@ -1059,6 +1183,12 @@ function addFacade(batcher, def) {
   for (let fy = def.yBase + 1.2; fy < def.yBase + def.height - 1.3; fy += floorH) {
     for (let s = 1.8; s < len - 1.8; s += step) {
       if ((def.skip || []).some(g => s > g.from - 1.2 && s < g.to + 1.2)) continue;
+      const localX = s - len / 2;
+      const localY = fy + 0.74 - def.yBase;
+      if (breaches.some(breach =>
+        Math.abs(localX - breach.x) < breach.width * 0.43
+        && localY > breach.bottom - 0.35
+        && localY < breach.top + 0.2)) continue;
       const parent = new THREE.Matrix4().compose(
         new THREE.Vector3(
         def.x1 + ux * s + nx * (def.out ?? 0.2),

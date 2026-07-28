@@ -158,6 +158,15 @@ def main():
         assert counts.get("facade-party-piers", 0) > 0
         assert counts.get("facade-shell-scars", 0) > 0
         assert counts.get("facade-exposed-masonry", 0) > 0
+        breaches = counts.get("facade-breach-recesses", 0)
+        assert breaches >= 3
+        assert counts.get("facade-breach-soot-fields", 0) == breaches
+        assert counts.get("facade-breach-masonry-rims", 0) == breaches
+        assert counts.get("facade-breach-interior-backs", 0) >= breaches
+        assert counts.get("facade-breach-floor-slabs", 0) >= breaches
+        assert counts.get("facade-breach-party-walls", 0) == breaches * 2
+        assert counts.get("facade-breach-rebar", 0) == breaches * 4
+        assert counts.get("facade-breach-collapse-piles", 0) == breaches * 9
         assert counts.get("facade-balcony-slabs", 0) > 0
         assert tower["counts"].get("facade-floor-ledges", 0) > 0
         assert tower["counts"].get("facade-parapets", 0) > 0
