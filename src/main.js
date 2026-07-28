@@ -227,6 +227,7 @@ function startLevel(id) {
     world.drone.dispose();
     world.drone = null;
   }
+  clearObjectiveMarker();
   const loadId = ++levelLoadId;
   currentLevel = id;
   const L = LEVELS[id - 1];
@@ -597,6 +598,14 @@ function startLevel(id) {
   });
 }
 
+function clearObjectiveMarker() {
+  if (!world?.beacon) return;
+  scene?.remove(world.beacon);
+  world.beacon.traverse(part => part.geometry?.dispose());
+  world.beacon.userData.material?.dispose();
+  world.beacon = null;
+}
+
 function setObjective() {
   const obj = world.level.objectives[world.objectiveIdx];
   hud.objective(obj ? obj.text : 'MISSION COMPLETE');
@@ -604,8 +613,10 @@ function setObjective() {
   world.lastIntelCallout = 0;
   if (world.markers) { for (const { m } of world.markers) scene.remove(m); world.markers = null; }
   if (world.objMarkers) { for (const m of world.objMarkers) scene.remove(m); world.objMarkers = []; }
-  // beacon at reach zones: glowing column visible through walls
-  if (world.beacon) { scene.remove(world.beacon); world.beacon = null; }
+  // Reach points use a grounded, depth-tested locator plus the HUD distance. A forty-metre
+  // depth-disabled column made every objective visible through buildings and obscured the
+  // authored location when the player arrived.
+  clearObjectiveMarker();
   if (world.drone && !world.drone.complete) {
     world.drone.dispose();
     world.drone = null;
@@ -619,14 +630,35 @@ function setObjective() {
   } else { world.markLive = null; world.markZone = null; }
   if (obj && obj.type === 'reach') {
     const [zx, zz, , zy] = obj.zone;
-    const col = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.7, 40, 10, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xffc107, transparent: true, opacity: 0.3, depthTest: false, side: THREE.DoubleSide })
-    );
-    col.position.set(zx, (zy ?? 0) + 20, zz);
-    col.renderOrder = 999;
-    scene.add(col);
-    world.beacon = col;
+    const marker = new THREE.Group();
+    marker.name = 'objective-ground-marker';
+    const markerMat = new THREE.MeshBasicMaterial({
+      color: 0x67c9e9,
+      transparent: true,
+      opacity: 0.46,
+      depthTest: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.28, 1.42, 40), markerMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.012;
+    marker.add(ring);
+    const ticks = [];
+    for (let i = 0; i < 4; i++) {
+      const angle = i * Math.PI / 2;
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.025, 0.065), markerMat);
+      tick.position.set(Math.cos(angle) * 1.68, 0.014, Math.sin(angle) * 1.68);
+      tick.rotation.y = -angle + Math.PI / 2;
+      marker.add(tick);
+      ticks.push(tick);
+    }
+    marker.position.set(zx, (zy ?? 0) + 0.055, zz);
+    marker.userData.ring = ring;
+    marker.userData.ticks = ticks;
+    marker.userData.material = markerMat;
+    scene.add(marker);
+    world.beacon = marker;
   } else if (obj && obj.type === 'drone') {
     player.locked = true;
     world.drone = new DroneController(scene, camera, obj, () => {
@@ -1296,9 +1328,12 @@ function frame() {
 
   // objectives + HUD
   if (!world.over) { checkObjectives(); objectiveWatchdog(dt); reinforcements(dt); blackoutTrigger(); }
-  // beacon pulse + live distance readout on reach objectives
+  // Ground marker pulse + live distance readout on reach objectives.
   if (world.beacon) {
-    world.beacon.material.opacity = 0.22 + Math.sin(performance.now() / 300) * 0.12;
+    const pulse = Math.sin(performance.now() / 420);
+    world.beacon.userData.material.opacity = 0.42 + pulse * 0.08;
+    world.beacon.userData.ring.scale.setScalar(1 + pulse * 0.065);
+    world.beacon.rotation.y += dt * 0.22;
     const obj = world.level.objectives[world.objectiveIdx];
     if (obj && obj.type === 'reach') {
       const d = Math.round(Math.hypot(player.pos.x - obj.zone[0], player.pos.z - obj.zone[1]));

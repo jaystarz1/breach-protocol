@@ -52,6 +52,26 @@ def main():
           }
         }""")
         page.wait_for_function("() => BP.world.objectiveIdx === 1", timeout=5000)
+        objective_marker = page.evaluate("""() => {
+          const marker = BP.world.beacon;
+          let minY = Infinity, maxY = -Infinity;
+          for (const child of marker.children) {
+            child.updateMatrix();
+            child.geometry.computeBoundingBox();
+            const box = child.geometry.boundingBox.clone().applyMatrix4(child.matrix);
+            minY = Math.min(minY, box.min.y);
+            maxY = Math.max(maxY, box.max.y);
+          }
+          return {
+            name: marker.name,
+            parts: marker.children.length,
+            height: +(maxY - minY).toFixed(3),
+            depthTested: marker.children.every(child => child.material.depthTest),
+            depthWritesDisabled: marker.children.every(child => !child.material.depthWrite),
+            ring: marker.children.some(child => child.geometry.type === 'RingGeometry'),
+            cylinder: marker.children.some(child => child.geometry.type === 'CylinderGeometry'),
+          };
+        }""")
         output_path = Path(args.output)
         op_path = output_path.with_name(f"{output_path.stem}-op{output_path.suffix}")
         page.evaluate("""() => {
@@ -93,6 +113,7 @@ def main():
             "droneScreenshot": str(drone_path),
             "droneStarted": drone_started,
             "droneFinished": drone_finished,
+            "objectiveMarker": objective_marker,
             "frontlineArt": art,
             "errors": errors[:8],
         }
@@ -108,6 +129,11 @@ def main():
         assert art["frontline-barricade-sandbags"]["instances"] > 10
         assert art["frontline-rubble-concrete-0"]["photoMap"]
         assert art["frontline-rubble-concrete-0"]["relief"]
+        assert objective_marker["name"] == "objective-ground-marker"
+        assert objective_marker["parts"] == 5
+        assert objective_marker["height"] < 0.1
+        assert objective_marker["depthTested"] and objective_marker["depthWritesDisabled"]
+        assert objective_marker["ring"] and not objective_marker["cylinder"]
         assert drone_started["active"] and drone_started["locked"]
         assert drone_finished["controllerDisposed"] and drone_finished["playerRestored"]
         browser.close()
