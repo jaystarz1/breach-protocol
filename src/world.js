@@ -36,7 +36,12 @@ const stand = (x, z, w, h, d, color, solid = false, emissive = false, base = -0.
 // Raise a prop kit onto a roof or down into a trench. Every prop helper places itself on the
 // ground at y=0, so without this a rooftop AC unit spawns 24m below the roof it belongs to.
 export function lift(geo, dy) {
-  return geo.map(e => { const c = e.slice(); c[1] += dy; return c; });
+  if (geo.visualProps) {
+    for (const def of geo.visualProps) def.y += dy;
+  }
+  const lifted = geo.map(e => { const c = e.slice(); c[1] += dy; return c; });
+  if (geo.visualProps) lifted.visualProps = geo.visualProps;
+  return lifted;
 }
 
 export const P = {
@@ -761,6 +766,17 @@ const POSTER_INK = [
   [0x1d2126, 0xc9ccd1],   // black-and-white newsprint
 ];
 
+// Detailed wall dressing is rendered later as one atlased mesh. Keeping a reference on the
+// returned array lets lift() move the registered decal when a room kit is raised into a tower;
+// the empty array also means these pieces never enter the box-geometry draw batches.
+function wallDecal(def) {
+  if (!window.__bpVisualProps) return null;
+  window.__bpVisualProps.push(def);
+  const out = [];
+  out.visualProps = [def];
+  return out;
+}
+
 // rot=true means the piece lies in the Z/Y plane (mounted on a wall that faces along X).
 //
 // `dir` is which way the wall faces: +1 for a surface whose front is toward +X (rot) or +Z
@@ -773,6 +789,9 @@ export function poster(x, z, rot = false, y = 1.7, color = null, seed = 5, dir =
   const pal = POSTER_INK[Math.floor(R() * POSTER_INK.length)];
   const ink = color ?? pal[0], stock = pal[1];
   const w = 0.62 + R() * 0.34, h = 0.86 + R() * 0.42;
+  const decal = wallDecal({ kind: 'wall-decal', style: 'poster', x, y, z, w, h, rot, dir,
+    seed: seed + Math.round(x * 31 + z * 17), ink, stock });
+  if (decal) return decal;
   const t = 0.03, ft = 0.03 * dir;
   const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
   const ox = rot ? ft : 0, oz = rot ? 0 : ft;
@@ -798,11 +817,15 @@ export function poster(x, z, rot = false, y = 1.7, color = null, seed = 5, dir =
 export function posterWall(x1, z1, x2, z2, rot = false, seed = 11, n = 4, y = 1.65, dir = 1) {
   const R = rng(seed);
   const out = [];
+  const visualProps = [];
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n + (R() - 0.5) * 0.12;
     const px = x1 + (x2 - x1) * t, pz = z1 + (z2 - z1) * t;
-    out.push(...poster(px, pz, rot, y + (R() - 0.5) * 0.5, null, seed * 7 + i * 13, dir));
+    const piece = poster(px, pz, rot, y + (R() - 0.5) * 0.5, null, seed * 7 + i * 13, dir);
+    out.push(...piece);
+    if (piece.visualProps) visualProps.push(...piece.visualProps);
   }
+  if (visualProps.length) out.visualProps = visualProps;
   return out;
 }
 
@@ -810,6 +833,8 @@ export function posterWall(x1, z1, x2, z2, rot = false, seed = 11, n = 4, y = 1.
 // break the grid by varying slip size and offset rather than angle.
 export function noticeBoard(x, z, rot = false, y = 1.6, w = 1.5, h = 1.0, seed = 17, dir = 1) {
   const R = rng(seed);
+  const decal = wallDecal({ kind: 'wall-decal', style: 'notice', x, y, z, w, h, rot, dir, seed });
+  if (decal) return decal;
   const t = 0.05;
   const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
   const out = [
@@ -827,6 +852,9 @@ export function noticeBoard(x, z, rot = false, y = 1.6, w = 1.5, h = 1.0, seed =
 
 // Dry-wipe board / floor plan. Reads as an office or a briefing room instantly.
 export function whiteboard(x, z, rot = false, y = 1.65, w = 1.9, h = 1.1, dir = 1) {
+  const seed = 211 + Math.round(x * 37 + z * 19 + y * 11);
+  const decal = wallDecal({ kind: 'wall-decal', style: 'whiteboard', x, y, z, w, h, rot, dir, seed });
+  if (decal) return decal;
   const t = 0.05;
   const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
   const o1 = 0.02 * dir, o2 = 0.04 * dir;
@@ -866,6 +894,9 @@ export function graffiti(x, z, rot = false, seed = 23, scale = 1, dir = 1) {
   const col = TAG_COLORS[Math.floor(R() * TAG_COLORS.length)];
   const t = 0.025;
   const y0 = 0.9 + R() * 0.8;
+  const decal = wallDecal({ kind: 'wall-decal', style: 'graffiti', x, y: y0, z,
+    w: 2.2 * scale, h: 1.15 * scale, rot, dir, seed, ink: col });
+  if (decal) return decal;
   const n = 4 + Math.floor(R() * 4);
   for (let i = 0; i < n; i++) {
     const bw = (0.18 + R() * 0.5) * scale, bh = (0.12 + R() * 0.45) * scale;
@@ -884,6 +915,9 @@ function c(i, R, col) {
 
 // Framed photo / small artwork, for the rooms that should read as somebody's home.
 export function picture(x, z, rot = false, y = 1.75, w = 0.42, h = 0.32, dir = 1) {
+  const seed = 401 + Math.round(x * 29 + z * 43 + y * 7);
+  const decal = wallDecal({ kind: 'wall-decal', style: 'picture', x, y, z, w, h, rot, dir, seed });
+  if (decal) return decal;
   const t = 0.04;
   const wide = a => (rot ? t : a), deep = a => (rot ? a : t);
   const o = 0.015 * dir;

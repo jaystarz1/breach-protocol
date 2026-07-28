@@ -621,8 +621,285 @@ function addMarketStall(batcher, scene, def, index) {
   }
 }
 
+const cssHex = value => `#${new THREE.Color(value).getHexString()}`;
+
+function paintPaper(ctx, R, x, y, w, h, fill, ragged = 4) {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(x + R() * ragged, y + R() * ragged);
+  ctx.lineTo(x + w - R() * ragged, y + R() * ragged);
+  ctx.lineTo(x + w - R() * ragged, y + h - R() * ragged);
+  ctx.lineTo(x + R() * ragged, y + h - R() * ragged);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function dirtyTile(ctx, R, size, amount = 48) {
+  for (let i = 0; i < amount; i++) {
+    const alpha = 0.025 + R() * 0.09;
+    ctx.fillStyle = `rgba(${R() < 0.55 ? '39,31,24' : '236,226,202'},${alpha})`;
+    const r = 0.4 + R() * 2.2;
+    ctx.fillRect(R() * size, R() * size, r, r * (0.45 + R()));
+  }
+}
+
+function paintPoster(ctx, def, R, size) {
+  const pad = 9;
+  paintPaper(ctx, R, pad, 5, size - pad * 2, size - 10, cssHex(def.stock), 7);
+  const ink = cssHex(def.ink);
+  const layout = Math.floor(R() * 4);
+  const wash = ctx.createLinearGradient(15, 18, size - 18, size * 0.68);
+  wash.addColorStop(0, ink);
+  wash.addColorStop(0.55, '#2a3235');
+  wash.addColorStop(1, '#8c8474');
+  ctx.fillStyle = wash;
+  ctx.fillRect(17, 18, size - 34, size * 0.49);
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#ece4d0';
+  if (layout === 0) {
+    ctx.beginPath();
+    ctx.moveTo(17, size * 0.56);
+    ctx.lineTo(size * 0.48, size * 0.23);
+    ctx.lineTo(size - 17, size * 0.48);
+    ctx.lineTo(size - 17, size * 0.66);
+    ctx.lineTo(17, size * 0.66);
+    ctx.fill();
+  } else if (layout === 1) {
+    ctx.save();
+    ctx.translate(size / 2, size * 0.42);
+    ctx.rotate(-0.48);
+    ctx.fillRect(-size * 0.46, -11, size * 0.92, 22);
+    ctx.restore();
+    ctx.globalAlpha = 0.5;
+    ctx.fillRect(size * 0.18, 22, 4, size * 0.42);
+    ctx.fillRect(size * 0.73, 22, 2, size * 0.42);
+  } else if (layout === 2) {
+    ctx.beginPath();
+    ctx.arc(size * 0.5, size * 0.41, size * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.arc(size * 0.5, size * 0.41, size * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillRect(22, 23, size * 0.31, size * 0.18);
+    ctx.fillRect(size * 0.56, 23, size * 0.27, size * 0.18);
+    ctx.fillRect(22, size * 0.45, size * 0.61, size * 0.17);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#171c1e';
+    ctx.fillRect(size * 0.45, 18, 3, size * 0.49);
+  }
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = ink;
+  for (let i = 0; i < 4; i++) {
+    const width = size * (0.67 - i * 0.09 - R() * 0.08);
+    ctx.fillRect(17, size * 0.75 + i * 7, width, i === 0 ? 4 : 2);
+  }
+  ctx.globalAlpha = 0.24;
+  ctx.fillStyle = '#261f19';
+  ctx.fillRect(7, 8, 8, 18);
+  ctx.fillRect(size - 15, size - 25, 8, 18);
+  ctx.globalAlpha = 1;
+  dirtyTile(ctx, R, size, 64);
+}
+
+function paintNotice(ctx, R, size) {
+  ctx.fillStyle = '#372d24';
+  ctx.fillRect(3, 3, size - 6, size - 6);
+  const cork = ctx.createLinearGradient(8, 8, size - 8, size);
+  cork.addColorStop(0, '#826345');
+  cork.addColorStop(1, '#594536');
+  ctx.fillStyle = cork;
+  ctx.fillRect(9, 9, size - 18, size - 18);
+  const papers = ['#d7d0b9', '#bdc8ca', '#cabd9c', '#c7c5be'];
+  for (let i = 0; i < 8; i++) {
+    const w = 24 + R() * 25, h = 21 + R() * 31;
+    const x = 13 + R() * (size - w - 26), y = 13 + R() * (size - h - 26);
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2);
+    ctx.rotate((R() - 0.5) * 0.18);
+    ctx.shadowColor = 'rgba(0,0,0,.3)';
+    ctx.shadowBlur = 2;
+    paintPaper(ctx, R, -w / 2, -h / 2, w, h, papers[i % papers.length], 2);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(35,43,47,.55)';
+    for (let line = 0; line < 3; line++) {
+      ctx.fillRect(-w * 0.34, -h * 0.2 + line * 5, w * (0.45 + R() * 0.22), 1.4);
+    }
+    ctx.fillStyle = i % 2 ? '#7d2f28' : '#344b5a';
+    ctx.beginPath();
+    ctx.arc(0, -h * 0.38, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  dirtyTile(ctx, R, size, 36);
+}
+
+function paintWhiteboard(ctx, R, size) {
+  ctx.fillStyle = '#62686b';
+  ctx.fillRect(2, 5, size - 4, size - 10);
+  ctx.fillStyle = '#d7d7cf';
+  ctx.fillRect(8, 10, size - 16, size - 24);
+  ctx.strokeStyle = 'rgba(42,65,74,.28)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath();
+    ctx.moveTo(16 + i * 19, 15);
+    ctx.lineTo(12 + i * 21, size - 23);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#354f5a';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath();
+    ctx.moveTo(15 + R() * 14, 25 + i * 19);
+    ctx.bezierCurveTo(42 + R() * 12, 15 + i * 22, 61 + R() * 18, 42 + i * 14,
+      size - 14, 24 + i * 20);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#8d352e';
+  ctx.beginPath();
+  ctx.moveTo(size * 0.56, size * 0.29);
+  ctx.lineTo(size * 0.76, size * 0.43);
+  ctx.lineTo(size * 0.66, size * 0.47);
+  ctx.stroke();
+  dirtyTile(ctx, R, size, 24);
+}
+
+function paintGraffiti(ctx, def, R, size) {
+  const primary = cssHex(def.ink);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = primary;
+  ctx.shadowColor = primary;
+  ctx.shadowBlur = 2.5;
+  ctx.lineWidth = 5 + R() * 4;
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath();
+    ctx.moveTo(11 + R() * 20, 25 + R() * 77);
+    ctx.bezierCurveTo(32 + R() * 28, 8 + R() * 102, 71 + R() * 30,
+      12 + R() * 105, size - 10, 24 + R() * 76);
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = primary;
+  for (let i = 0; i < 34; i++) {
+    ctx.globalAlpha = 0.18 + R() * 0.46;
+    const r = 0.4 + R() * 1.5;
+    ctx.beginPath();
+    ctx.arc(7 + R() * (size - 14), 10 + R() * (size - 20), r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function paintPicture(ctx, R, size) {
+  ctx.fillStyle = '#2f2923';
+  ctx.fillRect(4, 7, size - 8, size - 14);
+  const sky = ctx.createLinearGradient(10, 12, 10, size - 13);
+  sky.addColorStop(0, '#6f7b7c');
+  sky.addColorStop(0.55, '#a38f72');
+  sky.addColorStop(1, '#343e38');
+  ctx.fillStyle = sky;
+  ctx.fillRect(11, 14, size - 22, size - 28);
+  ctx.fillStyle = 'rgba(31,38,34,.82)';
+  ctx.beginPath();
+  ctx.moveTo(11, size - 14);
+  for (let x = 11; x <= size - 11; x += 12) ctx.lineTo(x, 58 + R() * 35);
+  ctx.lineTo(size - 11, size - 14);
+  ctx.fill();
+  dirtyTile(ctx, R, size, 20);
+}
+
+function addWallDecals(scene, defs) {
+  if (!defs.length) return;
+  const tile = 128, cols = 8;
+  const usedRows = Math.ceil(defs.length / cols);
+  const atlasW = tile * cols;
+  const atlasH = Math.pow(2, Math.ceil(Math.log2(Math.max(tile, usedRows * tile))));
+  const canvas = document.createElement('canvas');
+  canvas.width = atlasW;
+  canvas.height = atlasH;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, atlasW, atlasH);
+
+  const positions = [], normals = [], uvs = [], indices = [];
+  const counts = {};
+  let signature = 2166136261;
+  for (let i = 0; i < defs.length; i++) {
+    const def = defs[i];
+    const R = rng(def.seed);
+    const tx = (i % cols) * tile, ty = Math.floor(i / cols) * tile;
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.beginPath();
+    ctx.rect(0, 0, tile, tile);
+    ctx.clip();
+    if (def.style === 'poster') paintPoster(ctx, def, R, tile);
+    else if (def.style === 'notice') paintNotice(ctx, R, tile);
+    else if (def.style === 'whiteboard') paintWhiteboard(ctx, R, tile);
+    else if (def.style === 'graffiti') paintGraffiti(ctx, def, R, tile);
+    else if (def.style === 'picture') paintPicture(ctx, R, tile);
+    ctx.restore();
+
+    counts[def.style] = (counts[def.style] || 0) + 1;
+    signature ^= (def.seed + i * 131 + Math.round(def.x * 17) + Math.round(def.z * 29)) >>> 0;
+    signature = Math.imul(signature, 16777619) >>> 0;
+
+    const normal = def.rot ? [def.dir, 0, 0] : [0, 0, def.dir];
+    const right = def.rot ? [0, 0, -def.dir] : [def.dir, 0, 0];
+    const cx = def.x + normal[0] * 0.038, cy = def.y, cz = def.z + normal[2] * 0.038;
+    const hw = def.w / 2, hh = def.h / 2;
+    const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]];
+    for (const [side, up] of corners) {
+      positions.push(cx + right[0] * side, cy + up, cz + right[2] * side);
+      normals.push(...normal);
+    }
+    const u0 = tx / atlasW, u1 = (tx + tile) / atlasW;
+    const v0 = 1 - (ty + tile) / atlasH, v1 = 1 - ty / atlasH;
+    uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
+    const base = i * 4;
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = Math.min(quality.maxAnisotropy || 4, 8);
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  const mat = new THREE.MeshStandardMaterial({
+    map: texture,
+    transparent: true,
+    alphaTest: 0.08,
+    roughness: 0.94,
+    metalness: 0,
+    side: THREE.FrontSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const out = new THREE.Mesh(geometry, mat);
+  out.name = 'wall-decal-atlas';
+  out.castShadow = false;
+  out.receiveShadow = quality.shadows;
+  out.userData.decalCount = defs.length;
+  out.userData.decalCounts = counts;
+  out.userData.atlasSize = [atlasW, atlasH];
+  out.userData.signature = signature;
+  scene.userData.wallDecalStats = out.userData;
+  scene.add(out);
+}
+
 export function addVisualProps(scene, props = []) {
   const batcher = new InstanceBatcher(scene);
+  const wallDecals = [];
   let marketIndex = 0;
   for (const def of props) {
     if (def.kind === 'vehicle') addVehicle(batcher, def);
@@ -630,7 +907,9 @@ export function addVisualProps(scene, props = []) {
     else if (def.kind === 'market-stall') addMarketStall(batcher, scene, def, marketIndex++);
     else if (def.kind === 'roof-cap') addRoofCap(batcher, def);
     else if (def.kind === 'ceiling-fixture') addCeilingFixture(batcher, def);
+    else if (def.kind === 'wall-decal') wallDecals.push(def);
     else if (def.kind === 'skyline-stats') scene.userData.skylineStats = def.stats;
   }
   batcher.flush();
+  addWallDecals(scene, wallDecals);
 }

@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v39-fortified-watchposts';
+const CACHE = 'breach-protocol-v40-wall-decal-atlas';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
