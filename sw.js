@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v68-layered-viewmodel';
+const CACHE = 'breach-protocol-v69-grounded-combatants';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -20,7 +20,7 @@ const ASSETS = [
   'assets/materials/concrete/concrete-normal.webp',
   'assets/materials/concrete/concrete-roughness.webp',
   'assets/materials/NOTICE.md',
-  'assets/characters/Soldier.glb',
+  'assets/characters/SWAT.glb',
   'assets/characters/CivilianCasual.glb',
   'assets/characters/CivilianLongSleeve.glb',
   'assets/characters/CivilianWoman.glb',

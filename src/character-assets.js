@@ -14,7 +14,7 @@ if (quality.desktop) {
   try {
     const loader = new GLTFLoader();
     const [soldier, ...civilians] = await Promise.all([
-      loader.loadAsync('./assets/characters/Soldier.glb'),
+      loader.loadAsync('./assets/characters/SWAT.glb'),
       loader.loadAsync('./assets/characters/CivilianCasual.glb'),
       loader.loadAsync('./assets/characters/CivilianLongSleeve.glb'),
       loader.loadAsync('./assets/characters/CivilianWoman.glb'),
@@ -73,11 +73,31 @@ function factionMaterial(original, faction, silhouette, objectName = '') {
         out.color.set(tint);
       }
     } else {
-      out.color.multiply(new THREE.Color(tint));
+      // The desktop combatant is already a grounded SWAT mesh with distinct body, boot,
+      // exposed-skin and visor materials. Multiplying its source albedo preserved the old
+      // mustard cast and made opposing forces look like science-fiction toys. Assign a
+      // restrained field palette by authored material role instead.
+      const label = `${objectName} ${original.name || ''}`.toLowerCase();
+      const friendlyBlack = faction === 'black';
+      const friendlyBlue = faction === 'friendly';
+      if (/(skin)/.test(label)) {
+        tint = friendlyBlack ? 0xa8795c : friendlyBlue ? 0x9d7158 : 0x8d654c;
+      } else if (/(visor)/.test(label)) {
+        tint = 0x090d10;
+        out.roughness = 0.38;
+        out.metalness = 0.22;
+      } else if (/(black|feet|boot)/.test(label)) {
+        tint = friendlyBlack ? 0x0d1114 : friendlyBlue ? 0x121a21 : 0x171a16;
+      } else {
+        tint = friendlyBlack ? 0x181d20 : friendlyBlue ? 0x26343e : 0x3d4232;
+      }
+      out.color.set(tint);
     }
   }
-  out.roughness = Math.max(0.72, out.roughness ?? 0.8);
-  out.metalness = Math.min(0.08, out.metalness ?? 0);
+  if (!/(visor)/i.test(`${objectName} ${original.name || ''}`)) {
+    out.roughness = Math.max(0.78, out.roughness ?? 0.84);
+    out.metalness = Math.min(0.06, out.metalness ?? 0);
+  }
   factionMaterials.set(key, out);
   return out;
 }
@@ -88,16 +108,27 @@ const MERGED_CIVILIAN_MATERIAL = new THREE.MeshStandardMaterial({
   roughness: 0.86,
   metalness: 0.01,
 });
+const MERGED_SILHOUETTE_MATERIAL = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
 function bakeVertexColor(geometry, material) {
-  const source = Array.isArray(material) ? material[0] : material;
-  const color = source?.color || new THREE.Color(0xffffff);
+  const materials = Array.isArray(material) ? material : [material];
   const count = geometry.attributes.position.count;
   const values = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    values[i * 3] = color.r;
-    values[i * 3 + 1] = color.g;
-    values[i * 3 + 2] = color.b;
+  const fill = (start, length, source) => {
+    const color = source?.color || new THREE.Color(0xffffff);
+    const end = Math.min(count, start + length);
+    for (let i = start; i < end; i++) {
+      values[i * 3] = color.r;
+      values[i * 3 + 1] = color.g;
+      values[i * 3 + 2] = color.b;
+    }
+  };
+  fill(0, count, materials[0]);
+  // A multi-material skinned mesh stores its garment regions as geometry groups. Preserve
+  // those regions when collapsing the actor to one draw instead of painting the entire body
+  // with material zero.
+  for (const group of geometry.groups || []) {
+    fill(group.start, group.count, materials[group.materialIndex] || materials[0]);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
 }
@@ -107,7 +138,9 @@ function bakeVertexColor(geometry, material) {
 // twenty people in the market cost 163 draws before props, enemies or the squad. Bake each
 // piece's flat material colour into vertices and merge the compatible skin streams. The
 // silhouette, bones and clips remain untouched; a crowd member becomes one skinned draw.
-function mergeCivilianVisual(visual, cacheKey) {
+function mergeCivilianVisual(visual, cacheKey, {
+  name = 'civilian-merged-skinned', civilian = true,
+} = {}) {
   visual.updateMatrixWorld(true);
   const pieces = [];
   visual.traverse(object => {
@@ -142,6 +175,9 @@ function mergeCivilianVisual(visual, cacheKey) {
       const geometry = mergeGeometries(geometries, false);
       for (const source of geometries) source.dispose();
       if (!geometry) return null;
+      // Every source colour is vertex data now and this skin uses one material. Exporter
+      // groups no longer carry meaning and can make the merged actor look multi-draw.
+      geometry.clearGroups();
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
       cached = { geometry, sourceMeshes: pieces.length };
@@ -160,10 +196,11 @@ function mergeCivilianVisual(visual, cacheKey) {
   relative.decompose(merged.position, merged.quaternion, merged.scale);
   merged.bindMode = first.bindMode;
   merged.bind(first.skeleton, first.bindMatrix);
-  merged.name = 'civilian-merged-skinned';
+  merged.name = name;
   merged.castShadow = merged.receiveShadow = quality.shadows;
   merged.frustumCulled = false;
-  merged.userData.mergedCivilian = true;
+  merged.userData.mergedCivilian = civilian;
+  merged.userData.mergedCombatant = !civilian;
   merged.userData.sourceMeshes = cached.sourceMeshes;
   for (const piece of pieces) piece.parent?.remove(piece);
   visual.add(merged);
@@ -255,6 +292,49 @@ function aimBone(root, bone, child, target) {
   root.updateMatrixWorld(true);
 }
 
+function findRigObject(visual, name) {
+  const direct = visual.getObjectByName(name);
+  if (direct) return direct;
+  let match = null;
+  visual.traverse(object => {
+    if (!match && (object.name === name || object.name.endsWith(name))) match = object;
+  });
+  return match;
+}
+
+function poseAuthoredRifle(root, rig) {
+  if (!rig.weaponBones) {
+    const node = name => findRigObject(rig.visual, name);
+    rig.weaponBones = {
+      upperL: node('UpperArm.L'), lowerL: node('LowerArm.L'), wristL: node('Wrist.L'),
+      upperR: node('UpperArm.R'), lowerR: node('LowerArm.R'), wristR: node('Wrist.R'),
+    };
+  }
+  const b = rig.weaponBones;
+  if (rig.weaponPose) {
+    b.upperL?.quaternion.copy(rig.weaponPose.upperL);
+    b.lowerL?.quaternion.copy(rig.weaponPose.lowerL);
+    b.upperR?.quaternion.copy(rig.weaponPose.upperR);
+    b.lowerR?.quaternion.copy(rig.weaponPose.lowerR);
+    return;
+  }
+  // Low-ready rather than a rigid T-pose: trigger elbow tucked, support elbow lower and out,
+  // wrists converging on two separate points along the handguard.
+  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(-0.27, 1.18, 0.10));
+  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(-0.075, 1.25, 0.32));
+  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(0.34, 1.14, 0.27));
+  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(0.095, 1.24, 0.55));
+  // The solve above establishes local rotations once. Locomotion changes those four bones
+  // every mixer tick, so restore four cached quaternions afterward instead of repeating four
+  // world-matrix traversals for every combatant on every frame.
+  rig.weaponPose = {
+    upperL: b.upperL?.quaternion.clone(),
+    lowerL: b.lowerL?.quaternion.clone(),
+    upperR: b.upperR?.quaternion.clone(),
+    lowerR: b.lowerR?.quaternion.clone(),
+  };
+}
+
 function poseAuthoredHostage(root, rig) {
   const action = rig.actions.sitting;
   if (action) {
@@ -329,6 +409,23 @@ function patch(color, position, scale) {
   return mesh;
 }
 
+function mapActions(clips, mixer) {
+  const actions = {};
+  for (const clip of clips) {
+    const action = mixer.clipAction(clip);
+    const full = clip.name.toLowerCase();
+    const short = full.split('|').pop();
+    actions[full] = action;
+    actions[short] = action;
+    if (short.endsWith('_idle')) actions.idle = action;
+    if (short.endsWith('_run')) actions.run = action;
+    if (short.endsWith('_walk')) actions.walk = action;
+    if (short.endsWith('_sitting')) actions.sitting = action;
+    if (short.endsWith('_death') || short === 'death') actions.death = action;
+  }
+  return actions;
+}
+
 export function createAuthoredCharacter({ friendly, black, silhouette }) {
   if (!soldierSource) return null;
   const root = new THREE.Group();
@@ -346,22 +443,29 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
       object.material = factionMaterial(object.material, faction, silhouette, object.name);
     }
   });
+  const mergedSkin = mergeCivilianVisual(
+    visual, `combatant:${faction}:${silhouette ? 'silhouette' : 'lit'}`, {
+    name: 'combatant-merged-skinned',
+    civilian: false,
+  });
+  if (mergedSkin && silhouette) mergedSkin.material = MERGED_SILHOUETTE_MATERIAL;
   root.add(visual);
 
   const rifle = new THREE.Mesh(RIFLE_GEO, silhouette
     ? new THREE.MeshBasicMaterial({ color: 0x020305 })
     : RIFLE_MAT);
-  // Carried diagonally across the chest. A rifle pointed exactly down the actor's forward
-  // axis collapses to a tiny rectangle and makes an armed man look unarmed head-on.
-  rifle.position.set(0.04, 1.23, 0.27);
-  rifle.rotation.set(0, Math.PI / 2, -0.36);
+  // Low-ready on the actor's forward axis. The previous ninety-degree rotation made the gun
+  // a broad rectangular bar floating across the chest whenever an enemy faced the player.
+  // A real rifle aimed at you foreshortens; posture and faction kit carry identification.
+  rifle.position.set(0.03, 1.22, 0.26);
+  rifle.rotation.set(0.03, Math.PI - 0.16, -0.04);
   rifle.castShadow = quality.shadows;
   root.add(rifle);
 
   if (!silhouette && friendly) {
     root.add(
-      patch(0x38e8ff, [0, 1.42, 0.245], [0.18, 0.045, 0.018]),
-      patch(0x38e8ff, [0, 1.42, -0.245], [0.18, 0.045, 0.018]),
+      patch(0x4f96a8, [0, 1.42, 0.245], [0.075, 0.025, 0.014]),
+      patch(0x4f96a8, [0, 1.42, -0.245], [0.075, 0.025, 0.014]),
     );
   } else if (!silhouette) {
     // Small shoulder tape, not a floating faction bar. Identification must come from the
@@ -370,9 +474,12 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
   }
 
   const mixer = new THREE.AnimationMixer(visual);
-  const actions = {};
-  for (const clip of soldierClips) actions[clip.name.toLowerCase()] = mixer.clipAction(clip);
-  const idle = actions.idle || actions.character_idle;
+  const actions = mapActions(soldierClips, mixer);
+  // This asset includes weapon-specific upper-body work. Prefer it over the neutral clips so
+  // hands remain on the rifle instead of swinging like an unarmed mannequin.
+  actions.combatIdle = actions.idle_gun || actions.idle_gun_shoot || actions.idle;
+  actions.combatRun = actions.run_shoot || actions.run || actions.walk;
+  const idle = actions.combatIdle;
   if (idle) idle.play();
   root.userData.rig = {
     authored: true,
@@ -382,10 +489,14 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
     currentAction: idle || null,
     lastAnimationTime: performance.now(),
     rifle,
+    mergedSkin,
     hostile: true,
     friendly: !!friendly,
+    combatant: true,
     baseVisualY: visual.position.y,
   };
+  root.userData.rig.applyWeaponPose = () => poseAuthoredRifle(root, root.userData.rig);
+  root.userData.rig.applyWeaponPose();
   root.userData.bob = 0;
   return root;
 }
@@ -434,19 +545,7 @@ export function createCivilianCharacter({
   }
 
   const mixer = new THREE.AnimationMixer(visual);
-  const actions = {};
-  for (const clip of source.clips) {
-    const action = mixer.clipAction(clip);
-    const full = clip.name.toLowerCase();
-    const short = full.split('|').pop();
-    actions[full] = action;
-    actions[short] = action;
-    if (short.endsWith('_idle')) actions.idle = action;
-    if (short.endsWith('_run')) actions.run = action;
-    if (short.endsWith('_walk')) actions.walk = action;
-    if (short.endsWith('_sitting')) actions.sitting = action;
-    if (short.endsWith('_death') || short === 'death') actions.death = action;
-  }
+  const actions = mapActions(source.clips, mixer);
   const idle = actions.idle || actions.idle_neutral;
   const initial = hostage ? (actions.sitting || idle) : idle;
   if (initial) initial.play();
@@ -484,14 +583,15 @@ export function animateAuthoredCharacter(root, moving, flinch = 0) {
     return;
   }
   const desired = moving
-    ? (rig.actions.run || rig.actions.walk || rig.actions.character_walk)
-    : (rig.actions.idle || rig.actions.character_idle);
+    ? (rig.actions.combatRun || rig.actions.run || rig.actions.walk || rig.actions.character_walk)
+    : (rig.actions.combatIdle || rig.actions.idle || rig.actions.character_idle);
   if (desired && desired !== rig.currentAction) {
     desired.reset().fadeIn(0.14).play();
     rig.currentAction?.fadeOut(0.14);
     rig.currentAction = desired;
   }
   rig.mixer.update(dt);
+  if (rig.combatant) poseAuthoredRifle(root, rig);
   const hit = flinch * 3.2;
   rig.visual.rotation.x = -hit * 0.12;
   rig.visual.rotation.z = hit * 0.07;

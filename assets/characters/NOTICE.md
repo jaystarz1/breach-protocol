@@ -1,13 +1,14 @@
 # Character asset notice
 
-`Soldier.glb` is vendored from the Three.js r160 example assets:
+The glTF loader and skeleton-cloning utilities under `lib/` are vendored from Three.js r160,
+distributed under the MIT License. Copyright © 2010-2023 Three.js authors.
 
-https://github.com/mrdoob/three.js/blob/r160/examples/models/gltf/Soldier.glb
+`SWAT.glb` is the animated SWAT model by Quaternius, downloaded from Poly Pizza:
 
-The Three.js repository is distributed under the MIT License. The corresponding loader and
-skeleton-cloning utilities are vendored from the same r160 release under `lib/`.
+https://poly.pizza/m/Btfn3G5Xv4
 
-Copyright © 2010-2023 Three.js authors.
+The model is dedicated to the public domain under CC0 1.0. It supplies the desktop combatant
+mesh and weapon-specific locomotion clips.
 
 `CivilianCasual.glb`, `CivilianLongSleeve.glb`, and `CivilianWoman.glb` are models by
 Quaternius, distributed as public-domain CC0 assets through Poly Pizza:
