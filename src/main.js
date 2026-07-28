@@ -242,9 +242,6 @@ function startLevel(id) {
   window.__bpVisualProps = visualProps;
   window.__bpMissionVariant = missionVariant;
   const geo = [...L.geo(), ...(L.extraGeo ? L.extraGeo() : [])];
-  window.__bpBeacons = null;
-  window.__bpVisualProps = null;
-  window.__bpMissionVariant = null;
   const roomLights = takeLights();
   scene.background = new THREE.Color(L.sky);
   scene.fog = new THREE.Fog(L.fog[0], L.fog[1], L.fog[2]);
@@ -264,6 +261,9 @@ function startLevel(id) {
     // a 300m ring of scenery must not blow out the shadow frustum it has no business in.
     geo.push(...skyline(bounds, L.fog[2], L.id * 104729, { body: L.skylineTint }));
   }
+  window.__bpBeacons = null;
+  window.__bpVisualProps = null;
+  window.__bpMissionVariant = null;
 
   // PBR metals need something to reflect or they render black. Also supplies soft ambient
   // bounce, which is why the ambient light below can be dialled back once this is on.

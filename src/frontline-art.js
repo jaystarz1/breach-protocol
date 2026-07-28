@@ -337,5 +337,54 @@ export function addFrontlineMissionArt(scene, levelId) {
       if (i < 7) bags.push([side * (3.5 + i * 0.5), 0.48, 34, 0, 0, Math.PI / 2, 1, 1, 1]);
     }
     instanced(scene, new THREE.CapsuleGeometry(0.17, 0.38, 4, 8), sand, bags);
+
+    // The compound's old municipal wall has been converted into a fighting position. These
+    // silhouettes sit above the collision shell and turn the blank slab into a defended gate.
+    const timber = new THREE.MeshStandardMaterial({ color: 0x61533e, roughness: 0.93 });
+    const char = new THREE.MeshStandardMaterial({
+      color: 0x202324, roughness: 1, transparent: true, opacity: 0.76,
+    });
+    const watchGlass = new THREE.MeshStandardMaterial({
+      color: 0x162630, roughness: 0.2, metalness: 0.08,
+    });
+    const towerParts = [];
+    const towerRoofs = [];
+    const towerSupports = [];
+    const towerWindows = [];
+    for (const x of [-8.5, 8.5]) {
+      towerParts.push(
+        [x, 4.35, 30.25, 0, 0, 0, 4.2, 0.24, 2.35],
+        [x, 5.25, 30.75, 0, 0, 0, 4.0, 1.7, 0.14],
+        [x - 1.92, 5.15, 30.25, 0, 0, 0, 0.14, 1.9, 2.1],
+        [x + 1.92, 5.15, 30.25, 0, 0, 0, 0.14, 1.9, 2.1],
+      );
+      towerRoofs.push([x, 6.25, 30.25, 0, 0, 0, 4.65, 0.18, 2.75]);
+      towerWindows.push([x, 5.35, 30.84, 0, 0, 0, 3.2, 0.64, 0.04]);
+      for (const dx of [-1.55, 1.55]) {
+        towerSupports.push([x + dx, 2.15, 30.25, 0, 0, 0, 1, 4.3, 1]);
+      }
+    }
+    instanced(scene, new THREE.BoxGeometry(1, 1, 1), timber, towerParts);
+    instanced(scene, new THREE.BoxGeometry(1, 1, 1), timber, towerRoofs);
+    instanced(scene, new THREE.BoxGeometry(1, 1, 1), watchGlass, towerWindows, false);
+    instanced(scene, new THREE.CylinderGeometry(0.075, 0.1, 1, 8), steel, towerSupports);
+
+    const gateScars = [
+      [-12.5, 2.1, 30.21, 0, 0, -0.2, 0.86, 0.7, 1],
+      [15.8, 2.55, 30.21, 0, 0, 0.12, 0.82, 0.7, 1],
+    ];
+    instanced(scene, raggedDisc(1, 18, 1091), char, gateScars, false);
+
+    const gateRubble = [];
+    for (let i = 0; i < 28; i++) {
+      const side = i % 2 ? -1 : 1;
+      gateRubble.push([
+        side * (3.3 + (i % 7) * 0.32), 0.08 + (i % 3) * 0.055,
+        29.2 + ((i * 7) % 9) * 0.15,
+        i * 0.31, i * 0.17, i * 0.23,
+        0.42 + (i % 4) * 0.12, 0.28 + (i % 3) * 0.11, 0.38 + (i % 5) * 0.08,
+      ]);
+    }
+    instanced(scene, new THREE.DodecahedronGeometry(0.19, 0), dark, gateRubble, false);
   }
 }

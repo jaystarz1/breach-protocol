@@ -225,6 +225,12 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
       const w = arc * (0.55 + R() * 0.4), d = arc * (0.5 + R() * 0.35);
       const h = 12 + R() * (24 + t * 46);
       geo.push(box(bx, h / 2, bz, w, h, d, tint, false));
+      if (quality.desktop && window.__bpVisualProps && h < 30 && (i + ring * 2) % 5 === 0) {
+        window.__bpVisualProps.push({
+          kind: 'roof-cap', x: bx, z: bz, y: h, w, d,
+          color: new THREE.Color(tint).multiplyScalar(0.72).getHex(),
+        });
+      }
       // roof clutter reads as a city rather than a bar chart
       if (R() < 0.55) geo.push(box(bx + (R() - 0.5) * w * 0.5, h + 1.2, bz + (R() - 0.5) * d * 0.5, w * 0.16, 2.4, d * 0.16, tint, false));
       if (R() < 0.3) geo.push(box(bx + (R() - 0.5) * w * 0.6, h + 3.6, bz + (R() - 0.5) * d * 0.6, 0.6, 7.2, 0.6, tint, false));

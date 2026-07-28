@@ -118,6 +118,23 @@ const SHARD_GEO = (() => {
   geometry.computeVertexNormals();
   return geometry;
 })();
+const DRAIN_GEO = new THREE.CylinderGeometry(0.055, 0.065, 1, 8);
+const AC_FAN_GEO = new THREE.CylinderGeometry(0.22, 0.22, 0.035, 12);
+const ROOF_CAP_GEO = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.5, 0);
+  shape.lineTo(0.5, 0);
+  shape.lineTo(0.5, 0.26);
+  shape.lineTo(0, 0.62);
+  shape.lineTo(-0.5, 0.26);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 1, bevelEnabled: false, curveSegments: 1,
+  });
+  geometry.translate(0, 0, -0.5);
+  geometry.computeVertexNormals();
+  return geometry;
+})();
 
 function addVehicle(batcher, def) {
   const damage = Math.abs(Math.round(def.x * 17 + def.z * 31)) % 5;
@@ -263,6 +280,42 @@ function addFacade(batcher, def) {
     color: 0x7892a1, roughness: 0.18, metalness: 0.08,
     transparent: true, opacity: 0.58, side: THREE.DoubleSide,
   }));
+  const utilityMat = standard('facade-utility', 0x394043, 0.7, 0.48);
+  const acMat = standard('facade-ac', 0x596166, 0.82, 0.28);
+
+  const facadeParent = new THREE.Matrix4().compose(
+    new THREE.Vector3(
+      (def.x1 + def.x2) / 2 + nx * (def.out ?? 0.2),
+      def.yBase,
+      (def.z1 + def.z2) / 2 + nz * (def.out ?? 0.2),
+    ),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
+    new THREE.Vector3(1, 1, 1),
+  );
+  // Cornices, downpipes and wall-mounted plant break the single-box outline at negligible
+  // cost because every repeated element is still one instanced batch.
+  const gap = 0.55 + R() * Math.min(2.2, len * 0.12);
+  for (const side of [-1, 1]) {
+    const segment = Math.max(0.5, len / 2 - gap);
+    batcher.add('facade-cornice', UNIT_BOX, frameMat,
+      instanceMatrix(facadeParent, side * (len + gap) / 4, def.height - 0.08, 0.08,
+        segment, 0.26, 0.42));
+  }
+  for (const x of [-len / 2 + 0.55, len / 2 - 0.55]) {
+    batcher.add('facade-downpipes', DRAIN_GEO, utilityMat,
+      instanceMatrix(facadeParent, x, def.height * 0.48, 0.16, 1, def.height * 0.92, 1));
+  }
+  if (def.height > 5 && len > 8) {
+    const acCount = Math.min(3, Math.max(1, Math.floor(len / 15)));
+    for (let i = 0; i < acCount; i++) {
+      const x = -len * 0.3 + i * (len * 0.6 / Math.max(1, acCount - 1));
+      const y = Math.min(def.height - 1.4, 2.5 + (i % 2) * 2.8);
+      batcher.add('facade-ac-boxes', UNIT_BOX, acMat,
+        instanceMatrix(facadeParent, x, y, 0.27, 0.72, 0.52, 0.38));
+      batcher.add('facade-ac-fans', AC_FAN_GEO, utilityMat,
+        instanceMatrix(facadeParent, x, y, 0.49, 1, 1, 1, Math.PI / 2));
+    }
+  }
 
   for (let fy = def.yBase + 1.2; fy < def.yBase + def.height - 1.3; fy += floorH) {
     for (let s = 1.8; s < len - 1.8; s += step) {
@@ -320,6 +373,14 @@ function addFacade(batcher, def) {
   }
 }
 
+function addRoofCap(batcher, def) {
+  const parent = new THREE.Matrix4().makeTranslation(def.x, def.y, def.z);
+  const roof = standard('roof-cap', 0xffffff, 0.88, 0.03);
+  batcher.add('roof-caps', ROOF_CAP_GEO, roof,
+    instanceMatrix(parent, 0, 0, 0, def.w * 0.96, Math.min(3.4, def.w * 0.22), def.d * 0.96),
+    false, def.color);
+}
+
 function addMarketStall(batcher, scene, def, index) {
   const parent = new THREE.Matrix4().makeTranslation(def.x, 0, def.z);
   const steel = standard('stall-steel', 0x343a3f, 0.42, 0.72);
@@ -366,6 +427,7 @@ export function addVisualProps(scene, props = []) {
     if (def.kind === 'vehicle') addVehicle(batcher, def);
     else if (def.kind === 'facade') addFacade(batcher, def);
     else if (def.kind === 'market-stall') addMarketStall(batcher, scene, def, marketIndex++);
+    else if (def.kind === 'roof-cap') addRoofCap(batcher, def);
   }
   batcher.flush();
 }

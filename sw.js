@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v27-surface-and-civilian-pass';
+const CACHE = 'breach-protocol-v28-architectural-pass';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

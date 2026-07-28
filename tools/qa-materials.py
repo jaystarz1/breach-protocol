@@ -11,6 +11,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:4178/?renderer=desktop")
     parser.add_argument("--output", default="/private/tmp/bp-materials")
+    parser.add_argument("--levels", default="1,4,9,10")
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
@@ -25,7 +26,7 @@ def main():
         page.wait_for_function("() => !!window.BP", timeout=90000)
 
         results = {}
-        for level in (1, 4, 9, 10):
+        for level in [int(value) for value in args.levels.split(",") if value.strip()]:
             page.evaluate("(id) => BP.startLevel(id)", level)
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             page.wait_for_timeout(150)
