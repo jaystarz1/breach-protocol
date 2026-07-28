@@ -58,7 +58,7 @@ export class DroneController {
     this.overlay.innerHTML = `
       <div class="drone-frame"></div>
       <div class="drone-reticle"><i></i><b></b></div>
-      <div class="drone-label">VEKTOR ISR // OP ALPHA</div>
+      <div class="drone-label">VEKTOR ISR // ${definition.label || 'TACTICAL UAS'}</div>
       <div class="drone-status"></div>
       <div class="drone-help">WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE MARK</div>
     `;

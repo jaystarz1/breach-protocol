@@ -148,6 +148,33 @@ function metalRough() {
   return c;
 }
 
+function fabricCanvas() {
+  const { c, x } = canvas2d();
+  x.fillStyle = '#b8b8b8';
+  x.fillRect(0, 0, SIZE, SIZE);
+  // Fine ripstop weave. Kept close in value so it reads through grazing light without
+  // turning uniforms into patterned camouflage at medium range.
+  for (let i = 0; i < SIZE; i += 4) {
+    x.strokeStyle = i % 8 ? 'rgba(255,255,255,.045)' : 'rgba(20,20,20,.055)';
+    x.beginPath(); x.moveTo(i + 0.5, 0); x.lineTo(i + 0.5, SIZE); x.stroke();
+    x.beginPath(); x.moveTo(0, i + 0.5); x.lineTo(SIZE, i + 0.5); x.stroke();
+  }
+  speckle(x, { base: 184, spread: 18, density: 0.22, dot: 0.12 });
+  return c;
+}
+
+function fabricRoughCanvas() {
+  const { c, x } = canvas2d();
+  x.fillStyle = '#e0e0e0';
+  x.fillRect(0, 0, SIZE, SIZE);
+  for (let i = 0; i < SIZE; i += 4) {
+    x.strokeStyle = 'rgba(20,20,20,.08)';
+    x.beginPath(); x.moveTo(i, 0); x.lineTo(i, SIZE); x.stroke();
+    x.beginPath(); x.moveTo(0, i); x.lineTo(SIZE, i); x.stroke();
+  }
+  return c;
+}
+
 // ---------- Environment ----------
 // A metal with nothing to reflect renders BLACK, which is why naive PBR conversions look
 // worse than the Lambert they replaced. three's RoomEnvironment lives in examples/jsm and
@@ -205,10 +232,12 @@ export function surfaces() {
   if (cache) return cache;
   const cc = concreteCanvas(), cr = concreteRoughCanvas();
   const mc = metalMap(), mr = metalRough();
+  const fc = fabricCanvas(), fr = fabricRoughCanvas();
   cache = {
     // The colour canvas is reused as the height field: its luminance variation IS the relief.
     concrete: { map: finish(cc), roughnessMap: finish(cr), normalMap: heightToNormal(cc, 1.4) },
     metal: { map: finish(mc), roughnessMap: finish(mr), normalMap: heightToNormal(mc, 1.1) },
+    fabric: { map: finish(fc, 2), roughnessMap: finish(fr, 2), normalMap: heightToNormal(fc, 0.72) },
   };
   return cache;
 }

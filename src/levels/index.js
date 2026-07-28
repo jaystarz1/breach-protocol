@@ -338,6 +338,7 @@ export const LEVELS = [
       { type: 'reach', zone: [-11.2, -41.6, 3], text: 'ESTABLISH OBSERVATION POST ALPHA' },
       {
         type: 'drone',
+        label: 'OP ALPHA',
         text: 'RECON EASTERN APPROACHES — MARK THREE ASSAULT ROUTES',
         launch: [-11.2, 1.25, -41.6],
         yaw: Math.PI,
@@ -388,6 +389,14 @@ export const LEVELS = [
       { type: 'clear', zone: null, text: 'CLEAR ALL THREE FLOORS — PROTECT THE HOSTAGES' },
       { type: 'rescue', text: 'CUT THE HOSTAGES LOOSE — WALK UP TO EACH ONE' },
       { type: 'reach', zone: [-2, -6, 3, 9], text: 'GET TO THE ROOF' },
+      {
+        type: 'drone',
+        label: 'OP ALPHA',
+        text: 'LAUNCH FROM OP ALPHA — MAP THE NEXT ASSAULT AXES',
+        launch: [-2, 9.45, -6],
+        yaw: Math.PI,
+        targets: [[-8, 0.1, 12], [10, 0.1, 6], [0, 0.1, -18]],
+      },
     ],
   },
 
@@ -692,6 +701,14 @@ export const LEVELS = [
     ],
     reinforce: { every: 26, first: 30, max: 5, group: 2, range: 50, at: [[0, 0, 6], [-6, 0, 8]] },
     objectives: [
+      {
+        type: 'drone',
+        label: 'OP BRAVO',
+        text: 'OP BRAVO ISR — MARK THE TOWER CORDON BEFORE INSERTION',
+        launch: [3, 12.55, -2],
+        yaw: Math.PI,
+        targets: [[12, 0.1, 12], [-14, 0.1, 8], [0, 0.1, 14]],
+      },
       { type: 'clear', zone: null, text: 'CLEAR THE TOWER TOP TO BOTTOM' },
       { type: 'reach', zone: [0, 14, 4], text: 'EXTRACT AT STREET LEVEL' },
     ],

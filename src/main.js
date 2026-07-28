@@ -18,7 +18,11 @@ import { environment, environmentFrom } from './textures.js';
 import { skyDome, groundPlate, skyline, takeLights } from './world.js';
 import { spawnSquad, spawnRouteTeam } from './squad.js';
 import { addStreetSweepArt } from './street-sweep-art.js';
-import { addFrontlineAmbientArt, addFrontlineStreetArt } from './frontline-art.js';
+import {
+  addFrontlineAmbientArt,
+  addFrontlineMissionArt,
+  addFrontlineStreetArt,
+} from './frontline-art.js';
 import { addVisualProps } from './visual-kit.js';
 import { createRenderPipeline } from './renderer/render-pipeline.js';
 import { CAMPAIGN, briefingText, campaignSnapshot } from './campaign.js';
@@ -347,6 +351,7 @@ function startLevel(id) {
   const { solids, litMesh } = buildStaticGeometry(scene, geo);
   addVisualProps(scene, visualProps);
   if (!indoor) addFrontlineAmbientArt(scene, L.id, bounds);
+  addFrontlineMissionArt(scene, L.id);
   if (L.id === 2) {
     addStreetSweepArt(scene);
     addFrontlineStreetArt(scene);

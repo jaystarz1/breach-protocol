@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import { makeBox } from './physics.js';
 import { quality } from './quality.js';
 import { surfaces } from './textures.js';
+import {
+  animateAuthoredCharacter,
+  createAuthoredCharacter,
+  kneelAuthoredCharacter,
+  stopAuthoredCharacter,
+} from './character-assets.js';
 
 // Texels per world metre. Every face is projected at this scale regardless of box size,
 // so a 20m wall and a 0.5m crate share the same grain and nothing stretches.
@@ -111,15 +117,95 @@ function buildEmissive(scene, geo) {
 
 // Character/prop surfaces. Cloth and skin want no texture but do want PBR falloff;
 // flat Lambert is what made everything read as moulded plastic.
+const bodyMaterials = new Map();
 export function bodyMaterial(color) {
-  return quality.pbr
-    ? new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0.0 })
-    : new THREE.MeshLambertMaterial({ color });
+  const key = `${quality.pbr ? 'pbr' : 'lit'}:${color}`;
+  if (bodyMaterials.has(key)) return bodyMaterials.get(key);
+  let mat;
+  if (quality.pbr) {
+    const fabric = surfaces().fabric;
+    mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.9, metalness: 0,
+      map: quality.textures ? fabric.map : null,
+      roughnessMap: quality.textures ? fabric.roughnessMap : null,
+      normalMap: quality.textures ? fabric.normalMap : null,
+      normalScale: quality.textures ? new THREE.Vector2(0.16, 0.16) : undefined,
+    });
+  } else {
+    mat = new THREE.MeshLambertMaterial({ color });
+  }
+  bodyMaterials.set(key, mat);
+  return mat;
 }
 
 // ---------- Low-poly humanoid ----------
 const BODY_CAPSULE = new THREE.CapsuleGeometry(0.5, 1, 5, 10);
 const HEAD_SPHERE = new THREE.SphereGeometry(0.5, 16, 12);
+const UNIT_CHARACTER_BOX = new THREE.BoxGeometry(1, 1, 1);
+
+function mergeCharacterParts(parts) {
+  const positions = [], normals = [], uvs = [];
+  const matrix = new THREE.Matrix4();
+  const rotation = new THREE.Quaternion();
+  const position = new THREE.Vector3();
+  const scale = new THREE.Vector3();
+  for (const part of parts) {
+    position.set(...part.pos);
+    scale.set(...part.scale);
+    rotation.setFromEuler(new THREE.Euler(...(part.rot || [0, 0, 0])));
+    matrix.compose(position, rotation, scale);
+    const geometry = part.geometry.toNonIndexed();
+    geometry.applyMatrix4(matrix);
+    const p = geometry.attributes.position;
+    const n = geometry.attributes.normal;
+    const uv = geometry.attributes.uv;
+    for (let i = 0; i < p.count; i++) {
+      positions.push(p.getX(i), p.getY(i), p.getZ(i));
+      normals.push(n.getX(i), n.getY(i), n.getZ(i));
+      uvs.push(uv ? uv.getX(i) : 0, uv ? uv.getY(i) : 0);
+    }
+    geometry.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  out.computeBoundingSphere();
+  return out;
+}
+
+const TORSO_GEO = mergeCharacterParts([
+  { geometry: BODY_CAPSULE, pos: [0, 1.13, 0], scale: [0.34, 0.15, 0.2] },
+  { geometry: BODY_CAPSULE, pos: [0, 1.4, 0], scale: [0.4, 0.15, 0.22] },
+]);
+const TACTICAL_GEAR_GEO = mergeCharacterParts([
+  { geometry: BODY_CAPSULE, pos: [0, 1.38, 0], scale: [0.42, 0.13, 0.26] },
+  { geometry: UNIT_CHARACTER_BOX, pos: [-0.105, 1.22, 0.145], scale: [0.16, 0.14, 0.11] },
+  { geometry: UNIT_CHARACTER_BOX, pos: [0.105, 1.22, 0.145], scale: [0.16, 0.14, 0.11] },
+  { geometry: UNIT_CHARACTER_BOX, pos: [0, 1.04, 0], scale: [0.39, 0.08, 0.23] },
+  { geometry: BODY_CAPSULE, pos: [0, 1.36, -0.19], scale: [0.34, 0.21, 0.14] },
+  { geometry: BODY_CAPSULE, pos: [-0.29, 1.47, 0], scale: [0.14, 0.09, 0.16] },
+  { geometry: BODY_CAPSULE, pos: [0.29, 1.47, 0], scale: [0.14, 0.09, 0.16] },
+  { geometry: UNIT_CHARACTER_BOX, pos: [-0.31, 1.28, -0.02], scale: [0.09, 0.22, 0.12] },
+]);
+const HOSTILE_MARK_GEO = mergeCharacterParts([
+  { geometry: UNIT_CHARACTER_BOX, pos: [-0.265, 1.33, 0], scale: [0.13, 0.07, 0.14] },
+  { geometry: UNIT_CHARACTER_BOX, pos: [0.265, 1.33, 0], scale: [0.13, 0.07, 0.14] },
+]);
+const HELMET_ACCESSORY_GEO = mergeCharacterParts([
+  { geometry: UNIT_CHARACTER_BOX, pos: [0, 0.17, 0.145], scale: [0.29, 0.045, 0.12] },
+  { geometry: UNIT_CHARACTER_BOX, pos: [-0.235, 0.17, 0], scale: [0.045, 0.09, 0.22] },
+  { geometry: UNIT_CHARACTER_BOX, pos: [0.235, 0.17, 0], scale: [0.045, 0.09, 0.22] },
+  { geometry: HEAD_SPHERE, pos: [-0.235, 0.055, 0], scale: [0.075, 0.1, 0.055] },
+  { geometry: HEAD_SPHERE, pos: [0.235, 0.055, 0], scale: [0.075, 0.1, 0.055] },
+  { geometry: UNIT_CHARACTER_BOX, pos: [0, 0.255, 0.245], scale: [0.1, 0.075, 0.035] },
+]);
+
+function characterMesh(geometry, color) {
+  const out = new THREE.Mesh(geometry, bodyMaterial(color));
+  out.castShadow = out.receiveShadow = quality.shadows;
+  return out;
+}
 
 function limb(w, h, d, color, x, y, z) {
   // Clothing and anatomy use a rounded silhouette. Thin plates, optics and weapons retain
@@ -174,8 +260,12 @@ const OD_PANTS = [0x343a25, 0x3b4129, 0x2e3320];
 const SILHOUETTE_MAT = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
 export function makeCharacter({ hostile, hostage, friendly, black, silhouette, concealed }) {
-  const g = new THREE.Group();
   const armed = !!hostile || !!friendly;
+  if (armed && !concealed && !hostage) {
+    const authored = createAuthoredCharacter({ friendly, black, silhouette });
+    if (authored) return authored;
+  }
+  const g = new THREE.Group();
   const skin = SKINS[Math.floor(Math.random() * SKINS.length)];
   const shirt = friendly ? (black ? 0x16191c : 0x2d3a4a)
     : hostile && !concealed ? OD_SHIRT[Math.floor(Math.random() * OD_SHIRT.length)]
@@ -187,21 +277,17 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
 
   // hips + torso (slight taper: chest wider than waist)
   g.add(limb(0.32, 0.14, 0.2, pants, 0, 0.92, 0));
-  g.add(limb(0.34, 0.3, 0.2, shirt, 0, 1.13, 0));
-  g.add(limb(0.4, 0.3, 0.22, shirt, 0, 1.4, 0));       // chest
+  g.add(characterMesh(TORSO_GEO, shirt));
   if (armed && !concealed) {
     const rig = friendly ? (black ? 0x0d0f11 : 0x1b3560) : 0x3f4529;   // olive webbing
-    g.add(limb(0.42, 0.26, 0.26, rig, 0, 1.38, 0));                    // chest rig
-    g.add(limb(0.14, 0.1, 0.28, armed && !friendly ? 0x2f3520 : 0x1c1f22, -0.1, 1.24, 0.02)); // mag pouches
-    g.add(limb(0.14, 0.1, 0.28, armed && !friendly ? 0x2f3520 : 0x1c1f22, 0.1, 1.24, 0.02));
+    g.add(characterMesh(TACTICAL_GEAR_GEO, rig));
   }
   if (hostile && !concealed) {
     // Olive drab is correct for what these men are, but it cost the silhouette its single
     // strongest hostile tell (the old red chest rig) at exactly the moment identification
     // matters most. A red armband and helmet rag put that cue back — and irregular forces
     // really do mark themselves this way, so it costs nothing in plausibility.
-    g.add(limb(0.13, 0.11, 0.135, 0x8f2622, -0.265, 1.33, 0));
-    g.add(limb(0.135, 0.11, 0.13, 0x8f2622, 0.265, 1.33, 0));
+    g.add(characterMesh(HOSTILE_MARK_GEO, 0x8f2622));
   }
   if (friendly) {
     g.add(accent(0.2, 0.05, 0.02, 0x38e8ff, 0, 1.48, 0.135));   // chest IFF panel
@@ -230,7 +316,8 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
     helmet.position.y = 0.24;
     helmet.castShadow = quality.shadows;
     headG.add(helmet);
-    headG.add(limb(0.28, 0.045, 0.12, lid, 0, 0.16, -0.09));
+    headG.add(characterMesh(HELMET_ACCESSORY_GEO, lid));
+    headG.add(accent(0.19, 0.055, 0.025, friendly ? 0x1f3038 : 0x20251d, 0, 0.1, 0.145));
     if (hostile) headG.add(limb(0.27, 0.045, 0.28, 0x8f2622, 0, 0.155, 0)); // red helmet rag
     // Cat-eye strip on the back of the helmet: the real-world marking that exists for exactly
     // this problem, and it means a squadmate is identifiable from directly behind too.
@@ -256,7 +343,16 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
     const shin = new THREE.Group();
     shin.position.y = -0.42;
     shin.add(jointed(0.13, 0.4, 0.15, pants));
-    const foot = limb(0.13, 0.09, 0.24, boots, 0, -0.42, 0.04);
+    if (armed) {
+      const pad = characterMesh(UNIT_CHARACTER_BOX, black && friendly ? 0x090b0d : 0x222722);
+      pad.scale.set(0.16, 0.11, 0.055);
+      pad.position.set(0, -0.06, 0.145);
+      shin.add(pad);
+    }
+    const foot = characterMesh(BODY_CAPSULE, boots);
+    foot.scale.set(0.13, 0.12, 0.12);
+    foot.rotation.x = Math.PI / 2;
+    foot.position.set(0, -0.4, 0.085);
     shin.add(foot);
     lg.add(shin);
     lg.userData.shin = shin;
@@ -270,7 +366,9 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
     const fore = new THREE.Group();
     fore.position.y = -0.3;
     fore.add(jointed(0.1, 0.28, 0.11, armed ? color : skin)); // civilians: rolled sleeves
-    const hand = limb(0.09, 0.08, 0.09, skin, 0, -0.3, 0);
+    const hand = characterMesh(HEAD_SPHERE, skin);
+    hand.scale.set(0.09, 0.085, 0.075);
+    hand.position.set(0, -0.3, 0);
     fore.add(hand);
     ag.add(fore);
     ag.userData.fore = fore;
@@ -336,6 +434,13 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
 export function revealWeaponRig(g) {
   const r = g.userData.rig;
   if (!r?.rifle || !r.concealed) return;
+  const authored = createAuthoredCharacter({ friendly: false, black: false, silhouette: false });
+  if (authored) {
+    for (const child of g.children) child.visible = false;
+    g.add(authored);
+    g.userData.rig = authored.userData.rig;
+    return;
+  }
   r.concealed = false;
   r.rifle.visible = true;
   r.lArm.rotation.set(-0.9, 0, 0);
@@ -349,6 +454,10 @@ export function revealWeaponRig(g) {
 export function animateRig(g, phase, moving, flinch = 0) {
   const r = g.userData.rig;
   if (!r) return;
+  if (r.authored) {
+    animateAuthoredCharacter(g, moving, flinch);
+    return;
+  }
   const swing = moving ? Math.sin(phase) * 0.55 : 0;
   r.lLeg.rotation.x = swing;
   r.rLeg.rotation.x = -swing;
@@ -378,6 +487,10 @@ export function animateRig(g, phase, moving, flinch = 0) {
 export function kneelRig(g, k) {
   const r = g.userData.rig;
   if (!r) return;
+  if (r.authored) {
+    kneelAuthoredCharacter(g, k);
+    return;
+  }
   if (!r.baseY) r.baseY = g.children.map(c => c.position.y);
   const drop = 0.36 * k;
   for (let i = 0; i < g.children.length; i++) g.children[i].position.y = r.baseY[i] - drop;
@@ -394,6 +507,7 @@ export function kneelRig(g, k) {
 export function deathPose(g) {
   const r = g.userData.rig;
   if (!r) return;
+  if (stopAuthoredCharacter(g)) return;
   const s = () => (Math.random() - 0.5);
   r.lArm.rotation.set(-0.4 + s() * 0.5, 0, 0.9 + s() * 0.4);
   r.rArm.rotation.set(-0.3 + s() * 0.5, 0, -0.9 + s() * 0.4);

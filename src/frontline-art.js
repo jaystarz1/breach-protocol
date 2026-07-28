@@ -216,3 +216,91 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
   }
   instanced(scene, new THREE.DodecahedronGeometry(0.2, 0), concrete, chunks, false);
 }
+
+function addObservationPost(scene, x, y, z, yaw = 0) {
+  const sand = new THREE.MeshStandardMaterial({ color: 0x706b58, roughness: 0.96 });
+  const timber = new THREE.MeshStandardMaterial({ color: 0x5c4733, roughness: 0.9 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x262d30, roughness: 0.58, metalness: 0.62 });
+  const equipment = new THREE.MeshStandardMaterial({ color: 0x252b2a, roughness: 0.76 });
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const bags = [];
+  for (let i = -4; i <= 4; i++) {
+    bags.push([x + c * i * 0.5, y + 0.2, z - s * i * 0.5, 0, yaw, Math.PI / 2, 1, 1, 1]);
+    if (Math.abs(i) < 4) {
+      bags.push([x + c * i * 0.5, y + 0.48, z - s * i * 0.5, 0, yaw, Math.PI / 2, 1, 1, 1]);
+    }
+  }
+  instanced(scene, new THREE.CapsuleGeometry(0.17, 0.38, 4, 8), sand, bags);
+
+  const table = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.11, 0.78), timber);
+  table.position.set(x, y + 0.86, z + 1.25);
+  table.rotation.y = yaw;
+  table.castShadow = table.receiveShadow = quality.shadows;
+  scene.add(table);
+  const legs = [];
+  for (const lx of [-0.72, 0.72]) for (const lz of [-0.25, 0.25]) {
+    const wx = x + c * lx + s * lz;
+    const wz = z - s * lx + c * lz + 1.25;
+    legs.push([wx, y + 0.42, wz, 0, yaw, 0, 1, 1, 1]);
+  }
+  instanced(scene, new THREE.BoxGeometry(0.08, 0.82, 0.08), steel, legs);
+  const drone = droneModel();
+  drone.position.set(x, y + 1.04, z + 1.25);
+  drone.rotation.y = yaw - 0.2;
+  scene.add(drone);
+
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 3.4, 8), steel);
+  mast.position.set(x - c * 2.1, y + 1.7, z + s * 2.1 + 0.2);
+  scene.add(mast);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.74, 0.34), equipment);
+  panel.position.copy(mast.position);
+  panel.position.y += 1.18;
+  panel.rotation.y = yaw + 0.25;
+  scene.add(panel);
+}
+
+export function addFrontlineMissionArt(scene, levelId) {
+  if (!quality.desktop) return;
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2b302f, roughness: 0.86 });
+  const sand = new THREE.MeshStandardMaterial({ color: 0x706b58, roughness: 0.96 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x30373a, roughness: 0.58, metalness: 0.58 });
+
+  if (levelId === 3) addObservationPost(scene, -2, 9.2, -6, 0);
+  if (levelId === 6) addObservationPost(scene, -4, 24.2, 60, 0);
+  if (levelId === 7) addObservationPost(scene, -3, 12.25, -2, Math.PI / 2);
+
+  if (levelId === 4) {
+    // The abandoned direction-finding set at the escape gate.
+    instanced(scene, new THREE.BoxGeometry(0.7, 0.48, 0.5), dark, [
+      [-10, 0.26, -36.5, 0, 0.2, 0, 1.2, 0.9, 1],
+      [-8.7, 0.22, -37.1, 0, -0.15, 0, 0.9, 0.75, 0.9],
+      [-7.7, 0.18, -36.2, 0, 0.1, 0, 0.75, 0.65, 0.8],
+    ]);
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 5.2, 8), steel);
+    mast.position.set(-10.5, 2.6, -36.8);
+    mast.rotation.z = -0.12;
+    scene.add(mast);
+  }
+
+  if (levelId === 5) {
+    // Aid pallets and blast barriers make the market a contested humanitarian site.
+    const pallets = [];
+    for (const [x, z] of [[-26, 28], [25, 16], [-24, -20], [22, -26]]) {
+      for (let i = 0; i < 6; i++) {
+        pallets.push([x + (i % 3) * 0.72, 0.3 + Math.floor(i / 3) * 0.58, z,
+          0, (i % 2) * 0.08, 0, 1, 1, 1]);
+      }
+    }
+    instanced(scene, new THREE.BoxGeometry(0.64, 0.54, 0.62), dark, pallets);
+  }
+
+  if (levelId === 10) {
+    // Prepared fallback line outside the compound gate.
+    const bags = [];
+    for (const side of [-1, 1]) for (let i = 0; i < 9; i++) {
+      bags.push([side * (3.2 + i * 0.5), 0.2, 34, 0, 0, Math.PI / 2, 1, 1, 1]);
+      if (i < 7) bags.push([side * (3.5 + i * 0.5), 0.48, 34, 0, 0, Math.PI / 2, 1, 1, 1]);
+    }
+    instanced(scene, new THREE.CapsuleGeometry(0.17, 0.38, 4, 8), sand, bags);
+  }
+}
