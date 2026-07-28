@@ -66,9 +66,11 @@ def main():
           const meshes = {};
           const localBounds = {};
           const widthStations = {};
+          const vertexCounts = {};
           for (const object of BP.world.staticMesh.parent.children) {
             if (!object.isInstancedMesh || !object.name.startsWith('vehicle-')) continue;
             meshes[object.name] = object.userData.instanceCount;
+            vertexCounts[object.name] = object.geometry.attributes.position.count;
             if (/-(lower|cabin|side-glass)$/.test(object.name)) {
               object.geometry.computeBoundingBox();
               const box = object.geometry.boundingBox;
@@ -90,7 +92,7 @@ def main():
             }
           }
           return {
-            meshes, localBounds, widthStations,
+            meshes, localBounds, widthStations, vertexCounts,
             bodyTypes: ['sedan', 'hatch', 'suv'].filter(type =>
               Object.keys(meshes).some(name => name === `vehicle-${type}-lower`)),
             calls: BP.performance.render.calls,
@@ -135,11 +137,21 @@ def main():
         assert not errors
         assert len(coverage["bodyTypes"]) >= 2
         assert coverage["meshes"].get("vehicle-tyres", 0) >= 20
-        assert coverage["meshes"].get("vehicle-wheel-wells", 0) >= 20
+        assert coverage["meshes"].get("vehicle-wheel-wells", 0) == 0
+        assert coverage["meshes"].get("vehicle-contact-shadows", 0) == 0
         assert coverage["meshes"].get("vehicle-rim-spokes", 0) >= 100
         assert coverage["meshes"].get("vehicle-windscreen", 0) == 0  # variant-keyed only
         assert any(name.endswith("-windscreen") for name in coverage["meshes"])
-        assert all(count >= 4 for count in coverage["widthStations"].values())
+        assert all(count >= 15 for count in coverage["widthStations"].values())
+        assert all(
+            coverage["vertexCounts"][name] >= 18
+            for name in coverage["meshes"] if name.endswith("-windscreen")
+        )
+        assert coverage["vertexCounts"]["vehicle-headlights"] > 100
+        assert coverage["vertexCounts"]["vehicle-bumpers"] > 50
+        assert coverage["vertexCounts"]["vehicle-grilles"] > 40
+        assert coverage["meshes"].get("vehicle-grille-slats", 0) == 0
+        assert coverage["meshes"].get("vehicle-bumpers", 0) == 12
         assert all(
             item["found"]
             and item["actual"]["w"] == item["w"]

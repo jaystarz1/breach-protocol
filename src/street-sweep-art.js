@@ -108,8 +108,11 @@ function materials() {
       depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
     }),
     shadow: new THREE.MeshBasicMaterial({
-      map: contactShadow(), transparent: true, opacity: 0.48,
-      depthWrite: false, blending: THREE.MultiplyBlending,
+      // MultiplyBlending applies the black source colour outside the intended radial alpha
+      // on some WebGL paths, exposing the entire rectangular quad. Ordinary alpha blending
+      // preserves the soft canvas falloff and removes the hard black vehicle-sized cards.
+      map: contactShadow(), transparent: true, opacity: 0.34,
+      depthWrite: false,
     }),
   };
   // A separate tint with the same uploaded plaster maps gives the shop interiors less bounce

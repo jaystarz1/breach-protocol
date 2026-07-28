@@ -95,26 +95,49 @@ function loftedVehicleShell(stations, topWidth = 0.78) {
   // The old vehicles were side silhouettes extruded to a constant width. They looked
   // acceptable exactly side-on, but the constant-width bonnet, cabin and boot exposed the
   // blockout immediately from a first-person three-quarter view. This indexed loft uses a
-  // rounded ten-point transverse section at every longitudinal station, allowing the nose,
+  // rounded sixteen-point transverse section at every longitudinal station, allowing the nose,
   // shoulders, roof and tail to taper independently while remaining one instanced geometry.
+  const smoothStations = [];
+  const catmull = (p0, p1, p2, p3, t) => {
+    const t2 = t * t, t3 = t2 * t;
+    return 0.5 * ((2 * p1) + (-p0 + p2) * t
+      + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+      + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  };
+  // Three interpolated rings per authored interval remove the long planar bonnet, roof and
+  // quarter-panel facets that made the prior "loft" look like a paper model up close.
+  for (let i = 0; i < stations.length - 1; i++) {
+    const p0 = stations[Math.max(0, i - 1)];
+    const p1 = stations[i];
+    const p2 = stations[i + 1];
+    const p3 = stations[Math.min(stations.length - 1, i + 2)];
+    for (let step = 0; step < 3; step++) {
+      const t = step / 3;
+      smoothStations.push(p1.map((value, axis) => catmull(
+        p0[axis], value, p2[axis], p3[axis], t)));
+    }
+  }
+  smoothStations.push(stations[stations.length - 1]);
   const section = [
-    [-0.8, 0], [-0.97, 0.1], [-1, 0.38], [-0.95, 0.73], [-topWidth, 1],
-    [topWidth, 1], [0.95, 0.73], [1, 0.38], [0.97, 0.1], [0.8, 0],
+    [-0.72, 0], [-0.89, 0.045], [-0.98, 0.16], [-1, 0.36],
+    [-0.975, 0.55], [-0.91, 0.72], [-topWidth, 0.92], [-topWidth * 0.82, 1],
+    [topWidth * 0.82, 1], [topWidth, 0.92], [0.91, 0.72], [0.975, 0.55],
+    [1, 0.36], [0.98, 0.16], [0.89, 0.045], [0.72, 0],
   ];
   const positions = [];
   const uvs = [];
   const indices = [];
   const ring = section.length;
 
-  for (let s = 0; s < stations.length; s++) {
-    const [x, bottom, top, halfWidth] = stations[s];
+  for (let s = 0; s < smoothStations.length; s++) {
+    const [x, bottom, top, halfWidth] = smoothStations[s];
     const height = top - bottom;
     for (const [zFactor, yFactor] of section) {
       positions.push(x, bottom + height * yFactor, zFactor * halfWidth);
-      uvs.push(s / (stations.length - 1), yFactor);
+      uvs.push(s / (smoothStations.length - 1), yFactor);
     }
   }
-  for (let s = 0; s < stations.length - 1; s++) {
+  for (let s = 0; s < smoothStations.length - 1; s++) {
     const next = (s + 1) * ring;
     const here = s * ring;
     for (let i = 0; i < ring; i++) {
@@ -124,14 +147,15 @@ function loftedVehicleShell(stations, topWidth = 0.78) {
   }
   // Close both ends. The cap is rarely exposed, but a closed volume gives correct lighting
   // at damaged bumpers and prevents a bright road sliver from showing through the nose.
-  for (const [station, reverse] of [[0, true], [stations.length - 1, false]]) {
+  for (const [station, reverse] of [[0, true], [smoothStations.length - 1, false]]) {
     const center = positions.length / 3;
-    const [x, bottom, top] = stations[station];
+    const [x, bottom, top] = smoothStations[station];
     positions.push(x, (bottom + top) / 2, 0);
-    uvs.push(station, 0.5);
+    uvs.push(station / (smoothStations.length - 1), 0.5);
     const base = station * ring;
     for (let i = 0; i < ring; i++) {
       const j = (i + 1) % ring;
+      // Minimum-X faces point outward toward -X; maximum-X faces point toward +X.
       if (reverse) indices.push(center, base + j, base + i);
       else indices.push(center, base + i, base + j);
     }
@@ -180,17 +204,29 @@ function doubleSidedWindowPanels(polygons, sideOffset) {
 function transverseWindowPane(bottom, top) {
   const [bottomX, bottomY, bottomHalf] = bottom;
   const [topX, topY, topHalf] = top;
+  const across = 8;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const outward = Math.sign(bottomX - topX) || 1;
+  for (let i = 0; i <= across; i++) {
+    const t = i / across;
+    const side = t * 2 - 1;
+    const bow = outward * 0.045 * (1 - side * side);
+    positions.push(
+      bottomX + bow, bottomY, side * bottomHalf,
+      topX + bow, topY, side * topHalf,
+    );
+    uvs.push(t, 0, t, 1);
+  }
+  for (let i = 0; i < across; i++) {
+    const base = i * 2;
+    indices.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
+  }
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
-    bottomX, bottomY, -bottomHalf,
-    bottomX, bottomY, bottomHalf,
-    topX, topY, -topHalf,
-    topX, topY, topHalf,
-  ], 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute([
-    0, 0, 1, 0, 0, 1, 1, 1,
-  ], 2));
-  geometry.setIndex([0, 1, 2, 1, 3, 2]);
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
@@ -278,11 +314,38 @@ const TYRE_GEO = new THREE.TorusGeometry(0.36, 0.105, 14, 32);
 const HUB_GEO = new THREE.CylinderGeometry(0.23, 0.23, 0.045, 24);
 const CAP_GEO = new THREE.CylinderGeometry(0.075, 0.075, 0.052, 16);
 const RIM_SPOKE_GEO = new THREE.CapsuleGeometry(0.017, 0.13, 3, 7);
-const ARCH_GEO = new THREE.CylinderGeometry(0.43, 0.43, 0.035, 24);
 const MIRROR_GEO = new THREE.SphereGeometry(0.11, 12, 8);
 const HANDLE_GEO = new THREE.CapsuleGeometry(0.018, 0.11, 3, 8);
 const HEADREST_GEO = new THREE.CapsuleGeometry(0.12, 0.13, 4, 8);
-const VEHICLE_SHADOW_GEO = new THREE.CircleGeometry(1, 32);
+const VEHICLE_LAMP_GEO = new THREE.SphereGeometry(0.5, 14, 9);
+const VEHICLE_BUMPER_GEO = new THREE.CapsuleGeometry(0.08, 1.3, 4, 10);
+const POLICE_PUSH_BAR_GEO = new THREE.CapsuleGeometry(0.045, 0.68, 4, 9);
+const POLICE_LIGHTBAR_GEO = new THREE.CapsuleGeometry(0.055, 0.42, 4, 10);
+const VEHICLE_BURN_SCAR_GEO = (() => {
+  const shape = new THREE.Shape();
+  const points = [
+    [-0.48, -0.08], [-0.34, -0.37], [-0.04, -0.46], [0.25, -0.34],
+    [0.48, -0.05], [0.35, 0.29], [0.02, 0.43], [-0.31, 0.3],
+  ];
+  shape.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) shape.lineTo(points[i][0], points[i][1]);
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
+})();
+const VEHICLE_GRILLE_GEO = (() => {
+  const shape = new THREE.Shape();
+  const w = 0.88, h = 0.24, r = 0.065;
+  shape.moveTo(-w / 2 + r, -h / 2);
+  shape.lineTo(w / 2 - r, -h / 2);
+  shape.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+  shape.lineTo(w / 2, h / 2 - r);
+  shape.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+  shape.lineTo(-w / 2 + r, h / 2);
+  shape.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+  shape.lineTo(-w / 2, -h / 2 + r);
+  shape.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+  return new THREE.ShapeGeometry(shape);
+})();
 const SHARD_GEO = (() => {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute([
@@ -392,28 +455,32 @@ function addVehicle(batcher, def) {
   const paint = material('vehicle-paint-instanced', () => new THREE.MeshPhysicalMaterial({
     color: 0xffffff, roughness: 0.32, metalness: 0.04,
     clearcoat: 0.68, clearcoatRoughness: 0.24, envMapIntensity: 1.15,
+    side: THREE.DoubleSide,
   }));
   const trim = standard('vehicle-trim', 0x11161a, 0.54, 0.16);
   const rubber = standard('vehicle-rubber', 0x090b0d, 0.96, 0);
   const rim = standard('vehicle-rim', 0x7e8991, 0.24, 0.82);
   const interior = standard('vehicle-interior', 0x171a1c, 0.82, 0.02);
   const plate = standard('vehicle-plate', 0xc7c8bd, 0.42, 0.16);
-  const contactShadow = material('vehicle-contact-shadow', () => new THREE.MeshBasicMaterial({
-    color: 0x050708, transparent: true, opacity: 0.18, depthWrite: false,
-  }));
   const glass = material('vehicle-glass', () => new THREE.MeshPhysicalMaterial({
-    color: 0x14242d, roughness: 0.13, metalness: 0.18,
+    // At night automotive glass reads near-black with a restrained sky reflection. The
+    // previous bright blue-grey environment response turned every pane into an opaque slab.
+    color: 0x071017, roughness: 0.24, metalness: 0.04,
     transmission: 0, transparent: false,
-    clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.3,
+    clearcoat: 0.72, clearcoatRoughness: 0.16, envMapIntensity: 0.58,
     side: THREE.DoubleSide,
   }));
   const grime = standard('vehicle-road-grime', 0x282824, 0.98, 0.01);
+  const burnScar = material('vehicle-burn-scar', () => new THREE.MeshBasicMaterial({
+    color: 0x171817, transparent: true, opacity: 0.52, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide,
+  }));
   const shattered = standard('vehicle-shattered-glass', 0x10171b, 0.88, 0.03);
 
-  // A low sun made the old cast shadow a hard 4x2m black rectangle. A tight translucent
-  // contact patch anchors the car while keeping the silhouette legible on dark asphalt.
-  batcher.add('vehicle-contact-shadows', VEHICLE_SHADOW_GEO, contactShadow,
-    instanceMatrix(parent, 0, 0.018, 0, 1.95, 0.76, 1, -Math.PI / 2));
+  // Vehicle shells deliberately do not enter the coarse city shadow map. At street scale
+  // its low-angle projection becomes a hard black wedge several metres long, which is more
+  // conspicuous than omitting the shadow; contact and depth still come from the wheels,
+  // authored soft contact patches and the cars receiving surrounding building shadows.
   batcher.add(`vehicle-${type.key}-lower`, type.lower, paint, parent, false, bodyColor);
   batcher.add(`vehicle-${type.key}-cabin`, type.cabin, paint, parent, false, bodyColor);
   const glassSide = type.cabinHalf + 0.014;
@@ -456,8 +523,6 @@ function addVehicle(batcher, def) {
   }
 
   for (const x of type.wheels) for (const side of [-1, 1]) {
-    batcher.add('vehicle-wheel-wells', ARCH_GEO, interior,
-      instanceMatrix(parent, x, 0.4, side * (wheelSide - 0.02), 1, 1, 1, Math.PI / 2));
     batcher.add('vehicle-tyres', TYRE_GEO, rubber,
       instanceMatrix(parent, x, 0.4, side * wheelSide, 1, 1, 1), false);
     batcher.add('vehicle-hubs', HUB_GEO, rim,
@@ -476,26 +541,22 @@ function addVehicle(batcher, def) {
   }
 
   for (const side of [-0.56, 0.56]) {
-    batcher.add('vehicle-headlights', UNIT_BOX,
+    batcher.add('vehicle-headlights', VEHICLE_LAMP_GEO,
       material('headlamp', () => new THREE.MeshPhysicalMaterial({
-        color: 0xdde8df, emissive: 0xa9b5ab, emissiveIntensity: 0.08,
-        roughness: 0.14, metalness: 0.06, clearcoat: 1,
+        color: 0x9da9a4, emissive: 0x727d76, emissiveIntensity: 0.025,
+        roughness: 0.18, metalness: 0.05, clearcoat: 1,
       })),
-      instanceMatrix(parent, type.front - 0.012, 0.67, side, 0.035, 0.17, 0.42));
-    batcher.add('vehicle-taillights', UNIT_BOX,
+      instanceMatrix(parent, type.front - 0.018, 0.67, side, 0.055, 0.17, 0.39));
+    batcher.add('vehicle-taillights', VEHICLE_LAMP_GEO,
       standard('taillamp', 0x8f1514, 0.18, 0),
-      instanceMatrix(parent, type.rear + 0.012, 0.67, side, 0.035, 0.18, 0.4));
+      instanceMatrix(parent, type.rear + 0.018, 0.67, side, 0.055, 0.18, 0.37));
   }
   for (const x of [type.front - 0.025, type.rear + 0.025]) {
-    batcher.add('vehicle-trim-box', UNIT_BOX, trim,
-      instanceMatrix(parent, x, 0.34, 0, 0.12, 0.13, 1.58));
+    batcher.add('vehicle-bumpers', VEHICLE_BUMPER_GEO, trim,
+      instanceMatrix(parent, x, 0.34, 0, 0.72, 1, 1, Math.PI / 2, 0, 0));
   }
-  batcher.add('vehicle-grilles', UNIT_BOX, trim,
-    instanceMatrix(parent, type.front - 0.02, 0.52, 0, 0.035, 0.22, 0.86));
-  for (const z of [-0.31, -0.1, 0.1, 0.31]) {
-    batcher.add('vehicle-grille-slats', UNIT_BOX, rim,
-      instanceMatrix(parent, type.front - 0.042, 0.52, z, 0.02, 0.15, 0.025));
-  }
+  batcher.add('vehicle-grilles', VEHICLE_GRILLE_GEO, trim,
+    instanceMatrix(parent, type.front - 0.036, 0.52, 0, 1, 1, 1, 0, -Math.PI / 2));
   for (const x of [type.front - 0.05, type.rear + 0.05]) {
     batcher.add('vehicle-plates', UNIT_BOX, plate,
       instanceMatrix(parent, x, 0.39, 0, 0.018, 0.13, 0.42));
@@ -534,8 +595,9 @@ function addVehicle(batcher, def) {
         instanceMatrix(parent, type.wheels[1], 0.4, wheelSide + 0.065,
           1.35, 1.35, 1.1, Math.PI / 2));
       // Ash on the bonnet and a dropped bumper sell an abandoned strike-damaged shell.
-      batcher.add('vehicle-burn-scars', UNIT_BOX, grime,
-        instanceMatrix(parent, -1.38, 0.91, 0, 0.82, 0.025, 1.16, 0, 0, -0.08));
+      batcher.add('vehicle-burn-scars', VEHICLE_BURN_SCAR_GEO, burnScar,
+        instanceMatrix(parent, -1.38, 0.972, 0, 0.82, 1.16, 1,
+          -Math.PI / 2, 0, -0.08));
       batcher.add('vehicle-dropped-bumpers', UNIT_BOX, trim,
         instanceMatrix(parent, type.rear + 0.03, 0.2, 0.17,
           0.12, 0.11, 1.5, 0.16, 0.04, 0.12));
@@ -549,22 +611,26 @@ function addVehicle(batcher, def) {
         instanceMatrix(parent, 0.15, 0.67, side * 0.998, 1.45, 0.5, 1,
           0, side < 0 ? Math.PI : 0));
     }
-    batcher.add('vehicle-trim-box', UNIT_BOX, trim,
-      instanceMatrix(parent, 0.18, 1.59, 0, 0.32, 0.07, 1.34));
-    batcher.add('vehicle-trim-box', UNIT_BOX, trim,
-      instanceMatrix(parent, type.front - 0.16, 0.54, 0, 0.07, 0.09, 1.52));
-    batcher.add('vehicle-trim-box', UNIT_BOX, trim,
-      instanceMatrix(parent, type.front - 0.16, 0.88, 0, 0.07, 0.09, 1.52));
+    batcher.add('police-lightbar-base', VEHICLE_BUMPER_GEO, trim,
+      instanceMatrix(parent, 0.18, 1.59, 0, 0.52, 0.9, 0.9, Math.PI / 2, 0, 0));
+    for (const y of [0.54, 0.88]) {
+      batcher.add('police-push-bars', POLICE_PUSH_BAR_GEO, trim,
+        instanceMatrix(parent, type.front - 0.16, y, 0, 1.1, 1.9, 1.9,
+          Math.PI / 2, 0, 0));
+    }
     for (const z of [-0.52, 0.52]) {
-      batcher.add('vehicle-trim-box', UNIT_BOX, trim,
-        instanceMatrix(parent, type.front - 0.14, 0.78, z, 0.1, 0.76, 0.08));
+      batcher.add('police-push-bars', POLICE_PUSH_BAR_GEO, trim,
+        instanceMatrix(parent, type.front - 0.14, 0.76, z, 1.1, 0.8, 1.1));
     }
     for (const [z, col] of [[-0.38, 0xd51f28], [0.38, 0x245dff]]) {
-      batcher.add(`police-lens-${col}`, UNIT_BOX,
-        material(`police-lens-${col}`, () => new THREE.MeshBasicMaterial({
-          color: col, transparent: true, opacity: 0.76,
+      batcher.add(`police-lens-${col}`, POLICE_LIGHTBAR_GEO,
+        material(`police-lens-${col}`, () => new THREE.MeshPhysicalMaterial({
+          color: col, emissive: col, emissiveIntensity: 0.22,
+          roughness: 0.16, metalness: 0.02, transparent: true, opacity: 0.82,
+          clearcoat: 1,
         })),
-        instanceMatrix(parent, 0.18, 1.68, z, 0.28, 0.14, 0.54));
+        instanceMatrix(parent, 0.18, 1.68, z, 1.25, 0.78, 0.78,
+          Math.PI / 2, 0, 0));
     }
   }
 }

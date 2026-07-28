@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v53-authored-field-equipment';
+const CACHE = 'breach-protocol-v58-smoothed-vehicle-surfaces';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
