@@ -553,6 +553,35 @@ function addRoofCap(batcher, def) {
     false, def.color);
 }
 
+function addCeilingFixture(batcher, def) {
+  const parent = new THREE.Matrix4().makeTranslation(def.x, def.y, def.z);
+  const housing = standard('fixture-housing', 0x2b3033, 0.62, 0.42);
+  const trim = standard('fixture-trim', 0x596064, 0.5, 0.5);
+  const lensKey = `fixture-lens-${def.color}`;
+  const lens = material(lensKey, () => new THREE.MeshStandardMaterial({
+    color: 0xd8c9ad,
+    emissive: new THREE.Color(def.color).multiplyScalar(0.48),
+    emissiveIntensity: 0.72,
+    roughness: 0.72,
+    metalness: 0,
+  }));
+  batcher.add('ceiling-fixture-housings', UNIT_BOX, housing,
+    instanceMatrix(parent, 0, -0.075, 0, def.w + 0.12, 0.13, def.d + 0.1));
+  batcher.add(`ceiling-fixture-lenses-${def.color}`, UNIT_BOX, lens,
+    instanceMatrix(parent, 0, -0.155, 0, def.w - 0.14, 0.045, def.d - 0.08));
+  for (const x of [-def.w / 2 + 0.11, def.w / 2 - 0.11]) {
+    batcher.add('ceiling-fixture-endcaps', UNIT_BOX, trim,
+      instanceMatrix(parent, x, -0.17, 0, 0.09, 0.075, def.d + 0.04));
+  }
+  // Protective ribs turn a glowing rectangle into an industrial fitting and give the eye
+  // a stable dark edge even when bloom is active.
+  for (const x of [-0.24, 0.24]) {
+    if (Math.abs(x) > def.w / 2 - 0.12) continue;
+    batcher.add('ceiling-fixture-guards', UNIT_BOX, trim,
+      instanceMatrix(parent, x, -0.185, 0, 0.025, 0.035, def.d - 0.03));
+  }
+}
+
 function addMarketStall(batcher, scene, def, index) {
   const parent = new THREE.Matrix4().makeTranslation(def.x, 0, def.z);
   const steel = standard('stall-steel', 0x343a3f, 0.42, 0.72);
@@ -600,6 +629,7 @@ export function addVisualProps(scene, props = []) {
     else if (def.kind === 'facade') addFacade(batcher, def);
     else if (def.kind === 'market-stall') addMarketStall(batcher, scene, def, marketIndex++);
     else if (def.kind === 'roof-cap') addRoofCap(batcher, def);
+    else if (def.kind === 'ceiling-fixture') addCeilingFixture(batcher, def);
   }
   batcher.flush();
 }

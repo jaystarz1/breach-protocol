@@ -225,7 +225,10 @@ export const LEVELS = [
       g.push(...poster(0, 21.8, false, 1.75, null, 945, -1));
       g.push(...exitSign(0, 2.5, -19.4, false));
       // roof over the whole house
-      g.push(...floorSlab(4, 1, 16, 44, 3.3, 0.3, C.roof));
+      // This is a plaster/concrete soffit, not an exterior sheet-metal roof. Feeding it into
+      // the metal surface family turned every point light into a mirror-bright streak running
+      // the length of the corridor.
+      g.push(...floorSlab(4, 1, 16, 44, 3.3, 0.3, C.interiorWall));
       return g;
     },
     // Role players fed in from the north end of the corridor. Small and slow: this is the

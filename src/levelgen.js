@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from '../lib/BufferGeometryUtils.js';
 import { makeBox } from './physics.js';
 import { quality } from './quality.js';
 import { photoSurfaces, surfaces } from './textures.js';
@@ -618,18 +619,156 @@ export function deathPose(g) {
   g.rotation.z = s() * 0.35;
 }
 
-// Breachable door mesh
+const doorGeometryCache = new Map();
+const doorDetailCache = new Map();
+const DOOR_DETAIL_BOX = new THREE.BoxGeometry(1, 1, 1);
+const DOOR_ESCUTCHEON = new THREE.CylinderGeometry(0.075, 0.075, 0.026, 16);
+const DOOR_LEVER = new THREE.CapsuleGeometry(0.026, 0.15, 3, 8);
+const DOOR_HINGE = new THREE.CylinderGeometry(0.024, 0.024, 0.15, 10);
+let doorMaterials = null;
+
+function breachDoorMaterials() {
+  if (doorMaterials) return doorMaterials;
+  const metal = surfaces().metal;
+  doorMaterials = {
+    leaf: new THREE.MeshStandardMaterial({
+      color: 0x586264, roughness: 0.72, metalness: 0.28,
+      map: quality.textures ? metal.map : null,
+      roughnessMap: quality.textures ? metal.roughnessMap : null,
+      normalMap: quality.textures ? metal.normalMap : null,
+      normalScale: new THREE.Vector2(0.13, 0.13),
+    }),
+    inset: new THREE.MeshStandardMaterial({
+      color: 0x303739, roughness: 0.83, metalness: 0.18,
+    }),
+    hardware: new THREE.MeshStandardMaterial({
+      color: 0x8b9293, roughness: 0.38, metalness: 0.78,
+    }),
+    grime: new THREE.MeshStandardMaterial({
+      color: 0x242829, roughness: 0.98, metalness: 0,
+    }),
+  };
+  return doorMaterials;
+}
+
+function breachDoorGeometry(w, h) {
+  const key = `${w}:${h}`;
+  if (doorGeometryCache.has(key)) return doorGeometryCache.get(key);
+  const shape = new THREE.Shape();
+  shape.moveTo(-w / 2 + 0.025, 0.015);
+  shape.lineTo(w / 2 - 0.025, 0.015);
+  shape.lineTo(w / 2 - 0.025, h - 0.015);
+  shape.lineTo(-w / 2 + 0.025, h - 0.015);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.1, bevelEnabled: true, bevelSegments: 2,
+    bevelSize: 0.025, bevelThickness: 0.018, curveSegments: 1,
+  });
+  geometry.translate(0, 0, -0.05);
+  geometry.computeVertexNormals();
+  doorGeometryCache.set(key, geometry);
+  return geometry;
+}
+
+function breachDoorDetails(w, h) {
+  const key = `${w}:${h}`;
+  if (doorDetailCache.has(key)) return doorDetailCache.get(key);
+  const inset = [], hardware = [], grime = [];
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const euler = new THREE.Euler();
+  const add = (bucket, geometry, x, y, z, sx = 1, sy = 1, sz = 1,
+    rx = 0, ry = 0, rz = 0) => {
+    position.set(x, y, z);
+    euler.set(rx, ry, rz);
+    quaternion.setFromEuler(euler);
+    scale.set(sx, sy, sz);
+    matrix.compose(position, quaternion, scale);
+    bucket.push(geometry.clone().applyMatrix4(matrix));
+  };
+
+  const doubleLeaf = w >= 1.9;
+  const leafCenters = doubleLeaf ? [-w * 0.25, w * 0.25] : [0];
+  const insetWidth = doubleLeaf ? Math.min(0.28, w * 0.18) : Math.min(0.34, w * 0.28);
+  const insetHeight = Math.min(0.58, h * 0.24);
+  const insetY = h * 0.69;
+  for (const x of leafCenters) {
+    for (const side of [-1, 1]) {
+      add(inset, DOOR_DETAIL_BOX, x, insetY, side * 0.064,
+        insetWidth, insetHeight, 0.025);
+      for (const y of [insetY - insetHeight / 2, insetY + insetHeight / 2]) {
+        add(hardware, DOOR_DETAIL_BOX, x, y, side * 0.082,
+          insetWidth + 0.08, 0.035, 0.035);
+      }
+      for (const fx of [x - insetWidth / 2, x + insetWidth / 2]) {
+        add(hardware, DOOR_DETAIL_BOX, fx, insetY, side * 0.082,
+          0.035, insetHeight + 0.08, 0.035);
+      }
+    }
+  }
+  for (const side of [-1, 1]) {
+    add(hardware, DOOR_DETAIL_BOX, 0, 0.22, side * 0.066,
+      w - 0.15, 0.34, 0.025);
+  }
+  // Surface-mounted closer: a strong real-world silhouette at eye level that survives the
+  // dim corridor lighting better than subtle normal-map detail alone.
+  add(hardware, DOOR_DETAIL_BOX, w * 0.18, h - 0.14, 0.07,
+    Math.min(0.42, w * 0.3), 0.09, 0.055);
+  add(hardware, DOOR_DETAIL_BOX, -w * 0.03, h - 0.18, 0.085,
+    Math.min(0.48, w * 0.34), 0.026, 0.035, 0, 0, -0.08);
+
+  const hardwareX = doubleLeaf ? 0.16 : w / 2 - 0.2;
+  for (const side of [-1, 1]) {
+    add(hardware, DOOR_ESCUTCHEON, hardwareX, h * 0.48, side * 0.067,
+      1, 1, 1, Math.PI / 2);
+    add(hardware, DOOR_LEVER, hardwareX - 0.1, h * 0.48, side * 0.105,
+      1, 1, 1, 0, 0, Math.PI / 2);
+  }
+  for (const y of [0.38, h * 0.5, h - 0.38]) {
+    add(hardware, DOOR_HINGE, -w / 2 - 0.006, y, 0.02);
+  }
+  for (const [x, y, rz, length] of [
+    [-w * 0.18, h * 0.31, 0.16, w * 0.28],
+    [w * 0.12, h * 0.78, -0.11, w * 0.22],
+    [-w * 0.08, h * 0.17, -0.07, w * 0.34],
+  ]) {
+    add(grime, DOOR_DETAIL_BOX, x, y, 0.075, length, 0.018, 0.012, 0, 0, rz);
+  }
+  const result = {
+    inset: mergeGeometries(inset),
+    hardware: mergeGeometries(hardware),
+    grime: mergeGeometries(grime),
+  };
+  doorDetailCache.set(key, result);
+  return result;
+}
+
+// Breachable door mesh. The whole group remains one physics object and still flies inward on
+// breach, but the desktop presentation now reads as battered institutional steel rather than
+// a brown cuboid with a yellow cube attached.
 export function makeDoor(w = 1.4, h = 2.4) {
   const g = new THREE.Group();
-  const panel = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, 0.12),
-    bodyMaterial(0x6d4c41)
-  );
-  panel.position.y = h / 2;
+  g.name = 'breach-door';
+  g.userData.authoredDoor = true;
+  const m = breachDoorMaterials();
+  const panel = new THREE.Mesh(breachDoorGeometry(w, h), m.leaf);
+  panel.name = 'door-leaf';
+  panel.castShadow = panel.receiveShadow = quality.shadows;
   g.add(panel);
-  const knob = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.2), bodyMaterial(0xffc107));
-  knob.position.set(w / 2 - 0.18, h / 2, 0);
-  g.add(knob);
+
+  const details = breachDoorDetails(w, h);
+  for (const [name, geometry, mat] of [
+    ['door-inset-panels', details.inset, m.inset],
+    ['door-hardware', details.hardware, m.hardware],
+    ['door-scrapes', details.grime, m.grime],
+  ]) {
+    const part = new THREE.Mesh(geometry, mat);
+    part.name = name;
+    part.castShadow = part.receiveShadow = quality.shadows;
+    g.add(part);
+  }
   return g;
 }
 

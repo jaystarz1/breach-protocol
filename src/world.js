@@ -497,6 +497,12 @@ export function ceilingLight(x, y, z, opts = {}) {
     pos: [x, y - 0.3, z], color: warm,
     intensity: opts.intensity ?? 4.5, distance: opts.distance ?? 8.5,
   });
+  if (window.__bpVisualProps) {
+    window.__bpVisualProps.push({
+      kind: 'ceiling-fixture', x, y, z, w, d, color: warm,
+    });
+    return [];
+  }
   return [
     box(x, y - 0.07, z, w, 0.12, d, P.dark, false),
     box(x, y - 0.17, z, w - 0.16, 0.06, d - 0.1, warm, false, true),
