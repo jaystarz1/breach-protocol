@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v40-wall-decal-atlas';
+const CACHE = 'breach-protocol-v41-road-surface-atlas';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -15,6 +15,7 @@ const ASSETS = [
   'assets/street-sweep/sidewalk.jpg', 'assets/street-sweep/sidewalk-height.jpg',
   'assets/street-sweep/brick.jpg', 'assets/street-sweep/brick-height.jpg',
   'assets/street-sweep/plaster.jpg', 'assets/street-sweep/plaster-height.jpg',
+  'assets/street-sweep/road-damage-atlas.webp',
   'assets/characters/Soldier.glb',
   'assets/characters/CivilianCasual.glb',
   'assets/characters/CivilianLongSleeve.glb',

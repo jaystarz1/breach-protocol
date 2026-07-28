@@ -1,4 +1,5 @@
 import { C, floorSlab, wall, stairs, crate, car, policeCar, marketStall } from '../levelgen.js';
+import { quality } from '../quality.js';
 import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
@@ -312,8 +313,12 @@ export const LEVELS = [
         g.push(...lamp(13.4, lz - 7, 6.8, 1.9, -1));
       }
       g.push(...trafficLight(-13.0, -46, 4.6, 1), ...trafficLight(13.0, -46, 4.6, -1));
-      g.push(...roadLine(0, -48, 52));
-      g.push(...crosswalk(-42, -8, 8), ...crosswalk(28, -8, 8));
+      // Desktop owns one worn marking layer in street-sweep-art. Keeping these pristine box
+      // stripes underneath it made the chips reveal a second white stripe instead of asphalt.
+      if (!quality.desktop) {
+        g.push(...roadLine(0, -48, 52));
+        g.push(...crosswalk(-42, -8, 8), ...crosswalk(28, -8, 8));
+      }
       // Tagged walls and fly-posting down both building faces. A 110m run of unbroken concrete
       // is the single largest surface in the level and it had nothing on it at eye height.
       for (const gz of [44, 30, 15, -2, -18, -34, -48]) g.push(...graffiti(-15.8, gz, true, 250 + gz, 1.3));
