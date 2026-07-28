@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { quality } from './quality.js';
 import { rng } from './world.js';
+import { photoSurfaces } from './textures.js';
 
 const mats = {};
 const material = (key, make) => mats[key] || (mats[key] = make());
@@ -45,6 +46,15 @@ class InstanceBatcher {
 }
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const FACADE_PANEL_GEO = (() => {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const uv = geometry.attributes.uv;
+  // Four photographic plaster repeats across each property cap. Instanced scale changes the
+  // lot width but not the UVs, so this fixed repeat avoids smearing one photograph over 12m.
+  for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 4);
+  uv.needsUpdate = true;
+  return geometry;
+})();
 const UNIT_PLANE = new THREE.PlaneGeometry(1, 1);
 const STALL_POST = new THREE.CylinderGeometry(0.045, 0.045, 3.05, 10);
 const STALL_PRODUCE = new THREE.SphereGeometry(0.13, 9, 6);
@@ -180,6 +190,33 @@ const FACADE_SCAR_GEO = (() => {
   for (let i = 1; i < points.length; i++) shape.lineTo(points[i][0], points[i][1]);
   shape.closePath();
   return new THREE.ShapeGeometry(shape);
+})();
+const DAMAGED_PARAPET_GEO = (() => {
+  // A shallow extruded wall cap with an irregular shell-struck upper edge. Scaling this
+  // geometry produces different lot widths/heights while keeping a real return along the
+  // roof, so the silhouette does not collapse into a cardboard plane from oblique angles.
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.5, -0.5);
+  shape.lineTo(0.5, -0.5);
+  shape.lineTo(0.5, 0.28);
+  shape.lineTo(0.36, 0.34);
+  shape.lineTo(0.23, 0.18);
+  shape.lineTo(0.04, 0.43);
+  shape.lineTo(-0.13, 0.22);
+  shape.lineTo(-0.29, 0.38);
+  shape.lineTo(-0.5, 0.29);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.5,
+    steps: 1,
+    bevelEnabled: true,
+    bevelSegments: 1,
+    bevelSize: 0.012,
+    bevelThickness: 0.012,
+  });
+  geometry.translate(0, 0, -0.25);
+  geometry.computeVertexNormals();
+  return geometry;
 })();
 const DRAIN_GEO = new THREE.CylinderGeometry(0.055, 0.065, 1, 8);
 const AC_FAN_GEO = new THREE.CylinderGeometry(0.22, 0.22, 0.035, 12);
@@ -429,6 +466,31 @@ function addFacade(batcher, def) {
   }));
   const utilityMat = standard('facade-utility', 0x394043, 0.7, 0.48);
   const acMat = standard('facade-ac', 0x596166, 0.82, 0.28);
+  const shellMat = material('facade-shell-photo', () => {
+    const photo = photoSurfaces()?.plaster;
+    return new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: photo?.map || null,
+      bumpMap: photo?.height || null,
+      bumpScale: photo?.height ? 0.026 : 0,
+      roughness: 0.92,
+      metalness: 0.01,
+    });
+  });
+  const copingMat = standard('facade-coping', 0x63686a, 0.9, 0.025);
+  const balconyMat = standard('facade-balcony', 0x686e70, 0.9, 0.03);
+  const balconyRailMat = standard('facade-balcony-rail', 0x343b3e, 0.68, 0.48);
+  const masonryMat = material('facade-exposed-masonry-photo', () => {
+    const photo = photoSurfaces()?.brick;
+    return new THREE.MeshStandardMaterial({
+      color: 0x8b7668,
+      map: photo?.map || null,
+      bumpMap: photo?.height || null,
+      bumpScale: photo?.height ? 0.045 : 0,
+      roughness: 0.96,
+      metalness: 0,
+    });
+  });
 
   const facadeParent = new THREE.Matrix4().compose(
     new THREE.Vector3(
@@ -439,6 +501,120 @@ function addFacade(batcher, def) {
     new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
     new THREE.Vector3(1, 1, 1),
   );
+  // Split even a hundred-metre collision wall into individual property widths. The base wall
+  // remains the authoritative collision and photographic skin; these shallow shell pieces
+  // create stepped roof massing, party-wall rhythm and damage without changing navigation.
+  const lots = [];
+  let lotStart = -len / 2;
+  while (lotStart < len / 2 - 0.25) {
+    const remaining = len / 2 - lotStart;
+    const preferred = 7.5 + R() * 5.5;
+    const width = remaining < preferred + 4 ? remaining : preferred;
+    lots.push({
+      start: lotStart,
+      width,
+      rise: 0.52 + R() * 1.08,
+      damaged: R() < damageChance * 0.62,
+      tone: R() < 0.42 ? 0x697174 : R() < 0.72 ? 0x858681 : 0x6e6861,
+    });
+    lotStart += width;
+  }
+  for (let i = 0; i < lots.length; i++) {
+    const lot = lots[i];
+    const centre = lot.start + lot.width / 2;
+    const capWidth = Math.max(0.8, lot.width - 0.14);
+    const capGeometry = lot.damaged ? DAMAGED_PARAPET_GEO : FACADE_PANEL_GEO;
+    batcher.add(
+      lot.damaged ? 'facade-parapets-damaged' : 'facade-parapets',
+      capGeometry,
+      shellMat,
+      instanceMatrix(
+        facadeParent,
+        centre,
+        def.height + lot.rise / 2 - (lot.damaged ? lot.rise * 0.03 : 0),
+        -0.28,
+        capWidth,
+        lot.rise,
+        1.05,
+      ),
+      true,
+      lot.tone,
+    );
+    // Intact caps receive a projecting stone/metal coping. Damaged caps leave their jagged
+    // edge exposed rather than drawing an implausibly perfect trim line through the breach.
+    if (!lot.damaged) {
+      batcher.add('facade-parapet-coping', UNIT_BOX, copingMat,
+        instanceMatrix(facadeParent, centre, def.height + lot.rise + 0.045, 0.02,
+          capWidth + 0.12, 0.09, 0.46));
+    } else {
+      // A soot field over photographed wall material and a smaller exposed-brick patch gives
+      // shell damage two material depths instead of a black decal standing in for a hole.
+      const scarX = centre + (R() - 0.5) * Math.max(0.4, lot.width * 0.36);
+      const scarY = def.height - 0.65 - R() * Math.min(1.8, def.height * 0.18);
+      batcher.add('facade-shell-scars', FACADE_SCAR_GEO, sootMat,
+        instanceMatrix(facadeParent, scarX, scarY, 0.018,
+          1.8 + R() * 1.2, 1.35 + R() * 0.75, 1, 0, 0, (R() - 0.5) * 0.28));
+      batcher.add('facade-exposed-masonry', FACADE_SCAR_GEO, masonryMat,
+        instanceMatrix(facadeParent, scarX + (R() - 0.5) * 0.18, scarY - 0.05, 0.025,
+          1.13 + R() * 0.52, 0.78 + R() * 0.38, 1, 0, 0, (R() - 0.5) * 0.18));
+    }
+
+    // Real projecting balconies are sparse and deliberately asymmetric. A repeated window
+    // grid remains useful for target reading; one damaged balcony every few lots breaks its
+    // office-block cadence and gives the facade genuine first-person depth.
+    if (def.height >= 5.8 && lot.width > 6.4 && R() < 0.34) {
+      const balconyX = centre + (R() - 0.5) * Math.min(2, lot.width * 0.25);
+      const balconyY = Math.min(def.height - 1.35, floorH + 0.08 + (R() < 0.24 ? floorH : 0));
+      const balconyWidth = Math.min(3.25, Math.max(2.25, lot.width * 0.32));
+      const brokenSide = R() < damageChance ? (R() < 0.5 ? -1 : 1) : 0;
+      batcher.add('facade-balcony-slabs', UNIT_BOX, balconyMat,
+        instanceMatrix(facadeParent, balconyX, balconyY, 0.56,
+          balconyWidth, 0.16, 1.18, 0, 0, brokenSide * 0.025), true);
+      batcher.add('facade-balcony-front-rails', UNIT_BOX, balconyRailMat,
+        instanceMatrix(facadeParent, balconyX - brokenSide * 0.18, balconyY + 0.55, 1.08,
+          balconyWidth - (brokenSide ? 0.44 : 0.1), 0.07, 0.055,
+          0, 0, brokenSide * 0.065));
+      for (const side of [-1, 1]) {
+        if (side === brokenSide) continue;
+        batcher.add('facade-balcony-side-rails', UNIT_BOX, balconyRailMat,
+          instanceMatrix(facadeParent, balconyX + side * (balconyWidth / 2 - 0.05),
+            balconyY + 0.55, 0.56, 0.055, 0.07, 1.02));
+      }
+      for (let bar = -balconyWidth / 2 + 0.28; bar < balconyWidth / 2; bar += 0.48) {
+        if (brokenSide && Math.sign(bar) === brokenSide
+          && Math.abs(bar) > balconyWidth * 0.24) continue;
+        batcher.add('facade-balcony-balusters', UNIT_BOX, balconyRailMat,
+          instanceMatrix(facadeParent, balconyX + bar, balconyY + 0.31, 1.08,
+            0.045, 0.52, 0.045, 0, 0, brokenSide * 0.035));
+      }
+    }
+  }
+  // Party-wall piers project through the window plane and continue above the old flat roof.
+  // They make each lot read as a separate building even where the gameplay wall is continuous.
+  for (let i = 1; i < lots.length; i++) {
+    const x = lots[i].start;
+    const top = def.height + Math.min(lots[i - 1].rise, lots[i].rise);
+    const base = len > 50 ? Math.max(0, def.height - 1.35) : 0;
+    const pierHeight = top - base;
+    batcher.add('facade-party-piers', UNIT_BOX, shellMat,
+      instanceMatrix(facadeParent, x, base + pierHeight / 2, 0.02,
+        len > 50 ? 0.12 : 0.16, pierHeight, 0.44),
+      true,
+      0x4b5153);
+  }
+  // Long street walls already carry mission-specific floor bands. On ordinary buildings,
+  // interrupted lot-width ledges communicate separate construction dates without drawing a
+  // mathematically perfect stripe across the whole block.
+  if (len <= 50) {
+    for (let y = floorH; y < def.height - 0.35; y += floorH) {
+      for (const lot of lots) {
+        if (R() < 0.18) continue;
+        batcher.add('facade-floor-ledges', UNIT_BOX, copingMat,
+          instanceMatrix(facadeParent, lot.start + lot.width / 2, y, 0.075,
+            Math.max(0.5, lot.width - 0.22), 0.075, 0.3));
+      }
+    }
+  }
   // Cornices, downpipes and wall-mounted plant break the single-box outline at negligible
   // cost because every repeated element is still one instanced batch.
   const gap = 0.55 + R() * Math.min(2.2, len * 0.12);

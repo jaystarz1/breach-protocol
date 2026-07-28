@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v46-merged-crowd-skins';
+const CACHE = 'breach-protocol-v47-degraded-facade-shells';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
