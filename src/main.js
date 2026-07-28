@@ -522,7 +522,10 @@ function startLevel(id) {
     let drop = Math.round(free.length * (1 - cmul));
     cdefs = cdefs.filter(c => c.hostage || (drop-- <= 0));
   }
-  world.civilians = cdefs.map(d => new Civilian(scene, d));
+  world.civilians = cdefs.map((d, index) => new Civilian(scene, {
+    ...d,
+    _seed: L.id * 100003 + missionVariant * 1009 + index * 97,
+  }));
 
   // Squad. Not on the sniper mission: the player is a single man locked to a parapet and the
   // team he is covering is already down at the fountain — a stick standing on the roof with
@@ -860,12 +863,13 @@ function impactAt(p) {
 }
 
 function civilianKilled(civ) {
+  const protectedEvacuee = civ.hostage || civ.wasHostage;
   civ.kill();
   world.stats.civKills++;
   sfx.noShoot();
-  hud.noShoot(civ.hostage ? 'HOSTAGE DOWN' : 'CIVILIAN DOWN');
-  if (world.diff.noShootFail || civ.hostage) {
-    failMission(civ.hostage ? 'HOSTAGE KILLED' : 'CIVILIAN CASUALTY — ZERO TOLERANCE');
+  hud.noShoot(protectedEvacuee ? 'EVACUEE DOWN' : 'CIVILIAN DOWN');
+  if (world.diff.noShootFail || protectedEvacuee) {
+    failMission(protectedEvacuee ? 'PROTECTED EVACUEE KILLED' : 'CIVILIAN CASUALTY — ZERO TOLERANCE');
   } else {
     world.stats.score -= world.diff.noShootPenalty;
     hud.feed(`-${world.diff.noShootPenalty} DISCIPLINE`, '#ef9a9a');
@@ -1240,7 +1244,7 @@ function frame() {
       const man = world.allies.find(a => !a.dead && a.pos.distanceTo(c.pos) < 3.0 && Math.abs(a.pos.y - c.pos.y) < 2.2);
       if (man) by = man.name;
     }
-    if (by && c.rescue()) {
+    if (by && c.rescue(by)) {
       world.stats.rescued++;
       world.stats.score += 150;
       hud.feed(by === 'you' ? 'HOSTAGE FREED +150' : `${by}: HOSTAGE FREED +150`, '#a5d6a7');

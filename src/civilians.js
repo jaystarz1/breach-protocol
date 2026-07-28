@@ -6,34 +6,53 @@ import { sfx } from './audio.js';
 // occupant sinks to be genuinely hidden by geometry rather than switched off.
 const WIN_DROP = 1.72;
 
-// No-shoot actors. Hostages kneel in place; free civilians flee AWAY from the player
-// and never across his firing line, so a fair shot is never spoiled by a panicking body.
+function seededRandom(seed) {
+  let state = (seed || 1) >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ value >>> 15, value | 1);
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+    return ((value ^ value >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// No-shoot actors. Their reactions are varied but mission-seeded: repeating a mission variant
+// produces the same rushers, lane-crossers, delays and hostage behavior rather than dice-roll
+// madness that the player cannot learn.
 export class Civilian {
   constructor(scene, def) {
+    this.random = seededRandom(def._seed);
     this.hostage = !!def.hostage;
+    this.wasHostage = this.hostage;
     this.mesh = makeCharacter({ hostile: false, hostage: this.hostage });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
-    this.mesh.rotation.y = (def.yaw ?? Math.random() * 360) * Math.PI / 180;
+    this.mesh.rotation.y = (def.yaw ?? this.random() * 360) * Math.PI / 180;
     scene.add(this.mesh);
     this.dead = false;
     this.rescued = false;
     this.deathAnim = 0;
-    this.walkPhase = Math.random() * 6;
+    this.walkPhase = this.random() * 6;
     this.panic = false;
-    this.panicDir = Math.random() * Math.PI * 2;
+    this.panicDir = this.random() * Math.PI * 2;
     this.panicTimer = 0;
+    this.reactionDelay = 0.18 + this.random() * 0.58;
     this.screamed = false;
     this.exhausted = 0;
     this.prone = 0;                       // 0..1 blend into flat-on-the-floor
     // Some bound people flatten themselves; others freeze upright in a cower. Keeping a
     // hostage-sized obstruction in the target picture is intentional pressure, while the
     // split prevents every hostage encounter from behaving identically.
-    this.duckOnFire = Math.random() < 0.45;
+    this.duckOnFire = this.random() < 0.45;
     // A civilian who runs AT you is the actual shoot/no-shoot test. Fleeing bodies are easy:
     // they leave the frame. Someone sprinting at your muzzle with their hands up, in a level
     // where everything else running at you is trying to kill you, is the decision.
-    this.rush = def.rush !== undefined ? !!def.rush : (!this.hostage && Math.random() < 0.35);
+    this.rush = def.rush !== undefined ? !!def.rush : (!this.hostage && this.random() < 0.35);
+    this.crossLane = !this.hostage && !this.rush && this.random() < 0.32;
     this.rushDone = false;
+    this.escort = false;
+    this.escortSide = this.random() < 0.5 ? -1 : 1;
+    this.escortHeat = 0;
     this.baseY = this.mesh.position.y;
     // Window civilians. Same bay geometry the shooters use, and that is the point: at 160m
     // through a 7-degree scope, a head appearing in an opening is a head appearing in an
@@ -46,7 +65,7 @@ export class Civilian {
       this.perchY = this.perch[1];
       this.duck = 1;
       this.up = false;
-      this.winTimer = 0.5 + Math.random() * 4;
+      this.winTimer = 0.5 + this.random() * 4;
       this.exposed = false;
     }
   }
@@ -72,7 +91,7 @@ export class Civilian {
   }
 
   // cut loose: the bound man stands up and stops being scenery
-  rescue() {
+  rescue(by = 'you') {
     if (this.rescued || this.dead) return false;
     this.rescued = true;
     const r = this.mesh.userData.rig;
@@ -84,9 +103,10 @@ export class Civilian {
       r.lArm.userData.fore.rotation.x = 0; r.rArm.userData.fore.rotation.x = 0;
     }
     this.standUp();            // a man you just cut loose does not stay face-down
-    this.hostage = false;      // now a free civilian: flees like the rest
-    this.panic = true;
-    this.rush = false;         // and he runs AWAY from the man who freed him, obviously
+    this.hostage = false;      // no longer bound; still protected as an evacuee
+    this.panic = by !== 'you';
+    this.escort = by === 'you';
+    this.rush = false;         // never convert a freed hostage into a muzzle-rushing civilian
     return true;
   }
 
@@ -112,6 +132,8 @@ export class Civilian {
     // cluttered target picture, and a prone one is not.
     if (this.hostage) {
       if (world.combatHeat > 0) {
+        this.reactionDelay -= dt;
+        if (this.reactionDelay > 0) return;
         if (this.duckOnFire) this.goProne(dt);
         else animateRig(this.mesh, this.walkPhase, false);
         if (!this.screamed && this.pos.distanceTo(world.playerPos) < 28) {
@@ -122,7 +144,14 @@ export class Civilian {
       return;
     }
 
+    if (this.escort) {
+      this.updateEscort(dt, world);
+      return;
+    }
+
     if (world.combatHeat > 0 && !this.panic) {
+      this.reactionDelay -= dt;
+      if (this.reactionDelay > 0) return;
       this.panic = true;
       if (!this.screamed && this.pos.distanceTo(world.playerPos) < 28) {
         this.screamed = true;
@@ -151,20 +180,56 @@ export class Civilian {
 
     this.panicTimer -= dt;
     if (this.panicTimer <= 0) {
-      this.panicTimer = 1.0 + Math.random() * 1.4;
+      this.panicTimer = 1.0 + this.random() * 1.4;
       const away = Math.atan2(this.pos.x - world.playerPos.x, this.pos.z - world.playerPos.z);
-      let dir = away + (Math.random() - 0.5) * 0.7;
-      // never bolt across the player's aim: if this heading takes them through his
-      // forward axis, mirror it to the far side instead
+      let dir = this.crossLane && this.exhausted < 5
+        ? away + this.escortSide * Math.PI / 2
+        : away + (this.random() - 0.5) * 0.7;
+      // Most people clear the firing line. A seeded minority deliberately cross it for the
+      // crowded-market shoot/no-shoot problem, then transition to the normal away vector.
       const toward = Math.atan2(world.playerPos.x - this.pos.x, world.playerPos.z - this.pos.z);
       let rel = dir - toward;
       while (rel > Math.PI) rel -= 2 * Math.PI;
       while (rel < -Math.PI) rel += 2 * Math.PI;
-      if (Math.abs(rel) < 0.6) dir = toward + (rel >= 0 ? 1.1 : -1.1);
+      if (!this.crossLane && Math.abs(rel) < 0.6) dir = toward + (rel >= 0 ? 1.1 : -1.1);
       this.panicDir = dir;
     }
 
     this.step(dt, world, 3.2);
+  }
+
+  // Player-freed hostages trail close enough to matter. In a quiet room they follow through
+  // the same doorway; once fire starts they take a human-sized beat, then get down. If left
+  // far behind they move to rejoin before dropping, so rescuing someone creates an escort
+  // responsibility instead of instantly deleting that person from the encounter.
+  updateEscort(dt, world) {
+    const sin = Math.sin(world.playerYaw);
+    const cos = Math.cos(world.playerYaw);
+    const tx = world.playerPos.x + sin * 2.0 + cos * this.escortSide * 0.72;
+    const tz = world.playerPos.z + cos * 2.0 - sin * this.escortSide * 0.72;
+    const distance = Math.hypot(tx - this.pos.x, tz - this.pos.z);
+    if (world.combatHeat > 0) {
+      this.escortHeat += dt;
+      if (this.escortHeat < this.reactionDelay || distance > 5) {
+        if (distance > 1.8) {
+          this.panicDir = Math.atan2(tx - this.pos.x, tz - this.pos.z);
+          this.step(dt, world, 2.8);
+        }
+      } else {
+        this.goProne(dt);
+        animateRig(this.mesh, this.walkPhase, false);
+      }
+      return;
+    }
+
+    this.escortHeat = 0;
+    if (this.prone > 0) this.standUp();
+    if (distance > 2.45) {
+      this.panicDir = Math.atan2(tx - this.pos.x, tz - this.pos.z);
+      this.step(dt, world, 2.55);
+    } else {
+      animateRig(this.mesh, this.walkPhase, false);
+    }
   }
 
   // Somebody upstairs in a building a firefight has started underneath. They come to the
@@ -176,9 +241,9 @@ export class Civilian {
     if (this.winTimer <= 0) {
       this.up = !this.up;
       this.winTimer = this.up
-        ? (hot ? 1.0 + Math.random() * 1.6 : 3.0 + Math.random() * 4)
-        : (hot ? 4.5 + Math.random() * 6 : 2.0 + Math.random() * 4);
-      if (this.up && hot && !this.screamed && Math.random() < 0.4) {
+        ? (hot ? 1.0 + this.random() * 1.6 : 3.0 + this.random() * 4)
+        : (hot ? 4.5 + this.random() * 6 : 2.0 + this.random() * 4);
+      if (this.up && hot && !this.screamed && this.random() < 0.4) {
         this.screamed = true;
         sfx.civScream(this.pos);
       }
