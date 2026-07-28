@@ -996,6 +996,80 @@ function addSkylineRoofProfile(batcher, def) {
     def.color);
 }
 
+function addSkylineFacade(batcher, def) {
+  const R = rng(def.seed);
+  const yaw = Math.atan2(def.nx, def.nz);
+  const parent = new THREE.Matrix4().compose(
+    new THREE.Vector3(def.x, def.yBase, def.z),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
+    new THREE.Vector3(1, 1, 1),
+  );
+  // These faces sit behind the playable architecture and dissolve into fog. Strong white
+  // frames would turn them into a procedural grid, so the palette stays close to the wall
+  // value and relies on recess, rhythm and silhouette instead of brightness.
+  const recessMat = standard('skyline-window-recess', 0x111820, 0.93, 0.015);
+  const bandMat = standard('skyline-floor-band', 0xffffff, 0.96, 0);
+  const scarMat = material('skyline-shell-scar', () => new THREE.MeshBasicMaterial({
+    color: 0x090b0c,
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+  }));
+
+  const facadeColor = new THREE.Color(def.color);
+  const bandColor = facadeColor.clone().multiplyScalar(def.ring ? 0.72 : 0.82).getHex();
+  const span = Math.max(3, def.span);
+  const floorStep = Math.max(3.05, def.h / 11);
+  const rows = Math.max(1, Math.min(11, Math.floor((def.h - 2.2) / floorStep)));
+  const columns = Math.max(2, Math.min(7, Math.floor(span / 2.55)));
+  const colStep = span / columns;
+  const paneW = Math.min(1.35, Math.max(0.7, colStep * 0.48));
+  const paneH = Math.min(1.45, Math.max(0.9, floorStep * 0.38));
+
+  for (let row = 0; row < rows; row++) {
+    const y = 1.65 + row * floorStep;
+    if (y > def.h - 0.9) break;
+    // One recessed row may be missing after shelling, and a few individual openings are
+    // blanked or destroyed. The variation is deterministic so retries never redraw a city.
+    const missingRow = def.profile === 'collapsed' && row === rows - 1;
+    for (let col = 0; col < columns; col++) {
+      if (missingRow && (col + def.seed) % 3 !== 0) continue;
+      if (R() < (def.ring ? 0.14 : 0.09)) continue;
+      const x = -span / 2 + colStep * (col + 0.5);
+      batcher.add('skyline-window-recesses', UNIT_BOX, recessMat,
+        instanceMatrix(parent, x, y, 0, paneW, paneH, 0.13));
+    }
+    // Shallow slab/cornice lines divide the enormous wall plane into believable storeys.
+    // Every segment shares one InstancedMesh, even across the full skyline.
+    if (row > 0 && (row % 2 === 0 || def.profile === 'industrial')) {
+      batcher.add('skyline-floor-bands', UNIT_BOX, bandMat,
+        instanceMatrix(parent, 0, y - floorStep * 0.48, 0.025,
+          span * (0.9 + R() * 0.06), 0.11, 0.2),
+        false,
+        bandColor);
+    }
+  }
+
+  // A projecting cap catches a narrow highlight and makes the roof edge legible from below.
+  batcher.add('skyline-cornices', UNIT_BOX, bandMat,
+    instanceMatrix(parent, 0, def.h - 0.16, 0.055, span * 0.96, 0.28, 0.34),
+    false,
+    bandColor);
+
+  const scarChance = def.profile === 'collapsed' ? 0.96 : def.ring ? 0.16 : 0.28;
+  if (R() < scarChance && def.h > 10) {
+    const scarY = def.h * (0.38 + R() * 0.38);
+    batcher.add('skyline-shell-scars', FACADE_SCAR_GEO, scarMat,
+      instanceMatrix(parent, (R() - 0.5) * span * 0.52, scarY, 0.085,
+        Math.min(span * 0.24, 3.8 + R() * 2.8),
+        3.4 + R() * Math.min(5.5, def.h * 0.16), 1,
+        0, 0, R() * 0.42 - 0.21));
+  }
+}
+
 function addCeilingFixture(batcher, def) {
   const parent = new THREE.Matrix4().makeTranslation(def.x, def.y, def.z);
   const housing = standard('fixture-housing', 0x2b3033, 0.62, 0.42);
@@ -1395,6 +1469,7 @@ export function addVisualProps(scene, props = []) {
     else if (def.kind === 'market-stall') addMarketStall(batcher, scene, def, marketIndex++);
     else if (def.kind === 'roof-cap') addRoofCap(batcher, def);
     else if (def.kind === 'skyline-roof-profile') addSkylineRoofProfile(batcher, def);
+    else if (def.kind === 'skyline-facade') addSkylineFacade(batcher, def);
     else if (def.kind === 'ceiling-fixture') addCeilingFixture(batcher, def);
     else if (def.kind === 'wall-decal') wallDecals.push(def);
     else if (def.kind === 'skyline-stats') scene.userData.skylineStats = def.stats;

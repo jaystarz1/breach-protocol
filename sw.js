@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v69-grounded-combatants';
+const CACHE = 'breach-protocol-v70-degraded-skyline';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

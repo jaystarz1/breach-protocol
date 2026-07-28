@@ -30,14 +30,22 @@ def main():
             page.wait_for_timeout(220)
             result = page.evaluate("""() => {
               const profileBatches = {};
+              const facadeBatches = {};
               BP.world.staticMesh.parent.traverse(object => {
                 if (object.name?.startsWith('skyline-profile-')) {
                   profileBatches[object.name] = object.userData.instanceCount || 0;
+                }
+                if (object.name?.startsWith('skyline-window-')
+                    || object.name?.startsWith('skyline-floor-')
+                    || object.name === 'skyline-cornices'
+                    || object.name === 'skyline-shell-scars') {
+                  facadeBatches[object.name] = object.userData.instanceCount || 0;
                 }
               });
               return {
                 stats: BP.world.staticMesh.parent.userData.skylineStats,
                 profileBatches,
+                facadeBatches,
                 familyDraws: BP.world.staticMesh.children.length,
                 calls: BP.performance.render.calls,
               };
@@ -71,10 +79,16 @@ def main():
             assert stats["buildings"] >= 36
             assert stats["masses"] >= stats["buildings"] * 1.35
             assert stats["panes"] > 0
+            assert stats["facades"] >= stats["buildings"]
             assert all(count > 0 for count in stats["profiles"].values())
             assert all(count > 0 for count in stats["roofProfiles"].values())
             assert len(row["profileBatches"]) == 3
-            assert row["familyDraws"] <= 8
+            assert row["facadeBatches"]["skyline-window-recesses"] >= stats["facades"] * 5
+            assert row["facadeBatches"]["skyline-floor-bands"] > 0
+            assert row["facadeBatches"]["skyline-cornices"] == stats["facades"]
+            assert row["facadeBatches"]["skyline-shell-scars"] > 0
+            assert len(row["facadeBatches"]) == 4
+            assert row["familyDraws"] <= 12
         browser.close()
 
 

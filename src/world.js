@@ -206,7 +206,7 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
   const geo = [];
   const R = rng(seed);
   const stats = {
-    buildings: 0, masses: 0, panes: 0,
+    buildings: 0, masses: 0, panes: 0, facades: 0,
     profiles: {
       monolith: 0, stepped: 0, split: 0, penthouse: 0,
       gabled: 0, industrial: 0, collapsed: 0,
@@ -325,6 +325,37 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
           mass.x, mass.yBase + mass.h / 2, mass.z,
           mass.w, mass.h, mass.d, buildingTint, false));
       }
+      // The old skyline varied at the roof but left every wall below it as one blank slab.
+      // From street level that still read as a ring of primitive cubes. One lightweight
+      // visual definition per visible mass lets visual-kit stamp an instanced window rhythm,
+      // floor lines and occasional shell scars onto the inward face. It adds four draw
+      // families total, not a draw call per building or pane.
+      const alongX = Math.abs(Math.cos(a)) <= Math.abs(Math.sin(a));
+      const sgn = (alongX ? -Math.sign(Math.sin(a)) : -Math.sign(Math.cos(a))) || 1;
+      if (quality.desktop && window.__bpVisualProps) {
+        for (let massIndex = 0; massIndex < masses.length; massIndex++) {
+          const mass = masses[massIndex];
+          if (mass.h < 7) continue;
+          const nx = alongX ? 0 : sgn;
+          const nz = alongX ? sgn : 0;
+          window.__bpVisualProps.push({
+            kind: 'skyline-facade',
+            x: alongX ? mass.x : mass.x + sgn * (mass.w / 2 + 0.075),
+            z: alongX ? mass.z + sgn * (mass.d / 2 + 0.075) : mass.z,
+            yBase: mass.yBase,
+            h: mass.h,
+            span: alongX ? mass.w : mass.d,
+            nx,
+            nz,
+            profile: effectiveProfile,
+            ring,
+            seed: (seed ^ (ring * 0x9e3779b9) ^ (i * 0x85ebca6b)
+              ^ (massIndex * 0xc2b2ae35)) >>> 0,
+            color: buildingTint,
+          });
+          stats.facades++;
+        }
+      }
       const roof = masses.reduce((highest, mass) =>
         mass.yBase + mass.h > highest.yBase + highest.h ? mass : highest);
       const roofY = roof.yBase + roof.h;
@@ -373,8 +404,6 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
       // unlit and read as light coming OUT rather than as a pale grey square. Anything on
       // an outer ring is deep enough in fog that panes would be invisible anyway.
       if (!quality.textures || ring !== 0 || R() > 0.5) continue;
-      const alongX = Math.abs(Math.cos(a)) <= Math.abs(Math.sin(a));
-      const sgn = (alongX ? -Math.sign(Math.sin(a)) : -Math.sign(Math.cos(a))) || 1;
       let panes = 0;
       for (const mass of masses) {
         if (mass.h < 4.2 || panes >= PANES_PER_BUILDING) continue;
