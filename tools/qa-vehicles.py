@@ -35,6 +35,25 @@ def main():
         page.wait_for_timeout(250)
         page.screenshot(path=str(output / "street-vehicles-close.png"))
 
+        # Isolate the regular SUV from the marked unit behind it. This angle exposes the
+        # bonnet, roof and side width simultaneously, so a constant-width extrusion cannot
+        # pass merely because its side profile resembles a car.
+        page.evaluate("""() => {
+          BP.player.pos.set(-8, 0, 22);
+          BP.player.yaw = -2.214;
+          BP.player.pitch = -0.05;
+        }""")
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(output / "regular-suv-three-quarter.png"))
+
+        page.evaluate("""() => {
+          BP.player.pos.set(0, 0, 8);
+          BP.player.yaw = -0.785;
+          BP.player.pitch = -0.04;
+        }""")
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(output / "regular-hatch-three-quarter.png"))
+
         page.evaluate("""() => {
           BP.player.pos.set(7, 0, -20);
           BP.player.yaw = 0;
@@ -46,6 +65,7 @@ def main():
         coverage = page.evaluate("""() => {
           const meshes = {};
           const localBounds = {};
+          const widthStations = {};
           for (const object of BP.world.staticMesh.parent.children) {
             if (!object.isInstancedMesh || !object.name.startsWith('vehicle-')) continue;
             meshes[object.name] = object.userData.instanceCount;
@@ -57,10 +77,20 @@ def main():
                 y: +(box.max.y - box.min.y).toFixed(3),
                 z: +(box.max.z - box.min.z).toFixed(3),
               };
+              if (object.name.endsWith('-lower')) {
+                const positions = object.geometry.attributes.position;
+                const widths = new Map();
+                for (let i = 0; i < positions.count; i++) {
+                  const x = positions.getX(i).toFixed(3);
+                  widths.set(x, Math.max(widths.get(x) || 0, Math.abs(positions.getZ(i))));
+                }
+                widthStations[object.name] = new Set(
+                  [...widths.values()].map(width => width.toFixed(3))).size;
+              }
             }
           }
           return {
-            meshes, localBounds,
+            meshes, localBounds, widthStations,
             bodyTypes: ['sedan', 'hatch', 'suv'].filter(type =>
               Object.keys(meshes).some(name => name === `vehicle-${type}-lower`)),
             calls: BP.performance.render.calls,
@@ -93,7 +123,12 @@ def main():
         result = {
             "coverage": coverage,
             "collisions": collisions,
-            "screenshots": ["street-vehicles-close.png", "police-vehicle-close.png"],
+            "screenshots": [
+                "street-vehicles-close.png",
+                "regular-suv-three-quarter.png",
+                "regular-hatch-three-quarter.png",
+                "police-vehicle-close.png",
+            ],
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
@@ -101,8 +136,10 @@ def main():
         assert len(coverage["bodyTypes"]) >= 2
         assert coverage["meshes"].get("vehicle-tyres", 0) >= 20
         assert coverage["meshes"].get("vehicle-wheel-wells", 0) >= 20
+        assert coverage["meshes"].get("vehicle-rim-spokes", 0) >= 100
         assert coverage["meshes"].get("vehicle-windscreen", 0) == 0  # variant-keyed only
         assert any(name.endswith("-windscreen") for name in coverage["meshes"])
+        assert all(count >= 4 for count in coverage["widthStations"].values())
         assert all(
             item["found"]
             and item["actual"]["w"] == item["w"]

@@ -91,81 +91,193 @@ function mesh(geometry, mat, shadows = true) {
   return out;
 }
 
-function roundedProfile(points, depth, bevel = 0.06) {
-  const shape = new THREE.Shape();
-  shape.moveTo(points[0][0], points[0][1]);
-  // Curve the visible upper contour while keeping the sill/floor edge straight. The previous
-  // line-to polygon advertised every control point as a hard corner, which is why a nominally
-  // rounded car still read like a Roblox wedge from ten metres away.
-  const straightTail = points.length >= 8 ? 2 : 1;
-  const curveEnd = points.length - straightTail;
-  shape.splineThru(points.slice(1, curveEnd).map(([x, y]) => new THREE.Vector2(x, y)));
-  for (let i = curveEnd; i < points.length; i++) shape.lineTo(points[i][0], points[i][1]);
-  shape.closePath();
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth, bevelEnabled: true, bevelSegments: 3,
-    bevelSize: bevel, bevelThickness: bevel, curveSegments: 8,
-  });
-  geo.translate(0, 0, -depth / 2);
-  geo.computeVertexNormals();
-  return geo;
+function loftedVehicleShell(stations, topWidth = 0.78) {
+  // The old vehicles were side silhouettes extruded to a constant width. They looked
+  // acceptable exactly side-on, but the constant-width bonnet, cabin and boot exposed the
+  // blockout immediately from a first-person three-quarter view. This indexed loft uses a
+  // rounded ten-point transverse section at every longitudinal station, allowing the nose,
+  // shoulders, roof and tail to taper independently while remaining one instanced geometry.
+  const section = [
+    [-0.8, 0], [-0.97, 0.1], [-1, 0.38], [-0.95, 0.73], [-topWidth, 1],
+    [topWidth, 1], [0.95, 0.73], [1, 0.38], [0.97, 0.1], [0.8, 0],
+  ];
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const ring = section.length;
+
+  for (let s = 0; s < stations.length; s++) {
+    const [x, bottom, top, halfWidth] = stations[s];
+    const height = top - bottom;
+    for (const [zFactor, yFactor] of section) {
+      positions.push(x, bottom + height * yFactor, zFactor * halfWidth);
+      uvs.push(s / (stations.length - 1), yFactor);
+    }
+  }
+  for (let s = 0; s < stations.length - 1; s++) {
+    const next = (s + 1) * ring;
+    const here = s * ring;
+    for (let i = 0; i < ring; i++) {
+      const j = (i + 1) % ring;
+      indices.push(here + i, next + i, next + j, here + i, next + j, here + j);
+    }
+  }
+  // Close both ends. The cap is rarely exposed, but a closed volume gives correct lighting
+  // at damaged bumpers and prevents a bright road sliver from showing through the nose.
+  for (const [station, reverse] of [[0, true], [stations.length - 1, false]]) {
+    const center = positions.length / 3;
+    const [x, bottom, top] = stations[station];
+    positions.push(x, (bottom + top) / 2, 0);
+    uvs.push(station, 0.5);
+    const base = station * ring;
+    for (let i = 0; i < ring; i++) {
+      const j = (i + 1) % ring;
+      if (reverse) indices.push(center, base + j, base + i);
+      else indices.push(center, base + i, base + j);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
-const SEDAN_LOWER = roundedProfile([
-  [-2.2, 0.34], [-2.08, 0.72], [-1.68, 0.91], [1.65, 0.92],
-  [2.12, 0.73], [2.22, 0.4], [1.96, 0.27], [-1.98, 0.27],
-], 1.76, 0.09);
-const SEDAN_CABIN = roundedProfile([
-  [-1.12, 0.88], [-0.62, 1.45], [-0.34, 1.56], [0.78, 1.53],
-  [1.34, 0.94],
-], 1.58, 0.055);
-const SEDAN_WINDOW = roundedProfile([
-  [-0.96, 0.96], [-0.52, 1.42], [-0.28, 1.47], [0.68, 1.45], [1.15, 0.98],
-], 0.022, 0.015);
-const HATCH_LOWER = roundedProfile([
-  [-2.02, 0.32], [-1.92, 0.72], [-1.5, 0.91], [1.57, 0.93],
-  [1.98, 0.72], [2.03, 0.35], [1.78, 0.26], [-1.78, 0.26],
-], 1.74, 0.095);
-const HATCH_CABIN = roundedProfile([
-  [-1.18, 0.87], [-0.63, 1.48], [-0.34, 1.59], [1.18, 1.57],
-  [1.61, 1.18], [1.67, 0.92],
-], 1.57, 0.06);
-const HATCH_WINDOW = roundedProfile([
-  [-1.01, 0.96], [-0.52, 1.44], [-0.25, 1.5], [1.07, 1.49],
-  [1.47, 1.14], [1.5, 0.98],
-], 0.022, 0.015);
-const SUV_LOWER = roundedProfile([
-  [-2.26, 0.4], [-2.17, 0.82], [-1.75, 1.02], [1.78, 1.03],
-  [2.2, 0.84], [2.28, 0.43], [2.02, 0.3], [-2.02, 0.3],
-], 1.86, 0.1);
-const SUV_CABIN = roundedProfile([
-  [-1.24, 0.97], [-0.77, 1.61], [-0.47, 1.74], [1.45, 1.72],
-  [1.78, 1.38], [1.8, 1.02],
-], 1.67, 0.065);
-const SUV_WINDOW = roundedProfile([
-  [-1.07, 1.08], [-0.66, 1.57], [-0.38, 1.65], [1.32, 1.64],
-  [1.62, 1.33], [1.63, 1.09],
-], 0.022, 0.015);
+function doubleSidedWindowPanels(polygons, sideOffset) {
+  // Separate panes leave real painted B/C pillars between windows. The previous single black
+  // extrusion covered the whole side of the cabin and read as a toy-car sticker.
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  for (const side of [-1, 1]) {
+    for (const polygon of polygons) {
+      const base = positions.length / 3;
+      for (let i = 0; i < polygon.length; i++) {
+        const [x, y] = polygon[i];
+        positions.push(x, y, side * sideOffset);
+        uvs.push(i === 0 || i === polygon.length - 1 ? 0 : 1, y);
+      }
+      for (let i = 1; i < polygon.length - 1; i++) {
+        if (side > 0) indices.push(base, base + i, base + i + 1);
+        else indices.push(base, base + i + 1, base + i);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function transverseWindowPane(bottom, top) {
+  const [bottomX, bottomY, bottomHalf] = bottom;
+  const [topX, topY, topHalf] = top;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    bottomX, bottomY, -bottomHalf,
+    bottomX, bottomY, bottomHalf,
+    topX, topY, -topHalf,
+    topX, topY, topHalf,
+  ], 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute([
+    0, 0, 1, 0, 0, 1, 1, 1,
+  ], 2));
+  geometry.setIndex([0, 1, 2, 1, 3, 2]);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+const SEDAN_LOWER = loftedVehicleShell([
+  [-2.25, 0.31, 0.49, 0.68], [-2.12, 0.27, 0.76, 0.9],
+  [-1.73, 0.25, 0.91, 0.98], [-0.9, 0.24, 0.96, 0.99],
+  [0.75, 0.24, 0.96, 1], [1.69, 0.25, 0.9, 0.97],
+  [2.12, 0.28, 0.71, 0.88], [2.25, 0.33, 0.48, 0.65],
+], 0.8);
+const SEDAN_CABIN = loftedVehicleShell([
+  [-1.17, 0.88, 0.95, 0.72], [-0.73, 0.89, 1.46, 0.83],
+  [-0.39, 0.9, 1.57, 0.86], [0.7, 0.91, 1.55, 0.86],
+  [1.15, 0.92, 1.28, 0.82], [1.36, 0.93, 0.99, 0.7],
+], 0.72);
+const SEDAN_WINDOW = doubleSidedWindowPanels([
+  [[-0.98, 0.98], [-0.53, 1.4], [-0.29, 1.47], [0.05, 1.46], [0.05, 0.98]],
+  [[0.24, 0.98], [0.24, 1.46], [0.66, 1.44], [1.13, 0.99]],
+], 0.86);
+const SEDAN_WINDSCREEN = transverseWindowPane(
+  [-1.08, 0.97, 0.78], [-0.51, 1.48, 0.72]);
+const SEDAN_REAR_GLASS = transverseWindowPane(
+  [1.25, 0.98, 0.77], [0.68, 1.47, 0.72]);
+const HATCH_LOWER = loftedVehicleShell([
+  [-2.06, 0.31, 0.48, 0.66], [-1.94, 0.27, 0.74, 0.88],
+  [-1.55, 0.24, 0.91, 0.96], [-0.75, 0.23, 0.96, 0.99],
+  [1.15, 0.24, 0.96, 0.99], [1.7, 0.26, 0.88, 0.94],
+  [1.98, 0.3, 0.67, 0.82], [2.07, 0.34, 0.47, 0.64],
+], 0.8);
+const HATCH_CABIN = loftedVehicleShell([
+  [-1.2, 0.87, 0.94, 0.71], [-0.69, 0.88, 1.47, 0.82],
+  [-0.35, 0.9, 1.6, 0.86], [1.13, 0.92, 1.58, 0.86],
+  [1.53, 0.92, 1.27, 0.8], [1.69, 0.92, 0.99, 0.7],
+], 0.72);
+const HATCH_WINDOW = doubleSidedWindowPanels([
+  [[-1.02, 0.97], [-0.55, 1.42], [-0.27, 1.51], [0.08, 1.51], [0.08, 0.97]],
+  [[0.27, 0.97], [0.27, 1.51], [1.06, 1.5], [1.45, 1.15], [1.49, 0.98]],
+], 0.86);
+const HATCH_WINDSCREEN = transverseWindowPane(
+  [-1.11, 0.97, 0.78], [-0.53, 1.5, 0.72]);
+const HATCH_REAR_GLASS = transverseWindowPane(
+  [1.62, 1, 0.76], [1.12, 1.51, 0.72]);
+const SUV_LOWER = loftedVehicleShell([
+  [-2.31, 0.38, 0.57, 0.72], [-2.18, 0.31, 0.84, 0.96],
+  [-1.75, 0.29, 1.01, 1.04], [-0.86, 0.28, 1.06, 1.06],
+  [1.42, 0.29, 1.07, 1.06], [1.83, 0.31, 0.99, 1.02],
+  [2.2, 0.36, 0.81, 0.94], [2.32, 0.41, 0.57, 0.72],
+], 0.82);
+const SUV_CABIN = loftedVehicleShell([
+  [-1.27, 0.98, 1.06, 0.78], [-0.82, 1, 1.61, 0.89],
+  [-0.48, 1.01, 1.74, 0.92], [1.39, 1.02, 1.73, 0.92],
+  [1.71, 1.02, 1.42, 0.86], [1.82, 1.02, 1.1, 0.75],
+], 0.74);
+const SUV_WINDOW = doubleSidedWindowPanels([
+  [[-1.08, 1.08], [-0.68, 1.56], [-0.39, 1.66], [0.11, 1.66], [0.11, 1.08]],
+  [[0.3, 1.08], [0.3, 1.66], [1.28, 1.65], [1.6, 1.34], [1.63, 1.09]],
+], 0.92);
+const SUV_WINDSCREEN = transverseWindowPane(
+  [-1.17, 1.08, 0.84], [-0.52, 1.67, 0.77]);
+const SUV_REAR_GLASS = transverseWindowPane(
+  [1.75, 1.09, 0.82], [1.34, 1.66, 0.77]);
 const VEHICLE_TYPES = [
   {
     key: 'sedan', lower: SEDAN_LOWER, cabin: SEDAN_CABIN, window: SEDAN_WINDOW,
-    wheels: [-1.42, 1.42], screen: [-0.79, 1.19, 0.53, 0.99],
+    windscreen: SEDAN_WINDSCREEN, rearGlass: SEDAN_REAR_GLASS,
+    wheels: [-1.42, 1.42],
     bodyHalf: 0.97, cabinHalf: 0.845, front: -2.3, rear: 2.34,
   },
   {
     key: 'hatch', lower: HATCH_LOWER, cabin: HATCH_CABIN, window: HATCH_WINDOW,
-    wheels: [-1.29, 1.34], screen: [-0.84, 1.48, 0.56, 1.12],
+    windscreen: HATCH_WINDSCREEN, rearGlass: HATCH_REAR_GLASS,
+    wheels: [-1.29, 1.34],
     bodyHalf: 0.965, cabinHalf: 0.845, front: -2.13, rear: 2.13,
   },
   {
     key: 'suv', lower: SUV_LOWER, cabin: SUV_CABIN, window: SUV_WINDOW,
-    wheels: [-1.47, 1.47], screen: [-0.92, 1.62, 0.61, 1.22],
+    windscreen: SUV_WINDSCREEN, rearGlass: SUV_REAR_GLASS,
+    wheels: [-1.47, 1.47],
     bodyHalf: 1.03, cabinHalf: 0.9, front: -2.37, rear: 2.4,
   },
 ];
-const TYRE_GEO = new THREE.TorusGeometry(0.36, 0.105, 10, 24);
-const HUB_GEO = new THREE.CylinderGeometry(0.23, 0.23, 0.045, 20);
+const TYRE_GEO = new THREE.TorusGeometry(0.36, 0.105, 14, 32);
+const HUB_GEO = new THREE.CylinderGeometry(0.23, 0.23, 0.045, 24);
 const CAP_GEO = new THREE.CylinderGeometry(0.075, 0.075, 0.052, 16);
+const RIM_SPOKE_GEO = new THREE.CapsuleGeometry(0.017, 0.13, 3, 7);
 const ARCH_GEO = new THREE.CylinderGeometry(0.43, 0.43, 0.035, 24);
 const MIRROR_GEO = new THREE.SphereGeometry(0.11, 12, 8);
 const HANDLE_GEO = new THREE.CapsuleGeometry(0.018, 0.11, 3, 8);
@@ -278,8 +390,8 @@ function addVehicle(batcher, def) {
     new THREE.Vector3(1, 1, 1),
   );
   const paint = material('vehicle-paint-instanced', () => new THREE.MeshPhysicalMaterial({
-    color: 0xffffff, roughness: 0.24, metalness: 0.38,
-    clearcoat: 0.72, clearcoatRoughness: 0.2, envMapIntensity: 1.35,
+    color: 0xffffff, roughness: 0.32, metalness: 0.04,
+    clearcoat: 0.68, clearcoatRoughness: 0.24, envMapIntensity: 1.15,
   }));
   const trim = standard('vehicle-trim', 0x11161a, 0.54, 0.16);
   const rubber = standard('vehicle-rubber', 0x090b0d, 0.96, 0);
@@ -290,9 +402,10 @@ function addVehicle(batcher, def) {
     color: 0x050708, transparent: true, opacity: 0.18, depthWrite: false,
   }));
   const glass = material('vehicle-glass', () => new THREE.MeshPhysicalMaterial({
-    color: 0x08131b, roughness: 0.15, metalness: 0.08,
+    color: 0x14242d, roughness: 0.13, metalness: 0.18,
     transmission: 0, transparent: false,
-    clearcoat: 1, clearcoatRoughness: 0.1, envMapIntensity: 1.05,
+    clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.3,
+    side: THREE.DoubleSide,
   }));
   const grime = standard('vehicle-road-grime', 0x282824, 0.98, 0.01);
   const shattered = standard('vehicle-shattered-glass', 0x10171b, 0.88, 0.03);
@@ -306,9 +419,9 @@ function addVehicle(batcher, def) {
   const glassSide = type.cabinHalf + 0.014;
   const trimSide = type.bodyHalf + 0.028;
   const wheelSide = type.bodyHalf + 0.06;
+  batcher.add(`vehicle-${type.key}-side-glass`, type.window, wrecked ? shattered : glass,
+    parent);
   for (const side of [-1, 1]) {
-    batcher.add(`vehicle-${type.key}-side-glass`, type.window, wrecked ? shattered : glass,
-      instanceMatrix(parent, 0, 0, side * glassSide, 1, 1, 1));
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
       instanceMatrix(parent, 0.18, 1.2, side * (glassSide + 0.025), 0.085, 0.55, 0.055));
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
@@ -324,20 +437,17 @@ function addVehicle(batcher, def) {
         instanceMatrix(parent, x + 0.23, 0.83, side * (trimSide + 0.014),
           1, 1, 1, 0, 0, Math.PI / 2));
     }
+    batcher.add('vehicle-trim-box', UNIT_BOX, trim,
+      instanceMatrix(parent, -0.02, 0.91, side * trimSide, 3.26, 0.025, 0.016));
   }
 
   // The glasshouse is a volume, not a dark decal pasted on each side. Angled front/rear
   // panes, a visible interior and pillars prevent the profile from reading as two stacked
   // boxes when the player approaches from either end.
-  const [frontX, rearX, frontTilt, rearTilt] = type.screen;
-  batcher.add(`vehicle-${type.key}-windscreen`, UNIT_BOX, wrecked ? shattered : glass,
-    instanceMatrix(parent, frontX, type.key === 'suv' ? 1.35 : 1.23, 0,
-      0.035, type.key === 'suv' ? 0.72 : 0.6, type.key === 'suv' ? 1.61 : 1.52,
-      0, 0, -frontTilt));
-  batcher.add(`vehicle-${type.key}-rear-glass`, UNIT_BOX, wrecked ? shattered : glass,
-    instanceMatrix(parent, rearX, type.key === 'suv' ? 1.39 : 1.24, 0,
-      0.035, type.key === 'suv' ? 0.65 : 0.52, type.key === 'suv' ? 1.59 : 1.48,
-      0, 0, rearTilt));
+  batcher.add(`vehicle-${type.key}-windscreen`, type.windscreen,
+    wrecked ? shattered : glass, parent);
+  batcher.add(`vehicle-${type.key}-rear-glass`, type.rearGlass,
+    wrecked ? shattered : glass, parent);
   for (const side of [-0.45, 0.45]) {
     batcher.add('vehicle-seats', UNIT_BOX, interior,
       instanceMatrix(parent, 0.12, 0.96, side, 0.42, 0.58, 0.44, 0, 0, -0.08));
@@ -354,6 +464,15 @@ function addVehicle(batcher, def) {
       instanceMatrix(parent, x, 0.4, side * (wheelSide + 0.025), 1, 1, 1, Math.PI / 2));
     batcher.add('vehicle-caps', CAP_GEO, trim,
       instanceMatrix(parent, x, 0.4, side * (wheelSide + 0.055), 1, 1, 1, Math.PI / 2));
+    for (let spoke = 0; spoke < 5; spoke++) {
+      const angle = spoke * Math.PI * 2 / 5;
+      batcher.add('vehicle-rim-spokes', RIM_SPOKE_GEO, rim,
+        instanceMatrix(parent,
+          x - Math.sin(angle) * 0.1,
+          0.4 + Math.cos(angle) * 0.1,
+          side * (wheelSide + 0.061),
+          1, 1, 1, 0, 0, angle));
+    }
   }
 
   for (const side of [-0.56, 0.56]) {
@@ -388,6 +507,12 @@ function addVehicle(batcher, def) {
     batcher.add('vehicle-rockers', UNIT_BOX, trim,
       instanceMatrix(parent, 0, 0.28, side * trimSide, 3.38, 0.08, 0.035));
   }
+  // Bonnet and boot shut-lines catch a highlight at close range and communicate real panel
+  // scale without spending unique textures or meshes per vehicle.
+  batcher.add('vehicle-panel-lines', UNIT_BOX, trim,
+    instanceMatrix(parent, -1.55, 0.94, 0, 0.022, 0.014, 1.45, 0, 0, -0.08));
+  batcher.add('vehicle-panel-lines', UNIT_BOX, trim,
+    instanceMatrix(parent, 1.53, 0.93, 0, 0.022, 0.014, 1.42, 0, 0, 0.06));
 
   // Deterministic wear makes parked cars part of the battered district instead of pristine
   // showroom props. It stays instanced, so an entire street still costs only a few draws.
@@ -399,7 +524,7 @@ function addVehicle(batcher, def) {
     if (damage <= 2) {
       const side = damage % 2 ? -1 : 1;
       batcher.add(`vehicle-${type.key}-shattered`, type.window, shattered,
-        instanceMatrix(parent, 0, 0.008, side * (glassSide + 0.006), 0.98, 0.96, 1));
+        instanceMatrix(parent, 0, 0.008, side * 0.004, 0.98, 0.96, 1));
       batcher.add('vehicle-dent', UNIT_BOX, grime,
         instanceMatrix(parent, 1.22, 0.71, -side * (trimSide + 0.01), 0.58, 0.32, 0.022,
           0, 0, damage === 2 ? 0.11 : -0.08));
@@ -420,8 +545,9 @@ function addVehicle(batcher, def) {
   if (def.police) {
     const white = standard('police-white', 0xe5eaed, 0.38, 0.18);
     for (const side of [-1, 1]) {
-      batcher.add('police-doors', UNIT_BOX, white,
-        instanceMatrix(parent, 0.15, 0.67, side * 0.91, 1.45, 0.5, 0.025));
+      batcher.add('police-doors', UNIT_PLANE, white,
+        instanceMatrix(parent, 0.15, 0.67, side * 0.998, 1.45, 0.5, 1,
+          0, side < 0 ? Math.PI : 0));
     }
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
       instanceMatrix(parent, 0.18, 1.59, 0, 0.32, 0.07, 1.34));
