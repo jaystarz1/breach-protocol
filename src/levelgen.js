@@ -7,6 +7,7 @@ import {
   createAuthoredCharacter,
   createCivilianCharacter,
   kneelAuthoredCharacter,
+  releaseAuthoredHostage,
   stopAuthoredCharacter,
 } from './character-assets.js';
 
@@ -341,8 +342,10 @@ const SILHOUETTE_MAT = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
 export function makeCharacter({ hostile, hostage, friendly, black, silhouette, concealed, variant }) {
   const armed = !!hostile || !!friendly;
-  if ((!armed || concealed) && !hostage) {
-    const civilian = createCivilianCharacter({ concealed: !!concealed, variant });
+  if (!armed || concealed) {
+    const civilian = createCivilianCharacter({
+      concealed: !!concealed, hostage: !!hostage, variant,
+    });
     if (civilian) return civilian;
   }
   if (armed && !concealed && !hostage) {
@@ -513,6 +516,21 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
   };
   if (silhouette) g.traverse(o => { if (o.isMesh) o.material = SILHOUETTE_MAT; });
   return g;
+}
+
+// Cut a bound civilian loose. Authored hostages transition from their seated animation into
+// locomotion; the compatibility rig keeps its original explicit limb reset.
+export function releaseHostageRig(g) {
+  const r = g.userData.rig;
+  if (!r) return false;
+  if (r.authored) return releaseAuthoredHostage(g);
+  for (const c of g.children) c.position.y += 0.42;
+  r.lLeg.rotation.x = 0; r.rLeg.rotation.x = 0;
+  r.lLeg.userData.shin.rotation.x = 0; r.rLeg.userData.shin.rotation.x = 0;
+  r.lArm.rotation.set(0.1, 0, 0.15); r.rArm.rotation.set(0.1, 0, -0.15);
+  r.lArm.userData.fore.rotation.x = 0; r.rArm.userData.fore.rotation.x = 0;
+  r.hostage = false;
+  return true;
 }
 
 export function revealWeaponRig(g) {

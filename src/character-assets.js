@@ -116,6 +116,120 @@ const RIFLE_GEO = mergedBoxGeometry([
 const RIFLE_MAT = new THREE.MeshStandardMaterial({
   color: 0x0b0e11, roughness: 0.44, metalness: 0.58,
 });
+const RESTRAINT_MAT = new THREE.MeshStandardMaterial({
+  color: 0x5b574f, roughness: 0.84, metalness: 0.08,
+});
+const RESTRAINT_RING = new THREE.TorusGeometry(0.035, 0.008, 6, 12);
+const HOSTAGE_CHAIR_MAT = new THREE.MeshStandardMaterial({
+  color: 0x24292c, roughness: 0.72, metalness: 0.38,
+});
+const HOSTAGE_CHAIR_PAD = new THREE.MeshStandardMaterial({
+  color: 0x34393b, roughness: 0.9, metalness: 0.04,
+});
+const HOSTAGE_CHAIR_FRAME_GEO = mergedBoxGeometry([
+  [-0.18, 0.33, -0.16, 0.035, 0.66, 0.035],
+  [-0.18, 0.33, 0.16, 0.035, 0.66, 0.035],
+  [0.18, 0.33, -0.16, 0.035, 0.66, 0.035],
+  [0.18, 0.33, 0.16, 0.035, 0.66, 0.035],
+  [-0.19, 0.98, -0.205, 0.035, 0.72, 0.035],
+  [0.19, 0.98, -0.205, 0.035, 0.72, 0.035],
+]);
+const HOSTAGE_CHAIR_PAD_GEO = mergedBoxGeometry([
+  [0, 0.66, -0.01, 0.43, 0.055, 0.4],
+  [0, 1.0, -0.205, 0.4, 0.46, 0.045],
+]);
+const RESTRAINT_TIE_GEO = new THREE.BoxGeometry(1, 1, 1);
+
+function hostageChair() {
+  const chair = new THREE.Group();
+  chair.name = 'hostage-chair';
+  chair.add(
+    new THREE.Mesh(HOSTAGE_CHAIR_FRAME_GEO, HOSTAGE_CHAIR_MAT),
+    new THREE.Mesh(HOSTAGE_CHAIR_PAD_GEO, HOSTAGE_CHAIR_PAD));
+  chair.traverse(object => {
+    if (object.isMesh) object.castShadow = object.receiveShadow = quality.shadows;
+  });
+  return chair;
+}
+
+function aimBone(root, bone, child, target) {
+  if (!bone || !child) return;
+  root.updateMatrixWorld(true);
+  const from = child.getWorldPosition(new THREE.Vector3())
+    .sub(bone.getWorldPosition(new THREE.Vector3())).normalize();
+  const targetWorld = root.localToWorld(target.clone());
+  const to = targetWorld.sub(bone.getWorldPosition(new THREE.Vector3())).normalize();
+  const world = bone.getWorldQuaternion(new THREE.Quaternion());
+  const desired = new THREE.Quaternion().setFromUnitVectors(from, to).multiply(world);
+  const parentWorld = bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+  bone.quaternion.copy(parentWorld.multiply(desired));
+  root.updateMatrixWorld(true);
+}
+
+function poseAuthoredHostage(root, rig) {
+  const action = rig.actions.sitting;
+  if (action) {
+    // Man_Sitting is a seated loop with a long static hold. Freeze within that hold rather
+    // than looping its entry/exit and periodically making a bound person stand up.
+    action.paused = false;
+    action.time = action.getClip().duration * 0.5;
+    rig.mixer.update(0);
+    action.paused = true;
+  }
+
+  const find = name => {
+    const direct = rig.visual.getObjectByName(name);
+    if (direct) return direct;
+    let match = null;
+    rig.visual.traverse(object => {
+      if (!match && (object.name === name || object.name.endsWith(name))) match = object;
+    });
+    return match;
+  };
+  aimBone(root, find('UpperArm.L'), find('LowerArm.L'),
+    new THREE.Vector3(-0.32, 1.12, 0.14));
+  aimBone(root, find('LowerArm.L'), find('Palm.L'),
+    new THREE.Vector3(-0.065, 1.04, 0.29));
+  aimBone(root, find('UpperArm.R'), find('LowerArm.R'),
+    new THREE.Vector3(0.32, 1.12, 0.14));
+  aimBone(root, find('LowerArm.R'), find('Palm.R'),
+    new THREE.Vector3(0.065, 1.04, 0.29));
+
+  const restraint = new THREE.Group();
+  root.updateMatrixWorld(true);
+  const wristNodes = [
+    find('Palm.L') || find('Wrist.L') || find('LowerArm.L'),
+    find('Palm.R') || find('Wrist.R') || find('LowerArm.R'),
+  ];
+  const wristTargets = [
+    new THREE.Vector3(-0.065, 1.04, 0.29),
+    new THREE.Vector3(0.065, 1.04, 0.29),
+  ];
+  const wrists = wristNodes.map((palm, index) => palm
+    ? root.worldToLocal(palm.getWorldPosition(new THREE.Vector3()))
+    : wristTargets[index]);
+  for (const wrist of wrists) {
+    const cuff = new THREE.Mesh(RESTRAINT_RING, RESTRAINT_MAT);
+    cuff.position.copy(wrist);
+    cuff.rotation.y = Math.PI / 2;
+    restraint.add(cuff);
+  }
+  const midpoint = wrists[0].clone().add(wrists[1]).multiplyScalar(0.5);
+  const tie = new THREE.Mesh(RESTRAINT_TIE_GEO, RESTRAINT_MAT);
+  tie.scale.set(Math.max(0.04, wrists[0].distanceTo(wrists[1])), 0.012, 0.012);
+  tie.position.copy(midpoint);
+  tie.rotation.z = Math.atan2(
+    wrists[1].y - wrists[0].y, wrists[1].x - wrists[0].x);
+  restraint.add(tie);
+  restraint.traverse(object => {
+    if (object.isMesh) object.castShadow = quality.shadows;
+  });
+  root.add(restraint);
+  rig.restraint = restraint;
+  const seat = hostageChair();
+  root.add(seat);
+  rig.seat = seat;
+}
 
 function patch(color, position, scale) {
   const mesh = new THREE.Mesh(
@@ -188,12 +302,19 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
 }
 
 let civilianSequence = 0;
-export function createCivilianCharacter({ concealed = false, variant: requestedVariant } = {}) {
+export function createCivilianCharacter({
+  concealed = false, hostage = false, variant: requestedVariant,
+} = {}) {
   if (!civilianSources.length) return null;
   const root = new THREE.Group();
   const sequence = requestedVariant ?? civilianSequence++;
   const variant = Math.abs(sequence) % CIVILIAN_TOPS.length;
-  const source = civilianSources[Math.abs(sequence) % civilianSources.length];
+  // LongSleeve carries a real seated clip. Bound people all use that skeleton so their
+  // restraint pose is authored rather than approximated by rotating an upright mannequin's
+  // box limbs. Palette variation still prevents a hostage group becoming identical clones.
+  const source = hostage
+    ? civilianSources[1]
+    : civilianSources[Math.abs(sequence) % civilianSources.length];
   const visual = cloneSkeleton(source.scene);
   const faction = `civilian-${variant}`;
   visual.scale.setScalar(source.scale);
@@ -232,15 +353,18 @@ export function createCivilianCharacter({ concealed = false, variant: requestedV
     if (short.endsWith('_idle')) actions.idle = action;
     if (short.endsWith('_run')) actions.run = action;
     if (short.endsWith('_walk')) actions.walk = action;
+    if (short.endsWith('_sitting')) actions.sitting = action;
+    if (short.endsWith('_death') || short === 'death') actions.death = action;
   }
   const idle = actions.idle || actions.idle_neutral;
-  if (idle) idle.play();
+  const initial = hostage ? (actions.sitting || idle) : idle;
+  if (initial) initial.play();
   root.userData.rig = {
     authored: true,
     visual,
     mixer,
     actions,
-    currentAction: idle || null,
+    currentAction: initial || null,
     lastAnimationTime: performance.now(),
     rifle,
     hostile: false,
@@ -248,8 +372,10 @@ export function createCivilianCharacter({ concealed = false, variant: requestedV
     civilian: true,
     civilianSource: civilianSources.indexOf(source),
     concealed,
+    hostage,
     baseVisualY: visual.position.y,
   };
+  if (hostage) poseAuthoredHostage(root, root.userData.rig);
   root.userData.bob = 0;
   return root;
 }
@@ -260,6 +386,11 @@ export function animateAuthoredCharacter(root, moving, flinch = 0) {
   const now = performance.now();
   const dt = Math.min(0.05, Math.max(0, (now - rig.lastAnimationTime) / 1000));
   rig.lastAnimationTime = now;
+  if (rig.hostage) {
+    rig.mixer.update(dt);
+    root.userData.bob = 0;
+    return;
+  }
   const desired = moving
     ? (rig.actions.run || rig.actions.walk || rig.actions.character_walk)
     : (rig.actions.idle || rig.actions.character_idle);
@@ -273,6 +404,27 @@ export function animateAuthoredCharacter(root, moving, flinch = 0) {
   rig.visual.rotation.x = -hit * 0.12;
   rig.visual.rotation.z = hit * 0.07;
   root.userData.bob = 0;
+}
+
+export function releaseAuthoredHostage(root) {
+  const rig = root.userData.rig;
+  if (!rig?.authored || !rig.hostage) return false;
+  rig.hostage = false;
+  if (rig.restraint) rig.restraint.visible = false;
+  // The hostage walks away; the chair does not. Reparent while preserving its world
+  // transform so the room retains physical evidence of where the captive was held.
+  if (rig.seat && root.parent) {
+    root.parent.attach(rig.seat);
+    rig.seat = null;
+  }
+  const idle = rig.actions.idle || rig.actions.character_idle;
+  if (idle && idle !== rig.currentAction) {
+    idle.reset().fadeIn(0.2).play();
+    rig.currentAction?.fadeOut(0.2);
+    rig.currentAction = idle;
+  }
+  rig.lastAnimationTime = performance.now();
+  return true;
 }
 
 export function kneelAuthoredCharacter(root, amount) {

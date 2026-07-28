@@ -1,4 +1,4 @@
-import { makeCharacter, animateRig, deathPose } from './levelgen.js';
+import { makeCharacter, animateRig, deathPose, releaseHostageRig } from './levelgen.js';
 import { groundHeight, resolveXZ } from './physics.js';
 import { sfx } from './audio.js';
 
@@ -96,14 +96,7 @@ export class Civilian {
   rescue(by = 'you') {
     if (this.rescued || this.dead) return false;
     this.rescued = true;
-    const r = this.mesh.userData.rig;
-    if (r) {
-      for (const c of this.mesh.children) c.position.y += 0.42;
-      r.lLeg.rotation.x = 0; r.rLeg.rotation.x = 0;
-      r.lLeg.userData.shin.rotation.x = 0; r.rLeg.userData.shin.rotation.x = 0;
-      r.lArm.rotation.set(0.1, 0, 0.15); r.rArm.rotation.set(0.1, 0, -0.15);
-      r.lArm.userData.fore.rotation.x = 0; r.rArm.userData.fore.rotation.x = 0;
-    }
+    releaseHostageRig(this.mesh);
     this.standUp();            // a man you just cut loose does not stay face-down
     this.hostage = false;      // no longer bound; still protected as an evacuee
     this.panic = by !== 'you';
