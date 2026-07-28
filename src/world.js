@@ -200,6 +200,10 @@ const PANES_PER_BUILDING = 24;
 export function skyline(bounds, fogFar, seed, opts = {}) {
   const geo = [];
   const R = rng(seed);
+  const stats = {
+    buildings: 0, masses: 0, panes: 0,
+    profiles: { monolith: 0, stepped: 0, split: 0, penthouse: 0 },
+  };
   const inner = Math.max(bounds.r + 10, fogFar * 0.42);
   const outer = Math.max(inner + 70, fogFar * 0.8);
   const rings = opts.rings ?? (quality.pbr ? 3 : 2);
@@ -224,40 +228,133 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
       const bz = bounds.cz + Math.sin(a) * rr;
       const w = arc * (0.55 + R() * 0.4), d = arc * (0.5 + R() * 0.35);
       const h = 12 + R() * (24 + t * 46);
-      geo.push(box(bx, h / 2, bz, w, h, d, tint, false));
-      if (quality.desktop && window.__bpVisualProps && h < 30 && (i + ring * 2) % 5 === 0) {
+      const profile = quality.desktop ? Math.floor(R() * 4) : 0;
+      const buildingTint = new THREE.Color(tint)
+        .multiplyScalar(0.91 + R() * 0.15).getHex();
+      const masses = [];
+      let effectiveProfile = 'monolith';
+      if (profile === 1 && h > 21) {
+        effectiveProfile = 'stepped';
+        const lowerH = h * (0.56 + R() * 0.08);
+        const tangentX = -Math.sin(a), tangentZ = Math.cos(a);
+        const shift = (R() - 0.5) * Math.min(w, d) * 0.16;
+        masses.push(
+          { x: bx, z: bz, w, d, yBase: 0, h: lowerH },
+          {
+            x: bx + tangentX * shift, z: bz + tangentZ * shift,
+            w: w * (0.62 + R() * 0.12), d: d * (0.64 + R() * 0.12),
+            yBase: lowerH, h: h - lowerH,
+          },
+        );
+      } else if (profile === 2 && h > 26) {
+        effectiveProfile = 'split';
+        const podiumH = Math.max(5.2, h * 0.2);
+        masses.push({ x: bx, z: bz, w, d, yBase: 0, h: podiumH });
+        if (w >= d) {
+          const towerW = w * 0.38;
+          masses.push(
+            {
+              x: bx - w * 0.25, z: bz, w: towerW, d: d * 0.82,
+              yBase: podiumH, h: h - podiumH,
+            },
+            {
+              x: bx + w * 0.25, z: bz, w: towerW, d: d * 0.76,
+              yBase: podiumH, h: h * (0.72 + R() * 0.12) - podiumH,
+            },
+          );
+        } else {
+          const towerD = d * 0.38;
+          masses.push(
+            {
+              x: bx, z: bz - d * 0.25, w: w * 0.82, d: towerD,
+              yBase: podiumH, h: h - podiumH,
+            },
+            {
+              x: bx, z: bz + d * 0.25, w: w * 0.76, d: towerD,
+              yBase: podiumH, h: h * (0.72 + R() * 0.12) - podiumH,
+            },
+          );
+        }
+      } else if (profile === 3 && h > 18) {
+        effectiveProfile = 'penthouse';
+        const lowerH = h * 0.72;
+        masses.push(
+          { x: bx, z: bz, w, d, yBase: 0, h: lowerH },
+          {
+            x: bx + (R() - 0.5) * w * 0.08,
+            z: bz + (R() - 0.5) * d * 0.08,
+            w: w * 0.48, d: d * 0.5, yBase: lowerH, h: h - lowerH,
+          },
+        );
+      } else {
+        masses.push({ x: bx, z: bz, w, d, yBase: 0, h });
+      }
+      stats.buildings++;
+      stats.masses += masses.length;
+      stats.profiles[effectiveProfile]++;
+      for (const mass of masses) {
+        geo.push(box(
+          mass.x, mass.yBase + mass.h / 2, mass.z,
+          mass.w, mass.h, mass.d, buildingTint, false));
+      }
+      const roof = masses.reduce((highest, mass) =>
+        mass.yBase + mass.h > highest.yBase + highest.h ? mass : highest);
+      const roofY = roof.yBase + roof.h;
+      if (quality.desktop && window.__bpVisualProps
+          && roofY < 30 && (i + ring * 2) % 5 === 0) {
         window.__bpVisualProps.push({
-          kind: 'roof-cap', x: bx, z: bz, y: h, w, d,
-          color: new THREE.Color(tint).multiplyScalar(0.72).getHex(),
+          kind: 'roof-cap', x: roof.x, z: roof.z, y: roofY, w: roof.w, d: roof.d,
+          color: new THREE.Color(buildingTint).multiplyScalar(0.72).getHex(),
         });
       }
       // roof clutter reads as a city rather than a bar chart
-      if (R() < 0.55) geo.push(box(bx + (R() - 0.5) * w * 0.5, h + 1.2, bz + (R() - 0.5) * d * 0.5, w * 0.16, 2.4, d * 0.16, tint, false));
-      if (R() < 0.3) geo.push(box(bx + (R() - 0.5) * w * 0.6, h + 3.6, bz + (R() - 0.5) * d * 0.6, 0.6, 7.2, 0.6, tint, false));
+      if (R() < 0.62) geo.push(box(
+        roof.x + (R() - 0.5) * roof.w * 0.5, roofY + 1.1,
+        roof.z + (R() - 0.5) * roof.d * 0.5,
+        Math.max(0.8, roof.w * 0.16), 2.2, Math.max(0.8, roof.d * 0.16),
+        buildingTint, false));
+      if (R() < 0.32) geo.push(box(
+        roof.x + (R() - 0.5) * roof.w * 0.55, roofY + 3.4,
+        roof.z + (R() - 0.5) * roof.d * 0.55,
+        0.45, 6.8, 0.45, buildingTint, false));
 
       // Lit windows, inner ring only and only on some buildings. Emissive, so they draw
       // unlit and read as light coming OUT rather than as a pale grey square. Anything on
       // an outer ring is deep enough in fog that panes would be invisible anyway.
       if (!quality.textures || ring !== 0 || R() > 0.5) continue;
       const alongX = Math.abs(Math.cos(a)) <= Math.abs(Math.sin(a));
-      const sgn = alongX ? -Math.sign(Math.sin(a)) : -Math.sign(Math.cos(a));
-      const face = alongX ? bz + sgn * (d / 2 + 0.08) : bx + sgn * (w / 2 + 0.08);
-      const span = alongX ? w : d;
-      const rowStep = Math.max(3.4, (h - 5) / 6);
-      const colStep = Math.max(3.2, span / 5);
+      const sgn = (alongX ? -Math.sign(Math.sin(a)) : -Math.sign(Math.cos(a))) || 1;
       let panes = 0;
-      for (let wy = 3.2; wy < h - 2 && panes < PANES_PER_BUILDING; wy += rowStep) {
-        for (let off = -span / 2 + 2; off < span / 2 - 2 && panes < PANES_PER_BUILDING; off += colStep) {
-          const on = R();
-          if (on > 0.55) continue;
-          const col = on < 0.34 ? P.glassWarm : P.glassCool;
-          geo.push(alongX
-            ? box(bx + off, wy, face, 1.6, 1.6, 0.14, col, false, true)
-            : box(face, wy, bz + off, 0.14, 1.6, 1.6, col, false, true));
-          panes++;
+      for (const mass of masses) {
+        if (mass.h < 4.2 || panes >= PANES_PER_BUILDING) continue;
+        const face = alongX
+          ? mass.z + sgn * (mass.d / 2 + 0.08)
+          : mass.x + sgn * (mass.w / 2 + 0.08);
+        const span = alongX ? mass.w : mass.d;
+        const rowStep = Math.max(3.15, (mass.h - 3) / 5);
+        const colStep = Math.max(2.7, span / 5);
+        const paneW = Math.min(1.15, Math.max(0.72, colStep * 0.3));
+        for (let wy = mass.yBase + 2.5;
+          wy < mass.yBase + mass.h - 1.2 && panes < PANES_PER_BUILDING;
+          wy += rowStep) {
+          for (let off = -span / 2 + 1.3;
+            off < span / 2 - 1.3 && panes < PANES_PER_BUILDING;
+            off += colStep) {
+            const on = R();
+            if (on > 0.5) continue;
+            const col = on < 0.32 ? P.glassWarm : P.glassCool;
+            geo.push(alongX
+              ? box(mass.x + off, wy, face, paneW, 1.3, 0.12, col, false, true)
+              : box(face, wy, mass.z + off, 0.12, 1.3, paneW, col, false, true));
+            panes++;
+          }
         }
       }
+      stats.panes += panes;
     }
+  }
+  if (window.__bpVisualProps) {
+    window.__bpVisualProps.push({ kind: 'skyline-stats', stats });
   }
   return geo;
 }

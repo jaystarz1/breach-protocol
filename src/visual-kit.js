@@ -630,6 +630,7 @@ export function addVisualProps(scene, props = []) {
     else if (def.kind === 'market-stall') addMarketStall(batcher, scene, def, marketIndex++);
     else if (def.kind === 'roof-cap') addRoofCap(batcher, def);
     else if (def.kind === 'ceiling-fixture') addCeilingFixture(batcher, def);
+    else if (def.kind === 'skyline-stats') scene.userData.skylineStats = def.stats;
   }
   batcher.flush();
 }
