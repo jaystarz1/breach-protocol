@@ -24,6 +24,7 @@ import {
   addFrontlineStreetArt,
 } from './frontline-art.js';
 import { addVisualProps } from './visual-kit.js';
+import { addInteriorMissionArt } from './interior-mission-art.js';
 import { createRenderPipeline } from './renderer/render-pipeline.js';
 import { CAMPAIGN, briefingText, campaignSnapshot } from './campaign.js';
 import { DroneController } from './drone.js';
@@ -352,6 +353,7 @@ function startLevel(id) {
 
   const { solids, mesh: staticMesh, litMesh } = buildStaticGeometry(scene, geo);
   addVisualProps(scene, visualProps);
+  addInteriorMissionArt(scene, L.id);
   if (!indoor) addFrontlineAmbientArt(scene, L.id, bounds);
   addFrontlineMissionArt(scene, L.id);
   if (L.id === 2) {

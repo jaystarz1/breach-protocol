@@ -1,0 +1,522 @@
+// Desktop-only authored dressing for the two enclosed campaign environments.
+//
+// Missions 08 and 09 deliberately keep their original box collision and navigation. This
+// layer supplies the ceiling services, furniture, track hardware, platform language and
+// readable lighting that make those boxes feel like places rather than grey test chambers.
+import * as THREE from 'three';
+import { quality } from './quality.js';
+import { photoSurfaces } from './textures.js';
+
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const PIPE = new THREE.CylinderGeometry(0.065, 0.065, 1, 12);
+const SMALL_PIPE = new THREE.CylinderGeometry(0.032, 0.032, 1, 10);
+const CHAIR_PAD = new THREE.CapsuleGeometry(0.22, 0.38, 4, 10);
+const CHAIR_LEG = new THREE.CylinderGeometry(0.025, 0.025, 1, 8);
+const CASTER = new THREE.SphereGeometry(0.04, 8, 5);
+const MONITOR_BASE = new THREE.CylinderGeometry(0.19, 0.23, 0.035, 16);
+const LED = new THREE.SphereGeometry(0.018, 8, 5);
+const PLATFORM_STUD = new THREE.CylinderGeometry(0.055, 0.055, 0.018, 10);
+const CABLE = new THREE.CylinderGeometry(0.018, 0.018, 1, 7);
+const PAPER = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.48, -0.35);
+  shape.lineTo(0.44, -0.39);
+  shape.lineTo(0.5, 0.31);
+  shape.lineTo(0.1, 0.38);
+  shape.lineTo(-0.46, 0.27);
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
+})();
+
+const tempPosition = new THREE.Vector3();
+const tempQuaternion = new THREE.Quaternion();
+const tempScale = new THREE.Vector3();
+const tempEuler = new THREE.Euler();
+const tempMatrix = new THREE.Matrix4();
+
+function matrix(x, y, z, sx = 1, sy = 1, sz = 1, rx = 0, ry = 0, rz = 0) {
+  tempPosition.set(x, y, z);
+  tempEuler.set(rx, ry, rz);
+  tempQuaternion.setFromEuler(tempEuler);
+  tempScale.set(sx, sy, sz);
+  return tempMatrix.compose(tempPosition, tempQuaternion, tempScale).clone();
+}
+
+class Batches {
+  constructor(scene) {
+    this.scene = scene;
+    this.items = new Map();
+  }
+
+  add(name, geometry, material, transform, shadows = false) {
+    let batch = this.items.get(name);
+    if (!batch) {
+      batch = { geometry, material, transforms: [], shadows };
+      this.items.set(name, batch);
+    }
+    batch.transforms.push(transform);
+  }
+
+  flush() {
+    const stats = {};
+    for (const [name, batch] of this.items) {
+      const out = new THREE.InstancedMesh(
+        batch.geometry, batch.material, batch.transforms.length);
+      out.name = name;
+      out.userData.instanceCount = batch.transforms.length;
+      for (let i = 0; i < batch.transforms.length; i++) {
+        out.setMatrixAt(i, batch.transforms[i]);
+      }
+      out.instanceMatrix.needsUpdate = true;
+      out.castShadow = batch.shadows && quality.shadows;
+      out.receiveShadow = quality.shadows;
+      out.frustumCulled = true;
+      this.scene.add(out);
+      stats[name] = batch.transforms.length;
+    }
+    return stats;
+  }
+}
+
+function standard(color, roughness = 0.75, metalness = 0) {
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness });
+}
+
+function concreteMaterial(color = 0x8a8d88) {
+  const photo = photoSurfaces()?.concrete;
+  return new THREE.MeshStandardMaterial({
+    color,
+    map: photo?.map || null,
+    normalMap: photo?.normalMap || null,
+    roughnessMap: photo?.roughnessMap || null,
+    normalScale: new THREE.Vector2(0.38, 0.38),
+    roughness: 0.92,
+    metalness: 0.01,
+  });
+}
+
+function signTexture(title, subtitle, accent = '#d8b545') {
+  const canvas = document.createElement('canvas');
+  canvas.width = 768;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#172027';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = accent;
+  ctx.fillRect(0, 0, 22, canvas.height);
+  ctx.fillRect(0, canvas.height - 16, canvas.width, 16);
+  ctx.fillStyle = '#d8dde0';
+  ctx.font = '700 70px Arial, sans-serif';
+  ctx.fillText(title, 58, 112);
+  ctx.fillStyle = '#8f9ba2';
+  ctx.font = '36px Arial, sans-serif';
+  ctx.fillText(subtitle, 60, 181);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  return texture;
+}
+
+function addSign(scene, name, title, subtitle, position, rotationY = 0, width = 3.6,
+  accent = '#d8b545') {
+  const material = new THREE.MeshBasicMaterial({
+    map: signTexture(title, subtitle, accent),
+    side: THREE.FrontSide,
+  });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(width, width / 3), material);
+  sign.name = name;
+  sign.position.fromArray(position);
+  sign.rotation.y = rotationY;
+  scene.add(sign);
+}
+
+function addOfficeChair(b, x, z, yaw, mats) {
+  b.add('records-chair-seats', CHAIR_PAD, mats.fabric,
+    matrix(x, 0.53, z, 1.25, 0.34, 1.05, Math.PI / 2, yaw, 0));
+  b.add('records-chair-backs', CHAIR_PAD, mats.fabric,
+    matrix(x + Math.sin(yaw) * 0.38, 0.92, z + Math.cos(yaw) * 0.38,
+      1.2, 0.32, 1.45, 0, yaw, Math.PI / 2));
+  b.add('records-chair-legs', CHAIR_LEG, mats.darkMetal,
+    matrix(x, 0.28, z, 1, 0.42, 1));
+  for (let i = 0; i < 5; i++) {
+    const a = yaw + i * Math.PI * 2 / 5;
+    const lx = x + Math.sin(a) * 0.28;
+    const lz = z + Math.cos(a) * 0.28;
+    b.add('records-chair-legs', CHAIR_LEG, mats.darkMetal,
+      matrix((x + lx) / 2, 0.14, (z + lz) / 2, 1, 0.3, 1,
+        Math.PI / 2, 0, -a));
+    b.add('records-chair-casters', CASTER, mats.rubber, matrix(lx, 0.08, lz));
+  }
+}
+
+function addMonitor(b, x, z, yaw, mats, broken = false) {
+  b.add('records-monitor-stands', SMALL_PIPE, mats.darkMetal,
+    matrix(x, 0.96, z, 1, 0.34, 1));
+  b.add('records-monitor-bases', MONITOR_BASE, mats.darkMetal,
+    matrix(x, 0.795, z, 1, 1, 1));
+  const dx = Math.sin(yaw) * 0.03;
+  const dz = Math.cos(yaw) * 0.03;
+  b.add('records-monitor-cases', UNIT_BOX, mats.darkMetal,
+    matrix(x, 1.18, z, 0.78, 0.5, 0.08, 0, yaw, broken ? -0.08 : 0));
+  b.add('records-monitor-screens', UNIT_BOX, broken ? mats.deadScreen : mats.screen,
+    matrix(x - dx, 1.18, z - dz, 0.69, 0.41, 0.012, 0, yaw, broken ? -0.08 : 0));
+}
+
+function addRecordsOffice(scene) {
+  const b = new Batches(scene);
+  const mats = {
+    ceiling: standard(0x777d7b, 0.94, 0.01),
+    ceilingGap: standard(0x111719, 1, 0),
+    frame: standard(0x40494c, 0.58, 0.46),
+    galvanized: standard(0x6c7778, 0.47, 0.62),
+    darkMetal: standard(0x20282b, 0.62, 0.5),
+    rubber: standard(0x111516, 0.96, 0),
+    fabric: standard(0x303b3c, 0.94, 0),
+    screen: standard(0x142a28, 0.28, 0.08),
+    deadScreen: standard(0x111516, 0.92, 0),
+    cabinet: standard(0x596466, 0.72, 0.38),
+    paper: standard(0xc2beb0, 0.96, 0),
+    cable: standard(0x171b1c, 0.88, 0.05),
+    rack: standard(0x242c2f, 0.48, 0.62),
+    rackFace: standard(0x0e1416, 0.7, 0.4),
+    greenLed: new THREE.MeshBasicMaterial({ color: 0x4cd68a }),
+    amberLed: new THREE.MeshBasicMaterial({ color: 0xe0a148 }),
+  };
+
+  // A suspended grid gives the low office ceiling scale. Missing tiles and sagged panels
+  // make the blackout space read as damaged rather than merely unlit.
+  for (let x = -14; x <= 14; x += 4) {
+    b.add('records-ceiling-grid', UNIT_BOX, mats.frame, matrix(x, 2.91, 0, 0.035, 0.045, 39));
+  }
+  for (let z = -18; z <= 18; z += 4) {
+    b.add('records-ceiling-grid', UNIT_BOX, mats.frame, matrix(0, 2.91, z, 29, 0.045, 0.035));
+  }
+  for (const [x, z, rz] of [
+    [-11.8, 16, 0.03], [-3.8, 12, -0.08], [8.2, 16, 0],
+    [-11.8, 0, 0.06], [4.2, 0, -0.04], [12.2, -4, 0],
+    [-7.8, -12, 0.09], [0.2, -16, -0.06], [8.2, -16, 0],
+  ]) {
+    b.add('records-ceiling-tiles', UNIT_BOX, mats.ceiling,
+      matrix(x, 2.885, z, 3.84, 0.055, 3.84, 0, 0, rz));
+  }
+  for (const [x, z] of [[-7.8, 16], [4.2, 12], [-3.8, -8], [12.2, -12]]) {
+    b.add('records-missing-ceiling-tiles', UNIT_BOX, mats.ceilingGap,
+      matrix(x, 2.875, z, 3.76, 0.025, 3.76));
+  }
+
+  // Main cable tray and smaller branch conduits run continuously through the maze. Their
+  // repeated brackets are cheap instances but make the ceiling legible from every doorway.
+  b.add('records-cable-trays', UNIT_BOX, mats.galvanized,
+    matrix(0, 2.67, 0, 0.72, 0.08, 37));
+  for (let z = -17; z <= 17; z += 2) {
+    b.add('records-cable-tray-rungs', UNIT_BOX, mats.galvanized,
+      matrix(0, 2.61, z, 0.84, 0.035, 0.045));
+  }
+  for (const x of [-10, 10]) {
+    b.add('records-conduits', SMALL_PIPE, mats.galvanized,
+      matrix(x, 2.7, 0, 1, 37, 1, Math.PI / 2));
+  }
+  for (const [x, z, len] of [[-6, 12, 6], [6, 8, 8], [-8, -4, 10], [8, -8, 9]]) {
+    b.add('records-hanging-cables', CABLE, mats.cable,
+      matrix(x, 2.48, z, 1, len, 1, Math.PI / 2, 0, Math.PI / 2));
+  }
+
+  const desks = [
+    [-10, 5, Math.PI], [0, 6, Math.PI], [10, 4, Math.PI],
+    [-10, -8, 0], [10, -10, 0], [2, -10, 0], [-8, -17, 0], [8, -17, 0],
+  ];
+  desks.forEach(([x, z, yaw], i) => {
+    addOfficeChair(b, x + Math.sin(yaw) * 1.05, z + Math.cos(yaw) * 1.05,
+      yaw + Math.PI, mats);
+    addMonitor(b, x, z, yaw, mats, i === 3 || i === 6);
+  });
+
+  // Filing banks and server cabinets hug walls so they preserve the original combat lanes.
+  for (const [x, z, yaw] of [
+    [-13.9, 14, Math.PI / 2], [-13.9, 6, Math.PI / 2],
+    [13.9, 2, -Math.PI / 2], [13.9, -10, -Math.PI / 2],
+  ]) {
+    b.add('records-file-cabinets', UNIT_BOX, mats.cabinet,
+      matrix(x, 0.72, z, 0.56, 1.44, 1.3, 0, yaw));
+    for (const y of [0.35, 0.72, 1.09]) {
+      b.add('records-cabinet-handles', UNIT_BOX, mats.darkMetal,
+        matrix(x - Math.sin(yaw) * 0.3, y, z - Math.cos(yaw) * 0.3,
+          0.18, 0.025, 0.025, 0, yaw));
+    }
+  }
+  for (const x of [-10.5, -7.5, 7.5, 10.5]) {
+    b.add('records-server-racks', UNIT_BOX, mats.rack,
+      matrix(x, 1.05, -19.15, 1.15, 2.1, 0.62));
+    b.add('records-server-faces', UNIT_BOX, mats.rackFace,
+      matrix(x, 1.05, -18.825, 1.02, 1.94, 0.025));
+    for (let y = 0.25; y < 1.9; y += 0.22) {
+      b.add('records-server-slots', UNIT_BOX, mats.galvanized,
+        matrix(x, y, -18.805, 0.86, 0.035, 0.016));
+    }
+    for (let y = 0.34; y < 1.9; y += 0.44) {
+      b.add('records-server-led-green', LED, mats.greenLed,
+        matrix(x + 0.39, y, -18.77));
+      b.add('records-server-led-amber', LED, mats.amberLed,
+        matrix(x + 0.31, y, -18.77));
+    }
+  }
+
+  // Entry frame and floor debris establish the threshold before the first contact.
+  b.add('records-entry-frame', UNIT_BOX, mats.darkMetal, matrix(-1.58, 1.35, 19.82, 0.12, 2.7, 0.22));
+  b.add('records-entry-frame', UNIT_BOX, mats.darkMetal, matrix(1.58, 1.35, 19.82, 0.12, 2.7, 0.22));
+  b.add('records-entry-frame', UNIT_BOX, mats.darkMetal, matrix(0, 2.72, 19.82, 3.28, 0.12, 0.22));
+  for (const [x, z, r, s] of [
+    [-2.8, 17.3, 0.2, 0.5], [3.6, 14.8, -0.5, 0.38], [-8.2, 2.4, 0.4, 0.44],
+    [6.8, -1.1, -0.2, 0.52], [-3.1, -11.8, 0.8, 0.35], [11.2, -15.1, -0.7, 0.42],
+  ]) {
+    b.add('records-floor-paper', PAPER, mats.paper,
+      matrix(x, 0.025, z, s, s, s, -Math.PI / 2, 0, r));
+  }
+
+  addSign(scene, 'records-direction-sign', 'ARCHIVE / SERVER', 'CONTROL ROOM  ↓',
+    [-5.1, 1.9, 19.68], 0, 2.4, '#cf8b35');
+  return b.flush();
+}
+
+function addMetroBench(b, x, z, yaw, mats) {
+  for (const offset of [-0.72, 0, 0.72]) {
+    const ox = x + Math.cos(yaw) * offset;
+    const oz = z - Math.sin(yaw) * offset;
+    b.add('metro-bench-slats', UNIT_BOX, mats.bench,
+      matrix(ox, 0.55, oz, 0.65, 0.08, 0.48, 0, yaw));
+    b.add('metro-bench-slats', UNIT_BOX, mats.bench,
+      matrix(ox - Math.sin(yaw) * 0.24, 0.91, oz - Math.cos(yaw) * 0.24,
+        0.65, 0.48, 0.08, 0, yaw));
+  }
+  for (const offset of [-0.78, 0.78]) {
+    b.add('metro-bench-legs', PIPE, mats.darkMetal,
+      matrix(x + Math.cos(yaw) * offset, 0.28, z - Math.sin(yaw) * offset,
+        1.2, 0.48, 1.2));
+  }
+}
+
+function addMetro(scene) {
+  const b = new Batches(scene);
+  const mats = {
+    concrete: concreteMaterial(0x6d706d),
+    tile: standard(0x8c918d, 0.86, 0.03),
+    darkTile: standard(0x303a3c, 0.9, 0.02),
+    creamTile: standard(0xa4a18f, 0.9, 0.01),
+    warning: standard(0xb99a32, 0.82, 0.05),
+    rail: standard(0x7f8585, 0.28, 0.88),
+    sleeper: standard(0x40362e, 0.96, 0.02),
+    darkMetal: standard(0x242c2f, 0.58, 0.62),
+    pipe: standard(0x6a7271, 0.5, 0.7),
+    cable: standard(0x171b1c, 0.92, 0.02),
+    bench: standard(0x3f5556, 0.62, 0.3),
+    lampOff: standard(0xabb2aa, 0.42, 0.08),
+    lampOn: new THREE.MeshStandardMaterial({
+      color: 0xc6c8b8, emissive: 0xd5d0a8, emissiveIntensity: 0.42,
+      roughness: 0.38,
+    }),
+  };
+
+  // Enclose the nominal "street stub" around the stair entrance. With the indoor renderer
+  // there is intentionally no skyline, so this battered access pavilion replaces the black
+  // void around spawn and gives the descent an architectural threshold.
+  b.add('metro-entry-sidewalls', UNIT_BOX, mats.concrete,
+    matrix(-9.7, 7.65, 44, 0.5, 3.3, 15.5), true);
+  b.add('metro-entry-sidewalls', UNIT_BOX, mats.concrete,
+    matrix(9.7, 7.65, 44, 0.5, 3.3, 15.5), true);
+  b.add('metro-entry-backwall', UNIT_BOX, mats.concrete,
+    matrix(0, 7.65, 51.7, 19.8, 3.3, 0.5), true);
+  b.add('metro-entry-canopy', UNIT_BOX, mats.concrete,
+    matrix(0, 9.25, 44, 20, 0.35, 16), true);
+  // Front facade masks the exposed top of the underground ceiling slab. The original spawn
+  // looked over that slab into the black indoor background, which read as the edge of the
+  // world. Two wall wings and a lintel leave the authored four-metre stair opening clear.
+  b.add('metro-entry-front-wings', UNIT_BOX, mats.concrete,
+    matrix(-6, 7.45, 35.72, 7.8, 3.0, 0.42), true);
+  b.add('metro-entry-front-wings', UNIT_BOX, mats.concrete,
+    matrix(6, 7.45, 35.72, 7.8, 3.0, 0.42), true);
+  b.add('metro-entry-front-lintel', UNIT_BOX, mats.concrete,
+    matrix(0, 8.62, 35.72, 4.2, 0.66, 0.42), true);
+  b.add('metro-entry-front-tile', UNIT_BOX, mats.darkTile,
+    matrix(-6, 6.52, 35.47, 7.8, 0.24, 0.06));
+  b.add('metro-entry-front-tile', UNIT_BOX, mats.darkTile,
+    matrix(6, 6.52, 35.47, 7.8, 0.24, 0.06));
+  for (const x of [-2.18, 2.18]) {
+    b.add('metro-stairwell-cheek-walls', UNIT_BOX, mats.concrete,
+      matrix(x, 3.05, 31.8, 0.24, 5.8, 7.4), true);
+    b.add('metro-stairwell-tile-bands', UNIT_BOX, mats.darkTile,
+      matrix(x + Math.sign(x) * -0.135, 1.45, 31.8, 0.05, 2.2, 7.2));
+    b.add('metro-stairwell-handles', PIPE, mats.darkMetal,
+      matrix(x + Math.sign(x) * -0.22, 3.15, 31.8, 1, 6.7, 1,
+        Math.PI / 2, 0, 0));
+  }
+  b.add('metro-stairwell-lintel', UNIT_BOX, mats.concrete,
+    matrix(0, 4.75, 28.18, 4.6, 0.7, 0.34), true);
+  addSign(scene, 'metro-stairwell-sign', 'PLATFORM 2', 'TRAINS / SERVICE TUNNEL',
+    [0, 4.72, 28.37], 0, 2.4, '#bd3d35');
+  for (const x of [-4.2, 4.2]) {
+    b.add('metro-entry-railings', PIPE, mats.darkMetal, matrix(x, 6.72, 35.9, 1, 1.35, 1));
+    b.add('metro-entry-railings', PIPE, mats.darkMetal,
+      matrix(x, 7.33, 39.4, 1, 7, 1, Math.PI / 2));
+  }
+  addSign(scene, 'metro-entry-sign', 'KORSAK METRO', 'SERVICE ACCESS / ПЛАТФОРМА',
+    [-6, 7.65, 35.47], 0, 3.0, '#bd3d35');
+  for (const z of [37, 40.5, 44, 47.5, 51]) {
+    b.add('metro-entry-ceiling-ribs', UNIT_BOX, mats.darkMetal,
+      matrix(0, 9.02, z, 19.1, 0.16, 0.22));
+  }
+  for (const x of [-4.2, 4.2]) {
+    b.add('metro-entry-lamp-housings', UNIT_BOX, mats.darkMetal,
+      matrix(x, 9.02, 41, 2.3, 0.12, 0.34));
+    b.add('metro-entry-lamps', UNIT_BOX, mats.lampOn,
+      matrix(x, 8.94, 41, 2.05, 0.045, 0.22));
+    const entryLight = new THREE.PointLight(0xd8d6b8, 1.15, 11, 2);
+    entryLight.position.set(x, 8.55, 41);
+    entryLight.castShadow = false;
+    scene.add(entryLight);
+  }
+
+  // Structural ceiling ribs, columns and tiled lower walls keep the long hall from reading
+  // as one extruded box. Everything repeats through instancing.
+  for (let z = 25; z >= -28; z -= 5) {
+    b.add('metro-ceiling-ribs', UNIT_BOX, mats.darkMetal,
+      matrix(0, 4.72, z, 43.2, 0.22, 0.28), true);
+    b.add('metro-wall-ribs', UNIT_BOX, mats.darkMetal,
+      matrix(-21.55, 2.45, z, 0.3, 4.7, 0.28));
+    b.add('metro-wall-ribs', UNIT_BOX, mats.darkMetal,
+      matrix(21.55, 2.45, z, 0.3, 4.7, 0.28));
+  }
+  for (const side of [-1, 1]) {
+    b.add('metro-lower-tile-bands', UNIT_BOX, mats.tile,
+      matrix(side * 21.78, 1.12, -1, 0.06, 2.05, 56));
+    b.add('metro-tile-stripes', UNIT_BOX, mats.darkTile,
+      matrix(side * 21.74, 1.48, -1, 0.065, 0.18, 56));
+  }
+  for (const z of [18, 8, -2, -12, -22]) {
+    for (const x of [-8, 8]) {
+      b.add('metro-column-cladding', UNIT_BOX, mats.creamTile,
+        matrix(x, 1.22, z, 1.14, 2.4, 1.14));
+      b.add('metro-column-collars', UNIT_BOX, mats.darkTile,
+        matrix(x, 2.35, z, 1.2, 0.18, 1.2));
+      b.add('metro-column-collars', UNIT_BOX, mats.darkTile,
+        matrix(x, 0.18, z, 1.2, 0.22, 1.2));
+    }
+  }
+
+  // Track hardware: real twin rails, sleepers and a tactile platform edge. These are close
+  // to the player for most of the mission, so silhouettes matter more than extra textures.
+  for (const x of [-19.2, -15.1]) {
+    b.add('metro-running-rails', UNIT_BOX, mats.rail,
+      matrix(x, -0.9, -1, 0.12, 0.15, 58), true);
+  }
+  for (let z = 26; z >= -29; z -= 1.35) {
+    b.add('metro-sleepers', UNIT_BOX, mats.sleeper,
+      matrix(-17.15, -1.06, z, 6.1, 0.14, 0.24));
+  }
+  b.add('metro-warning-strip', UNIT_BOX, mats.warning,
+    matrix(-12.68, 0.04, -1, 0.42, 0.055, 57));
+  for (let z = 26; z >= -29; z -= 0.72) {
+    b.add('metro-platform-studs', PLATFORM_STUD, mats.warning,
+      matrix(-12.66, 0.085, z, 1, 1, 1));
+  }
+
+  // Two pipe/cable runs lead the eye toward the south service tunnel.
+  for (const [x, y, material] of [
+    [-20.9, 3.72, mats.pipe], [-20.9, 3.48, mats.pipe],
+    [20.9, 4.0, mats.cable], [20.9, 3.78, mats.cable],
+  ]) {
+    b.add(material === mats.pipe ? 'metro-service-pipes' : 'metro-cable-runs',
+      material === mats.pipe ? PIPE : CABLE, material,
+      matrix(x, y, -1, 1, 57, 1, Math.PI / 2));
+  }
+  for (let z = 25; z >= -28; z -= 4) {
+    b.add('metro-pipe-brackets', UNIT_BOX, mats.darkMetal,
+      matrix(-20.9, 3.6, z, 0.28, 0.72, 0.05));
+    b.add('metro-pipe-brackets', UNIT_BOX, mats.darkMetal,
+      matrix(20.9, 3.88, z, 0.22, 0.62, 0.05));
+  }
+
+  addMetroBench(b, 15.4, 15, Math.PI / 2, mats);
+  addMetroBench(b, 15.4, -8, Math.PI / 2, mats);
+  addMetroBench(b, -5.2, -24, 0, mats);
+
+  // Alternating live/dead fluorescent housings create a readable route without flattening
+  // the whole underground level into uniform daylight.
+  const liveLights = [];
+  for (let z = 23, i = 0; z >= -27; z -= 6, i++) {
+    const live = i % 3 !== 1;
+    b.add('metro-fluorescent-housings', UNIT_BOX, mats.darkMetal,
+      matrix(2, 4.56, z, 0.32, 0.13, 3.3));
+    b.add(live ? 'metro-fluorescent-live' : 'metro-fluorescent-dead', UNIT_BOX,
+      live ? mats.lampOn : mats.lampOff,
+      matrix(2, 4.48, z, 0.22, 0.055, 2.85));
+    if (live && liveLights.length < 4) liveLights.push([2, 4.25, z]);
+  }
+  for (const [x, y, z] of liveLights) {
+    const light = new THREE.PointLight(0xd8d6b8, 1.35, 14, 2);
+    light.position.set(x, y, z);
+    light.castShadow = false;
+    scene.add(light);
+  }
+
+  // The narrow south tunnel needs its own repeated services or it collapses into another
+  // black rectangle after the platform.
+  for (const x of [-6.65, 6.65]) {
+    b.add('metro-tunnel-tile-bands', UNIT_BOX, mats.darkTile,
+      matrix(x, 1.05, -45, 0.06, 1.9, 29));
+  }
+  for (const x of [-5.7, -5.35]) {
+    b.add('metro-tunnel-pipes', PIPE, mats.pipe,
+      matrix(x, 3.55, -45, 1, 29, 1, Math.PI / 2));
+  }
+  b.add('metro-tunnel-cable-tray', UNIT_BOX, mats.darkMetal,
+    matrix(0, 4.12, -45, 0.62, 0.08, 28));
+  for (let z = -58; z <= -32; z += 2) {
+    b.add('metro-tunnel-cable-rungs', UNIT_BOX, mats.pipe,
+      matrix(0, 4.06, z, 0.72, 0.035, 0.045));
+  }
+  for (let z = -57; z <= -33; z += 4) {
+    b.add('metro-tunnel-ceiling-ribs', UNIT_BOX, mats.darkMetal,
+      matrix(0, 4.25, z, 13.4, 0.16, 0.22));
+  }
+  for (const [side, z] of [[-1, -37], [1, -43], [-1, -49], [1, -55]]) {
+    const x = side * 6.55;
+    b.add('metro-tunnel-junction-boxes', UNIT_BOX, mats.darkMetal,
+      matrix(x, 2.2, z, 0.18, 0.78, 0.62));
+    b.add('metro-tunnel-junction-doors', UNIT_BOX, mats.pipe,
+      matrix(x - side * 0.105, 2.2, z, 0.025, 0.65, 0.5));
+  }
+  for (const z of [-36, -46, -56]) {
+    b.add('metro-tunnel-lamp-housings', UNIT_BOX, mats.darkMetal,
+      matrix(2.3, 4.12, z, 0.3, 0.12, 2.5));
+    b.add('metro-tunnel-lamps', UNIT_BOX, z === -46 ? mats.lampOff : mats.lampOn,
+      matrix(2.3, 4.04, z, 0.21, 0.045, 2.1));
+    if (z !== -46) {
+      const tunnelLight = new THREE.PointLight(0xd8d6b8, 0.95, 12, 2);
+      tunnelLight.position.set(2.3, 3.82, z);
+      tunnelLight.castShadow = false;
+      scene.add(tunnelLight);
+    }
+  }
+  for (const [x, z] of [[4.8, -35], [-4.5, -42], [4.7, -51], [-4.8, -57]]) {
+    b.add('metro-floor-drains', UNIT_BOX, mats.rail,
+      matrix(x, 0.025, z, 0.42, 0.035, 0.68));
+  }
+  addSign(scene, 'metro-platform-sign', 'PLATFORM 2', 'SOUTH SERVICE / ВЫХОД',
+    [7.42, 3.28, -26], -Math.PI / 2, 3.2, '#bd3d35');
+
+  return b.flush();
+}
+
+export function addInteriorMissionArt(scene, levelId) {
+  if (!quality.desktop) return;
+  let batches = null;
+  if (levelId === 8) batches = addRecordsOffice(scene);
+  if (levelId === 9) batches = addMetro(scene);
+  if (batches) {
+    scene.userData.interiorMissionStats = {
+      levelId,
+      batches,
+      instances: Object.values(batches).reduce((sum, value) => sum + value, 0),
+    };
+  }
+}

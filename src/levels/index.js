@@ -828,7 +828,10 @@ export const LEVELS = [
       g.push(...wall(-22, 28, 22, 28, 5, C.tunnel, [{ off: 18, w: 8, h: 5 }]));
       g.push(...wall(-22, 28, -22, -30, 5, C.tunnel));
       g.push(...wall(22, 28, 22, -30, 5, C.tunnel));
-      g.push(...floorSlab(0, 0, 46, 62, 5.1, 0.5, C.tunnel));
+      // Stop the station ceiling at the entrance wall (z=28). The former 62m slab extended
+      // three metres under the exterior stairwell, so the spawn camera looked across the top
+      // of the roof as if it had reached the edge of the map.
+      g.push(...floorSlab(0, -1, 46, 58, 5.1, 0.5, C.tunnel));
       // columns
       for (const cz of [18, 8, -2, -12, -22]) { g.push([-8, 2.5, cz, 1, 5, 1, C.concrete]); g.push([8, 2.5, cz, 1, 5, 1, C.concrete]); }
       // track trench along west side

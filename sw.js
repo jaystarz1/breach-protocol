@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v58-smoothed-vehicle-surfaces';
+const CACHE = 'breach-protocol-v64-authored-interior-missions';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -6,7 +6,7 @@ const ASSETS = [
   'src/civilians.js', 'src/breach.js', 'src/hud.js', 'src/audio.js', 'src/physics.js',
   'src/levelgen.js', 'src/difficulty.js', 'src/save.js', 'src/levels/index.js', 'src/navgrid.js',
   'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js', 'src/street-sweep-art.js',
-  'src/visual-kit.js', 'src/character-assets.js',
+  'src/visual-kit.js', 'src/character-assets.js', 'src/interior-mission-art.js',
   'src/frontline-art.js',
   'src/drone.js',
   'src/campaign.js', 'src/renderer/capabilities.js', 'src/renderer/render-pipeline.js',
