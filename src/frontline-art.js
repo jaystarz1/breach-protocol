@@ -52,6 +52,22 @@ function frontlineMaterials() {
       metalness: 0.52,
       side: THREE.DoubleSide,
     }),
+    timber: new THREE.MeshStandardMaterial({
+      color: 0x6a4d32,
+      map: procedural.timber.map,
+      normalMap: procedural.timber.normalMap,
+      normalScale: new THREE.Vector2(0.34, 0.34),
+      roughness: 0.91,
+      metalness: 0,
+    }),
+    equipment: new THREE.MeshStandardMaterial({
+      color: 0x252a27,
+      map: procedural.fabric.map,
+      normalMap: procedural.fabric.normalMap,
+      normalScale: new THREE.Vector2(0.18, 0.18),
+      roughness: 0.78,
+      metalness: 0.08,
+    }),
   };
   materialKit.concreteDark = materialKit.concrete.clone();
   materialKit.concreteDark.color.setHex(0x656762);
@@ -151,6 +167,110 @@ function instanced(scene, geometry, material, transforms, shadows = true) {
   return out;
 }
 
+function chamferedCaseGeometry() {
+  const shape = new THREE.Shape();
+  const w = 0.72, h = 0.48, r = 0.055;
+  shape.moveTo(-w / 2 + r, -h / 2);
+  shape.lineTo(w / 2 - r, -h / 2);
+  shape.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+  shape.lineTo(w / 2, h / 2 - r);
+  shape.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+  shape.lineTo(-w / 2 + r, h / 2);
+  shape.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+  shape.lineTo(-w / 2, -h / 2 + r);
+  shape.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.44,
+    steps: 1,
+    bevelEnabled: true,
+    bevelSegments: 1,
+    bevelSize: 0.025,
+    bevelThickness: 0.025,
+    curveSegments: 2,
+  });
+  geometry.translate(0, 0, -0.22);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+const EQUIPMENT_CASE_GEO = chamferedCaseGeometry();
+const FIELD_BOARD_GEO = distressedBoxGeometry(1, 1, 1, 9200);
+const FIELD_LEG_GEO = new THREE.CylinderGeometry(0.025, 0.025, 0.98, 8);
+const FIELD_BRACE_GEO = new THREE.CylinderGeometry(0.014, 0.014, 0.82, 7);
+
+function addFieldTable(scene, x, y, z, yaw, width = 2.2, depth = 0.92) {
+  const frontline = frontlineMaterials();
+  const group = new THREE.Group();
+  group.name = 'frontline-field-table';
+  group.userData.authoredBoards = 4;
+  group.userData.foldingTubeParts = 6;
+  group.position.set(x, y, z);
+  group.rotation.y = yaw;
+
+  // Separate uneven boards and folding tube legs make this read as an improvised launch
+  // bench, not one scaled cube. The mission's existing invisible geometry remains collision.
+  const dummy = new THREE.Object3D();
+  const boards = new THREE.InstancedMesh(FIELD_BOARD_GEO, frontline.timber, 4);
+  for (let i = 0; i < 4; i++) {
+    dummy.position.set(-width * 0.375 + i * width * 0.25, (i % 2) * 0.006, 0);
+    dummy.rotation.set(0, i % 2 ? 0.006 : -0.004, 0);
+    dummy.scale.set(width / 4 - 0.018, 0.075, depth);
+    dummy.updateMatrix();
+    boards.setMatrixAt(i, dummy.matrix);
+  }
+  boards.name = 'frontline-field-table-boards';
+  boards.castShadow = boards.receiveShadow = quality.shadows;
+  group.add(boards);
+  const tube = frontline.barrierSteel;
+  const legs = new THREE.InstancedMesh(FIELD_LEG_GEO, tube, 4);
+  let legIndex = 0;
+  for (const side of [-1, 1]) {
+    for (const zSide of [-1, 1]) {
+      dummy.position.set(side * width * 0.36, -0.5, zSide * depth * 0.31);
+      dummy.rotation.set(0, 0, side * 0.09);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      legs.setMatrixAt(legIndex++, dummy.matrix);
+    }
+  }
+  legs.name = 'frontline-field-table-legs';
+  group.add(legs);
+  const braces = new THREE.InstancedMesh(FIELD_BRACE_GEO, tube, 2);
+  for (let i = 0; i < 2; i++) {
+    dummy.position.set((i ? 1 : -1) * width * 0.36, -0.52, 0);
+    dummy.rotation.set(Math.PI / 2, 0, 0);
+    dummy.updateMatrix();
+    braces.setMatrixAt(i, dummy.matrix);
+  }
+  braces.name = 'frontline-field-table-braces';
+  group.add(braces);
+  scene.add(group);
+  return group;
+}
+
+function addEquipmentCases(scene, cases) {
+  const frontline = frontlineMaterials();
+  const bodies = instanced(scene, EQUIPMENT_CASE_GEO, frontline.equipment, cases, false);
+  bodies.name = 'frontline-equipment-case-bodies';
+  const bands = [];
+  const latches = [];
+  for (const [x, y, z, rx, ry, rz, sx, sy, sz] of cases) {
+    for (const side of [-1, 1]) {
+      bands.push([x + Math.cos(ry) * side * 0.21 * sx, y, z - Math.sin(ry) * side * 0.21 * sx,
+        rx, ry, rz, 0.055 * sx, 0.58 * sy, 0.52 * sz]);
+      latches.push([x + Math.cos(ry) * side * 0.18 * sx, y + 0.25 * sy,
+        z - Math.sin(ry) * side * 0.18 * sx, rx, ry, rz, 0.07, 0.045, 0.045]);
+    }
+  }
+  const bandBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), frontline.barrierSteel, bands, false);
+  bandBatch.name = 'frontline-equipment-case-bands';
+  const latchBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), frontline.rebar, latches, false);
+  latchBatch.name = 'frontline-equipment-case-latches';
+}
+
 function raggedDisc(radius = 1, points = 18, seed = 1) {
   const R = rng(seed);
   const shape = new THREE.Shape();
@@ -227,7 +347,6 @@ export function addFrontlineStreetArt(scene) {
   const darkConcrete = new THREE.MeshStandardMaterial({ color: 0x292c2d, roughness: 0.98 });
   const char = new THREE.MeshStandardMaterial({ color: 0x141515, roughness: 1 });
   const steel = new THREE.MeshStandardMaterial({ color: 0x30373a, roughness: 0.62, metalness: 0.62 });
-  const timber = new THREE.MeshStandardMaterial({ color: 0x67503a, roughness: 0.9 });
 
   // Shell craters: one dark floor scar plus a low irregular broken rim.
   for (const [x, z, radius] of [[-3.6, 14, 1.6], [5.4, -8, 1.15], [-4.8, -39, 1.4]]) {
@@ -293,17 +412,7 @@ export function addFrontlineStreetArt(scene) {
   const sandbags = instanced(scene, SANDBAG_GEO, frontline.sandbag, bags);
   sandbags.name = 'frontline-op-sandbags';
 
-  const table = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.13, 0.92), timber);
-  table.position.set(-11.15, 1.05, -41.6);
-  table.castShadow = table.receiveShadow = true;
-  scene.add(table);
-  const legs = [
-    [-12.0, 0.52, -41.88, 0, 0, 0, 1, 1, 1],
-    [-10.3, 0.52, -41.88, 0, 0, 0, 1, 1, 1],
-    [-12.0, 0.52, -41.32, 0, 0, 0, 1, 1, 1],
-    [-10.3, 0.52, -41.32, 0, 0, 0, 1, 1, 1],
-  ];
-  instanced(scene, new THREE.BoxGeometry(0.1, 1.0, 0.1), steel, legs);
+  addFieldTable(scene, -11.15, 1.05, -41.6, 0);
 
   const drone = droneModel();
   drone.position.set(-11.15, 1.28, -41.6);
@@ -324,7 +433,7 @@ export function addFrontlineStreetArt(scene) {
     [-10.1, 0.22, -40.8, 0, -0.2, 0, 0.9, 0.5, 0.65],
     [-12.7, 0.25, -40.75, 0, 0.1, 0, 1.0, 0.55, 0.7],
   ];
-  instanced(scene, new THREE.BoxGeometry(0.75, 0.52, 0.48), darkConcrete, cases);
+  addEquipmentCases(scene, cases);
 
   // Skin the authoritative 32m metal collision wall with a field-built barricade. Individual
   // corrugations, bent panels and exposed posts break the huge blank rectangle while the
@@ -459,7 +568,6 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
 
 function addObservationPost(scene, x, y, z, yaw = 0) {
   const frontline = frontlineMaterials();
-  const timber = new THREE.MeshStandardMaterial({ color: 0x5c4733, roughness: 0.9 });
   const steel = new THREE.MeshStandardMaterial({ color: 0x262d30, roughness: 0.58, metalness: 0.62 });
   const equipment = new THREE.MeshStandardMaterial({ color: 0x252b2a, roughness: 0.76 });
   const c = Math.cos(yaw), s = Math.sin(yaw);
@@ -473,18 +581,7 @@ function addObservationPost(scene, x, y, z, yaw = 0) {
   const sandbags = instanced(scene, SANDBAG_GEO, frontline.sandbag, bags);
   sandbags.name = 'frontline-mission-op-sandbags';
 
-  const table = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.11, 0.78), timber);
-  table.position.set(x, y + 0.86, z + 1.25);
-  table.rotation.y = yaw;
-  table.castShadow = table.receiveShadow = quality.shadows;
-  scene.add(table);
-  const legs = [];
-  for (const lx of [-0.72, 0.72]) for (const lz of [-0.25, 0.25]) {
-    const wx = x + c * lx + s * lz;
-    const wz = z - s * lx + c * lz + 1.25;
-    legs.push([wx, y + 0.42, wz, 0, yaw, 0, 1, 1, 1]);
-  }
-  instanced(scene, new THREE.BoxGeometry(0.08, 0.82, 0.08), steel, legs);
+  addFieldTable(scene, x, y + 0.86, z + 1.25, yaw, 1.9, 0.78);
   const drone = droneModel();
   drone.position.set(x, y + 1.04, z + 1.25);
   drone.rotation.y = yaw - 0.2;

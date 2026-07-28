@@ -43,6 +43,23 @@ def main():
           });
           return named;
         }""")
+        field_equipment = page.evaluate("""() => {
+          const root = BP.world.staticMesh.parent;
+          const table = root.getObjectByName('frontline-field-table');
+          const bodies = root.getObjectByName('frontline-equipment-case-bodies');
+          const bands = root.getObjectByName('frontline-equipment-case-bands');
+          const latches = root.getObjectByName('frontline-equipment-case-latches');
+          return {
+            boards: table?.userData.authoredBoards,
+            tubeParts: table?.userData.foldingTubeParts,
+            tableParts: table?.children.length,
+            cases: bodies?.count,
+            caseVertices: bodies?.geometry.attributes.position.count,
+            bands: bands?.count,
+            latches: latches?.count,
+            caseRelief: !!bodies?.material.normalMap,
+          };
+        }""")
 
         page.evaluate("""() => {
           if (BP.world.reinf) BP.world.reinf.sent = BP.world.reinf.max;
@@ -114,6 +131,7 @@ def main():
             "droneStarted": drone_started,
             "droneFinished": drone_finished,
             "objectiveMarker": objective_marker,
+            "fieldEquipment": field_equipment,
             "frontlineArt": art,
             "errors": errors[:8],
         }
@@ -134,6 +152,11 @@ def main():
         assert objective_marker["height"] < 0.1
         assert objective_marker["depthTested"] and objective_marker["depthWritesDisabled"]
         assert objective_marker["ring"] and not objective_marker["cylinder"]
+        assert field_equipment["boards"] == 4 and field_equipment["tubeParts"] == 6
+        assert field_equipment["tableParts"] == 3
+        assert field_equipment["cases"] == 3 and field_equipment["caseVertices"] > 24
+        assert field_equipment["bands"] == 6 and field_equipment["latches"] == 6
+        assert field_equipment["caseRelief"]
         assert drone_started["active"] and drone_started["locked"]
         assert drone_finished["controllerDisposed"] and drone_finished["playerRestored"]
         browser.close()
