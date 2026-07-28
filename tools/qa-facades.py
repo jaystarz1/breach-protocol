@@ -32,14 +32,41 @@ def main():
                 counts[object.name] = (counts[object.name] || 0)
                   + object.userData.instanceCount;
               });
+              const photoRooms = [0, 1, 2, 3].reduce(
+                (sum, tile) => sum + (counts[`window-room-photo-${tile}`] || 0), 0);
               const windows = (counts['recess-dark'] || 0)
                 + (counts['recess-warm'] || 0)
-                + (counts['recess-cool'] || 0);
+                + (counts['recess-cool'] || 0)
+                + photoRooms;
               const litWindows = (counts['recess-warm'] || 0)
-                + (counts['recess-cool'] || 0);
+                + (counts['recess-cool'] || 0)
+                + (counts['window-room-photo-0'] || 0)
+                + (counts['window-room-photo-1'] || 0);
+              const photoBatches = BP.world.staticMesh.parent.children
+                .filter(object => object.name.startsWith('window-room-photo-'))
+                .map(object => {
+                  const uv = object.geometry.attributes.uv;
+                  const us = [], vs = [];
+                  for (let i = 0; i < uv.count; i++) {
+                    us.push(uv.getX(i));
+                    vs.push(uv.getY(i));
+                  }
+                  return {
+                    name: object.name,
+                    instances: object.userData.instanceCount,
+                    atlas: object.material.map?.image?.currentSrc
+                      || object.material.map?.image?.src || '',
+                    uv: [
+                      Math.min(...us), Math.min(...vs),
+                      Math.max(...us), Math.max(...vs),
+                    ].map(value => +value.toFixed(3)),
+                  };
+                });
               return {
                 counts,
                 windows,
+                photoRooms,
+                photoBatches,
                 litWindows,
                 litRatio: +(litWindows / windows).toFixed(3),
                 framesPerWindow: +((counts['window-frames'] || 0) / windows).toFixed(2),
@@ -76,10 +103,26 @@ def main():
         tower = signature()
         page.screenshot(path=str(output / "tower-shells.png"))
 
+        def facade_counts(row):
+            return {
+                key: value for key, value in row["counts"].items()
+                if not key.startswith(("vehicle-", "police-"))
+            }
+
+        stable_first = facade_counts(first)
+        stable_second = facade_counts(second)
+        repeat_diff = {
+            key: [stable_first.get(key, 0), stable_second.get(key, 0)]
+            for key in set(stable_first) | set(stable_second)
+            if stable_first.get(key, 0) != stable_second.get(key, 0)
+        }
         result = {
             "first": first,
             "tower": tower,
-            "repeatStable": first["counts"] == second["counts"],
+            # Mission variants intentionally rotate vehicle types and paint. This gate owns
+            # facades, so compare only the architecture it is supposed to keep deterministic.
+            "repeatStable": stable_first == stable_second,
+            "repeatDiff": repeat_diff,
             "errors": errors[:8],
             "screenshots": [
                 "street-facades.png", "facade-shell-oblique.png", "tower-shells.png"
@@ -91,6 +134,17 @@ def main():
         assert not errors
         assert result["repeatStable"]
         assert first["windows"] > 100
+        assert first["photoRooms"] > 80
+        assert len(first["photoBatches"]) == 4
+        assert all(
+            batch["atlas"].endswith("assets/windows/frontline-interiors-atlas-v2.webp")
+            for batch in first["photoBatches"]
+        )
+        assert all(
+            batch["uv"][2] - batch["uv"][0] < 0.49
+            and batch["uv"][3] - batch["uv"][1] < 0.49
+            for batch in first["photoBatches"]
+        )
         assert counts.get("window-boards", 0) > 0
         assert counts.get("window-shards", 0) > 0
         assert counts.get("window-bent-frames", 0) > 0

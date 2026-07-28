@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v73-authored-vehicle-fleet';
+const CACHE = 'breach-protocol-v74-photographic-window-interiors';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -31,6 +31,8 @@ const ASSETS = [
   'assets/vehicles/CarSUV.glb',
   'assets/vehicles/BrokenCar.glb',
   'assets/vehicles/NOTICE.md',
+  'assets/windows/frontline-interiors-atlas-v2.webp',
+  'assets/windows/NOTICE.md',
   'icons/icon-192.png', 'icons/icon-512.png',
 ];
 

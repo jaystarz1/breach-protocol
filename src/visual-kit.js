@@ -49,6 +49,20 @@ if (quality.desktop) {
   }
 }
 
+let frontlineInteriorAtlas = null;
+if (quality.desktop) {
+  try {
+    frontlineInteriorAtlas = await new THREE.TextureLoader().loadAsync(
+      './assets/windows/frontline-interiors-atlas-v2.webp');
+    frontlineInteriorAtlas.colorSpace = THREE.SRGBColorSpace;
+    frontlineInteriorAtlas.anisotropy = Math.min(quality.maxAnisotropy || 4, 8);
+    frontlineInteriorAtlas.generateMipmaps = true;
+    frontlineInteriorAtlas.wrapS = frontlineInteriorAtlas.wrapT = THREE.ClampToEdgeWrapping;
+  } catch (error) {
+    console.warn('[bp] photographic window interiors unavailable; using material fallback', error);
+  }
+}
+
 const mats = {};
 const material = (key, make) => mats[key] || (mats[key] = make());
 const standard = (key, color, roughness = 0.7, metalness = 0) =>
@@ -101,6 +115,28 @@ const FACADE_PANEL_GEO = (() => {
   return geometry;
 })();
 const UNIT_PLANE = new THREE.PlaneGeometry(1, 1);
+const WINDOW_INTERIOR_GEOS = Array.from({ length: 4 }, (_, tile) => {
+  const geometry = new THREE.PlaneGeometry(1, 1);
+  const uv = geometry.attributes.uv;
+  const column = tile % 2;
+  const rowFromTop = Math.floor(tile / 2);
+  // Image generation left a clean 13px-equivalent black guard around each 512px tile.
+  // Crop inside it so minification cannot bleed a neighbouring room through the frame.
+  const pad = 0.013;
+  const u0 = column * 0.5 + pad;
+  const u1 = (column + 1) * 0.5 - pad;
+  const v0 = rowFromTop === 0 ? 0.5 + pad : pad;
+  const v1 = rowFromTop === 0 ? 1 - pad : 0.5 - pad;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(
+      i,
+      THREE.MathUtils.lerp(u0, u1, uv.getX(i)),
+      THREE.MathUtils.lerp(v0, v1, uv.getY(i)),
+    );
+  }
+  uv.needsUpdate = true;
+  return geometry;
+});
 const STALL_POST = new THREE.CylinderGeometry(0.045, 0.045, 3.05, 10);
 const STALL_PRODUCE = new THREE.SphereGeometry(0.13, 9, 6);
 const STALL_BULB = new THREE.SphereGeometry(0.075, 10, 6);
@@ -798,9 +834,9 @@ function addFacade(batcher, def) {
   const frameMat = standard('window-frame', 0x343b41, 0.56, 0.34);
   const recessMat = standard('window-recess', 0x05080b, 0.96, 0);
   const glassDark = material('architectural-glass', () => new THREE.MeshPhysicalMaterial({
-    color: 0x304653, roughness: 0.2, metalness: 0.14,
-    transparent: true, opacity: 0.52, clearcoat: 1,
-    clearcoatRoughness: 0.1, envMapIntensity: 1.65,
+    color: 0x283b45, roughness: 0.22, metalness: 0.1,
+    transparent: true, opacity: 0.38, clearcoat: 1,
+    clearcoatRoughness: 0.12, envMapIntensity: 1.28,
   }));
   const floorH = def.floorH ?? 3;
   const step = def.step ?? 3;
@@ -816,6 +852,20 @@ function addFacade(batcher, def) {
   const coolRoom = material('window-room-cool', () => new THREE.MeshStandardMaterial({
     color: 0x526c82, emissive: 0x78add7, emissiveIntensity: 0.1, roughness: 0.96,
   }));
+  const photoRooms = frontlineInteriorAtlas
+    ? [0, 1, 2, 3].map(tile => material(
+      `window-room-photo-${tile}`,
+      () => new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: frontlineInteriorAtlas,
+        emissive: 0xffffff,
+        emissiveMap: frontlineInteriorAtlas,
+        emissiveIntensity: [0.13, 0.11, 0.018, 0.012][tile],
+        roughness: 0.96,
+        metalness: 0,
+      }),
+    ))
+    : null;
   const sillMat = standard('window-sill', 0x8f969a, 0.82, 0.02);
   const blindMat = standard('blind', 0xb9ae9d, 0.9, 0);
   const revealMat = standard('window-reveal', 0x555b5d, 0.95, 0.01);
@@ -1024,10 +1074,21 @@ function addFacade(batcher, def) {
       const cracked = !destroyed && !boarded && damageRoll < damageChance;
       const lit = !destroyed && !boarded && R() < litChance;
       const warm = R() < 0.72;
-      const roomMat = lit ? (warm ? warmRoom : coolRoom) : recessMat;
+      let roomTile = null;
+      if (photoRooms && !boarded) {
+        if (destroyed) roomTile = 3;
+        else if (lit) roomTile = warm ? 0 : 1;
+        else roomTile = 2;
+      }
+      const roomMat = roomTile == null
+        ? (lit ? (warm ? warmRoom : coolRoom) : recessMat)
+        : photoRooms[roomTile];
+      const roomGeometry = roomTile == null ? UNIT_PLANE : WINDOW_INTERIOR_GEOS[roomTile];
       batcher.add(
-        lit ? (warm ? 'recess-warm' : 'recess-cool') : 'recess-dark',
-        UNIT_PLANE, roomMat, instanceMatrix(parent, 0, 0, -0.03, 1.96, 1.74, 1));
+        roomTile == null
+          ? (lit ? (warm ? 'recess-warm' : 'recess-cool') : 'recess-dark')
+          : `window-room-photo-${roomTile}`,
+        roomGeometry, roomMat, instanceMatrix(parent, 0, 0, -0.03, 1.96, 1.74, 1));
       // Four shallow plaster returns make the 30cm bay legible at an oblique street angle.
       // They sit inside the non-solid facade overlay, so bullets and navigation still use the
       // original wall/collision definitions.
