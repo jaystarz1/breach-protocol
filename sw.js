@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v75-scanned-combatant-fabric';
+const CACHE = 'breach-protocol-v76-photographic-street-fleet';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -32,6 +32,17 @@ const ASSETS = [
   'assets/vehicles/CarSedan.glb',
   'assets/vehicles/CarSUV.glb',
   'assets/vehicles/BrokenCar.glb',
+  'assets/vehicles/covered_car/covered_car_1k.gltf',
+  'assets/vehicles/covered_car/covered_car.bin',
+  'assets/vehicles/covered_car/textures/covered_car_diff_1k.jpg',
+  'assets/vehicles/covered_car/textures/covered_car_nor_gl_1k.jpg',
+  'assets/vehicles/covered_car/textures/covered_car_arm_1k.jpg',
+  'assets/vehicles/abandoned_sedan/scene.gltf',
+  'assets/vehicles/abandoned_sedan/scene.bin',
+  'assets/vehicles/abandoned_sedan/license.txt',
+  'assets/vehicles/abandoned_sedan/textures/Material_1_baseColor.webp',
+  'assets/vehicles/abandoned_sedan/textures/Material_1_metallicRoughness.webp',
+  'assets/vehicles/abandoned_sedan/textures/Material_1_normal.webp',
   'assets/vehicles/NOTICE.md',
   'assets/windows/frontline-interiors-atlas-v2.webp',
   'assets/windows/NOTICE.md',

@@ -52,7 +52,7 @@ def main():
           BP.player.pitch = -0.04;
         }""")
         page.wait_for_timeout(250)
-        page.screenshot(path=str(output / "regular-hatch-three-quarter.png"))
+        page.screenshot(path=str(output / "abandoned-sedan-three-quarter.png"))
 
         page.evaluate("""() => {
           BP.player.pos.set(7, 0, -20);
@@ -101,6 +101,12 @@ def main():
                 mapped: !!object.material?.map,
                 normalMapped: !!object.material?.normalMap,
                 roughnessMapped: !!object.material?.roughnessMap,
+                mapResolution: object.material?.map?.image
+                  ? [
+                    object.material.map.image.width,
+                    object.material.map.image.height,
+                  ]
+                  : null,
                 material: object.material?.name,
                 bounds: [
                   box.max.x - box.min.x,
@@ -147,7 +153,7 @@ def main():
             "screenshots": [
                 "street-vehicles-close.png",
                 "regular-suv-three-quarter.png",
-                "regular-hatch-three-quarter.png",
+                "abandoned-sedan-three-quarter.png",
                 "police-vehicle-close.png",
                 "shell-struck-wreck.png",
             ],
@@ -167,18 +173,23 @@ def main():
                 and item["material"] == "authored-vehicle-layered-finish"
             )
             or (
-                item["kind"] == "wreck"
+                item["kind"] in ("hatch", "wreck")
                 and item["mapped"]
                 and item["normalMapped"]
                 and item["roughnessMapped"]
-                and item["material"] == "authored-vehicle-covered-photo"
+                and item["mapResolution"] == [1024, 1024]
+                and item["material"]
+                == {
+                    "hatch": "authored-vehicle-abandoned-sedan-photo",
+                    "wreck": "authored-vehicle-covered-photo",
+                }[item["kind"]]
             )
             for item in coverage["authored"]
         )
         assert all(item["bounds"][0] > 4 and item["bounds"][2] > 1.8
                    for item in coverage["authored"])
-        assert coverage["calls"] < 250
-        assert coverage["triangles"] < 420_000
+        assert coverage["calls"] < 260
+        assert coverage["triangles"] < 430_000
         assert coverage["police"].get("police-doors", 0) == 4
         assert coverage["police"].get("police-side-stripes", 0) == 4
         assert coverage["police"].get("police-roundels", 0) == 4

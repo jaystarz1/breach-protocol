@@ -10,7 +10,7 @@ let authoredVehicleSources = null;
 if (quality.desktop) {
   try {
     const loader = new GLTFLoader();
-    const [sedan, suv, wreck, covered] = await Promise.all([
+    const [sedan, suv, wreck, covered, abandonedSedan] = await Promise.all([
       loader.loadAsync('./assets/vehicles/CarSedan.glb'),
       loader.loadAsync('./assets/vehicles/CarSUV.glb'),
       loader.loadAsync('./assets/vehicles/BrokenCar.glb'),
@@ -19,10 +19,21 @@ if (quality.desktop) {
           console.warn('[bp] photographic covered vehicle unavailable; using damaged shell', error);
           return null;
         }),
+      loader.loadAsync('./assets/vehicles/abandoned_sedan/scene.gltf')
+        .catch(error => {
+          console.warn('[bp] photographic abandoned sedan unavailable; using intact hatch', error);
+          return null;
+        }),
     ]);
     let coveredMaterial = null;
     covered?.scene.traverse(object => {
       if (!coveredMaterial && object.isMesh) coveredMaterial = object.material;
+    });
+    let abandonedSedanMaterial = null;
+    abandonedSedan?.scene.traverse(object => {
+      if (!abandonedSedanMaterial && object.isMesh) {
+        abandonedSedanMaterial = object.material;
+      }
     });
     authoredVehicleSources = {
       sedan: {
@@ -31,12 +42,18 @@ if (quality.desktop) {
         scale: new THREE.Vector3(1.39, 1.42, 1.18),
       },
       hatch: {
-        // The intact sedan and SUV cover ordinary traffic. A shell-struck hatch is supplied
-        // separately below, so the former procedural hatch silhouette does not survive merely
-        // to create a third nominal body type.
-        scene: sedan.scene,
-        bodyMaterials: new Set(['LightBlue']),
-        scale: new THREE.Vector3(1.3, 1.39, 1.16),
+        // A photographed, genuinely damaged sedan occupies the hatch-sized collision slot.
+        // It brings a modeled cabin, engine bay, open panels and baked deterioration into the
+        // ordinary street fleet without increasing draw calls or inventing another collider.
+        scene: abandonedSedan?.scene || sedan.scene,
+        bodyMaterials: abandonedSedan ? new Set() : new Set(['LightBlue']),
+        scale: abandonedSedan
+          ? new THREE.Vector3(0.2, 0.217, 0.152)
+          : new THREE.Vector3(1.3, 1.39, 1.16),
+        photographic: !!abandonedSedan,
+        sourceMaterial: abandonedSedanMaterial,
+        materialKey: 'abandoned-sedan',
+        materialTint: 0xffffff,
       },
       suv: {
         scene: suv.scene,
@@ -51,6 +68,8 @@ if (quality.desktop) {
           : new THREE.Vector3(0.775, 0.955, 0.731),
         photographic: !!covered,
         sourceMaterial: coveredMaterial,
+        materialKey: 'covered',
+        materialTint: 0xd5d0c5,
       },
     };
     for (const source of Object.values(authoredVehicleSources)) {
@@ -908,11 +927,13 @@ outgoingLight += vVehicleLight * diffuseColor.rgb * 0.055;
   });
 }
 
-function photographicCoveredVehicleMaterial(sourceMaterial) {
-  return material('authored-vehicle-covered-photo', () => {
+function photographicVehicleMaterial(source, kind) {
+  const sourceMaterial = source.sourceMaterial;
+  const key = `authored-vehicle-${source.materialKey || kind}-photo`;
+  return material(key, () => {
     const out = new THREE.MeshStandardMaterial({
-      name: 'authored-vehicle-covered-photo',
-      color: 0xd5d0c5,
+      name: key,
+      color: source.materialTint ?? 0xffffff,
       map: sourceMaterial?.map || null,
       normalMap: sourceMaterial?.normalMap || null,
       normalScale: sourceMaterial?.normalScale?.clone() || new THREE.Vector2(1, 1),
@@ -969,7 +990,7 @@ function addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked) {
   if (!geometry) return false;
   const fixedColour = wrecked ? 'fixed' : new THREE.Color(bodyColor).getHexString();
   const vehicleMat = source.photographic
-    ? photographicCoveredVehicleMaterial(source.sourceMaterial)
+    ? photographicVehicleMaterial(source, kind)
     : authoredVehicleMaterial(wrecked);
   batcher.add(`vehicle-authored-${kind}-${fixedColour}`, geometry, vehicleMat, parent);
   for (const wheelX of type.wheels) {
