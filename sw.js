@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v32-authored-civilians';
+const CACHE = 'breach-protocol-v33-vehicle-fidelity';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

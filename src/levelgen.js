@@ -701,10 +701,23 @@ export function marketStall(x, z, color = 0x7a4a4a) {
 const CAR_COLORS = [0x6e2a2a, 0x27406b, 0x5a5f63, 0x37503a, 0x6b5a2a, 0x2f2f33];
 
 export function car(x, z, rotZAxis = false, color = null, opts = {}) {
-  const col = color ?? CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
+  // Vehicle appearance must be repeatable across restarts: it is part of the authored street,
+  // not gameplay entropy. Position supplies enough variation without consuming Math.random()
+  // and changing every parked car whenever some unrelated level code gains a random call.
+  const appearance = Math.abs(Math.round(x * 37 + z * 61));
+  const col = color ?? CAR_COLORS[appearance % CAR_COLORS.length];
+  const variant = opts.variant ?? appearance % 3;
   if (window.__bpVisualProps) {
-    window.__bpVisualProps.push({ kind: 'vehicle', x, z, rotZAxis, color: col, police: !!opts.police });
-    return [[x, 0.62, z, rotZAxis ? 1.82 : 4.3, 1.24, rotZAxis ? 4.3 : 1.82,
+    window.__bpVisualProps.push({
+      kind: 'vehicle', x, z, rotZAxis, color: col, police: !!opts.police,
+      variant,
+      damage: opts.damage ?? appearance % 7,
+    });
+    const length = [4.6, 4.26, 4.76][opts.police ? 0 : variant];
+    const width = [1.94, 1.93, 2.06][opts.police ? 0 : variant];
+    const height = [1.62, 1.68, 1.84][opts.police ? 0 : variant];
+    return [[x, height / 2, z, rotZAxis ? width : length, height,
+      rotZAxis ? length : width,
       col, true, false, false]];
   }
   const glass = opts.glass ?? 0x141b22;

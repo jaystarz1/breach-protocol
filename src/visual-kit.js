@@ -25,9 +25,11 @@ class InstanceBatcher {
   }
 
   flush() {
-    for (const batch of this.batches.values()) {
+    for (const [key, batch] of this.batches) {
       const out = new THREE.InstancedMesh(
         batch.geometry, batch.mat, batch.matrices.length);
+      out.name = key;
+      out.userData.instanceCount = batch.matrices.length;
       for (let i = 0; i < batch.matrices.length; i++) {
         out.setMatrixAt(i, batch.matrices[i]);
         if (batch.colors[i]) out.setColorAt(i, batch.colors[i]);
@@ -82,34 +84,83 @@ function mesh(geometry, mat, shadows = true) {
 function roundedProfile(points, depth, bevel = 0.06) {
   const shape = new THREE.Shape();
   shape.moveTo(points[0][0], points[0][1]);
-  for (let i = 1; i < points.length; i++) shape.lineTo(points[i][0], points[i][1]);
+  // Curve the visible upper contour while keeping the sill/floor edge straight. The previous
+  // line-to polygon advertised every control point as a hard corner, which is why a nominally
+  // rounded car still read like a Roblox wedge from ten metres away.
+  const straightTail = points.length >= 8 ? 2 : 1;
+  const curveEnd = points.length - straightTail;
+  shape.splineThru(points.slice(1, curveEnd).map(([x, y]) => new THREE.Vector2(x, y)));
+  for (let i = curveEnd; i < points.length; i++) shape.lineTo(points[i][0], points[i][1]);
   shape.closePath();
   const geo = new THREE.ExtrudeGeometry(shape, {
     depth, bevelEnabled: true, bevelSegments: 3,
-    bevelSize: bevel, bevelThickness: bevel, curveSegments: 4,
+    bevelSize: bevel, bevelThickness: bevel, curveSegments: 8,
   });
   geo.translate(0, 0, -depth / 2);
   geo.computeVertexNormals();
   return geo;
 }
 
-const CAR_LOWER = roundedProfile([
+const SEDAN_LOWER = roundedProfile([
   [-2.2, 0.34], [-2.08, 0.72], [-1.68, 0.91], [1.65, 0.92],
   [2.12, 0.73], [2.22, 0.4], [1.96, 0.27], [-1.98, 0.27],
 ], 1.76, 0.09);
-const CAR_CABIN = roundedProfile([
+const SEDAN_CABIN = roundedProfile([
   [-1.12, 0.88], [-0.62, 1.45], [-0.34, 1.56], [0.78, 1.53],
   [1.34, 0.94],
 ], 1.58, 0.055);
-const CAR_WINDOW = roundedProfile([
+const SEDAN_WINDOW = roundedProfile([
   [-0.96, 0.96], [-0.52, 1.42], [-0.28, 1.47], [0.68, 1.45], [1.15, 0.98],
 ], 0.022, 0.015);
+const HATCH_LOWER = roundedProfile([
+  [-2.02, 0.32], [-1.92, 0.72], [-1.5, 0.91], [1.57, 0.93],
+  [1.98, 0.72], [2.03, 0.35], [1.78, 0.26], [-1.78, 0.26],
+], 1.74, 0.095);
+const HATCH_CABIN = roundedProfile([
+  [-1.18, 0.87], [-0.63, 1.48], [-0.34, 1.59], [1.18, 1.57],
+  [1.61, 1.18], [1.67, 0.92],
+], 1.57, 0.06);
+const HATCH_WINDOW = roundedProfile([
+  [-1.01, 0.96], [-0.52, 1.44], [-0.25, 1.5], [1.07, 1.49],
+  [1.47, 1.14], [1.5, 0.98],
+], 0.022, 0.015);
+const SUV_LOWER = roundedProfile([
+  [-2.26, 0.4], [-2.17, 0.82], [-1.75, 1.02], [1.78, 1.03],
+  [2.2, 0.84], [2.28, 0.43], [2.02, 0.3], [-2.02, 0.3],
+], 1.86, 0.1);
+const SUV_CABIN = roundedProfile([
+  [-1.24, 0.97], [-0.77, 1.61], [-0.47, 1.74], [1.45, 1.72],
+  [1.78, 1.38], [1.8, 1.02],
+], 1.67, 0.065);
+const SUV_WINDOW = roundedProfile([
+  [-1.07, 1.08], [-0.66, 1.57], [-0.38, 1.65], [1.32, 1.64],
+  [1.62, 1.33], [1.63, 1.09],
+], 0.022, 0.015);
+const VEHICLE_TYPES = [
+  {
+    key: 'sedan', lower: SEDAN_LOWER, cabin: SEDAN_CABIN, window: SEDAN_WINDOW,
+    wheels: [-1.42, 1.42], screen: [-0.79, 1.19, 0.53, 0.99],
+    bodyHalf: 0.97, cabinHalf: 0.845, front: -2.3, rear: 2.34,
+  },
+  {
+    key: 'hatch', lower: HATCH_LOWER, cabin: HATCH_CABIN, window: HATCH_WINDOW,
+    wheels: [-1.29, 1.34], screen: [-0.84, 1.48, 0.56, 1.12],
+    bodyHalf: 0.965, cabinHalf: 0.845, front: -2.13, rear: 2.13,
+  },
+  {
+    key: 'suv', lower: SUV_LOWER, cabin: SUV_CABIN, window: SUV_WINDOW,
+    wheels: [-1.47, 1.47], screen: [-0.92, 1.62, 0.61, 1.22],
+    bodyHalf: 1.03, cabinHalf: 0.9, front: -2.37, rear: 2.4,
+  },
+];
 const TYRE_GEO = new THREE.TorusGeometry(0.36, 0.105, 10, 24);
 const HUB_GEO = new THREE.CylinderGeometry(0.23, 0.23, 0.045, 20);
 const CAP_GEO = new THREE.CylinderGeometry(0.075, 0.075, 0.052, 16);
+const ARCH_GEO = new THREE.CylinderGeometry(0.43, 0.43, 0.035, 24);
 const MIRROR_GEO = new THREE.SphereGeometry(0.11, 12, 8);
 const HANDLE_GEO = new THREE.CapsuleGeometry(0.018, 0.11, 3, 8);
-const HEADLIGHT_GEO = new THREE.SphereGeometry(0.16, 14, 8);
+const HEADREST_GEO = new THREE.CapsuleGeometry(0.12, 0.13, 4, 8);
+const VEHICLE_SHADOW_GEO = new THREE.CircleGeometry(1, 32);
 const SHARD_GEO = (() => {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute([
@@ -137,64 +188,126 @@ const ROOF_CAP_GEO = (() => {
 })();
 
 function addVehicle(batcher, def) {
-  const damage = Math.abs(Math.round(def.x * 17 + def.z * 31)) % 5;
+  const damage = def.damage ?? Math.abs(Math.round(def.x * 17 + def.z * 31)) % 7;
+  const type = VEHICLE_TYPES[def.police ? 0 : Math.abs(def.variant ?? 0) % VEHICLE_TYPES.length];
+  const wrecked = !def.police && damage === 0;
+  const bodyColor = wrecked ? 0x242321 : def.color;
   const parent = new THREE.Matrix4().compose(
     new THREE.Vector3(def.x, 0.01, def.z),
     new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0), def.rotZAxis ? Math.PI / 2 : 0),
     new THREE.Vector3(1, 1, 1),
   );
-  const paint = standard('vehicle-paint-instanced', 0xffffff, 0.28, 0.34);
+  const paint = material('vehicle-paint-instanced', () => new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, roughness: 0.24, metalness: 0.38,
+    clearcoat: 0.72, clearcoatRoughness: 0.2, envMapIntensity: 1.35,
+  }));
   const trim = standard('vehicle-trim', 0x11161a, 0.54, 0.16);
   const rubber = standard('vehicle-rubber', 0x090b0d, 0.96, 0);
   const rim = standard('vehicle-rim', 0x7e8991, 0.24, 0.82);
+  const interior = standard('vehicle-interior', 0x171a1c, 0.82, 0.02);
+  const plate = standard('vehicle-plate', 0xc7c8bd, 0.42, 0.16);
+  const contactShadow = material('vehicle-contact-shadow', () => new THREE.MeshBasicMaterial({
+    color: 0x050708, transparent: true, opacity: 0.18, depthWrite: false,
+  }));
   const glass = material('vehicle-glass', () => new THREE.MeshPhysicalMaterial({
-    color: 0x24384a, roughness: 0.08, metalness: 0.05,
-    transmission: 0.18, transparent: true, opacity: 0.72,
-    clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.8,
+    color: 0x08131b, roughness: 0.15, metalness: 0.08,
+    transmission: 0, transparent: false,
+    clearcoat: 1, clearcoatRoughness: 0.1, envMapIntensity: 1.05,
   }));
   const grime = standard('vehicle-road-grime', 0x282824, 0.98, 0.01);
   const shattered = standard('vehicle-shattered-glass', 0x10171b, 0.88, 0.03);
 
-  batcher.add('vehicle-lower', CAR_LOWER, paint, parent, true, def.color);
-  batcher.add('vehicle-cabin', CAR_CABIN, paint, parent, true, def.color);
+  // A low sun made the old cast shadow a hard 4x2m black rectangle. A tight translucent
+  // contact patch anchors the car while keeping the silhouette legible on dark asphalt.
+  batcher.add('vehicle-contact-shadows', VEHICLE_SHADOW_GEO, contactShadow,
+    instanceMatrix(parent, 0, 0.018, 0, 1.95, 0.76, 1, -Math.PI / 2));
+  batcher.add(`vehicle-${type.key}-lower`, type.lower, paint, parent, false, bodyColor);
+  batcher.add(`vehicle-${type.key}-cabin`, type.cabin, paint, parent, false, bodyColor);
+  const glassSide = type.cabinHalf + 0.014;
+  const trimSide = type.bodyHalf + 0.028;
+  const wheelSide = type.bodyHalf + 0.06;
   for (const side of [-1, 1]) {
-    batcher.add('vehicle-window', CAR_WINDOW, glass,
-      instanceMatrix(parent, 0, 0, side * 0.804, 1, 1, 1));
+    batcher.add(`vehicle-${type.key}-side-glass`, type.window, wrecked ? shattered : glass,
+      instanceMatrix(parent, 0, 0, side * glassSide, 1, 1, 1));
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
-      instanceMatrix(parent, 0.18, 1.2, side * 0.83, 0.085, 0.55, 0.055));
+      instanceMatrix(parent, 0.18, 1.2, side * (glassSide + 0.025), 0.085, 0.55, 0.055));
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
-      instanceMatrix(parent, 0.08, 0.95, side * 0.83, 2.15, 0.055, 0.06));
+      instanceMatrix(parent, -0.58, 1.2, side * (glassSide + 0.026), 0.055, 0.5, 0.052));
+    batcher.add('vehicle-trim-box', UNIT_BOX, trim,
+      instanceMatrix(parent, 0.08, 0.95, side * (glassSide + 0.025), 2.15, 0.055, 0.06));
     batcher.add('vehicle-mirror', MIRROR_GEO, trim,
-      instanceMatrix(parent, -0.92, 1.12, side * 0.98, 1.35, 0.65, 0.75));
+      instanceMatrix(parent, -0.92, 1.12, side * (type.bodyHalf + 0.1), 1.35, 0.65, 0.75));
     for (const x of [-0.72, 0.86]) {
       batcher.add('vehicle-trim-box', UNIT_BOX, trim,
-        instanceMatrix(parent, x, 0.65, side * 0.902, 0.018, 0.62, 0.014));
+        instanceMatrix(parent, x, 0.65, side * trimSide, 0.018, 0.62, 0.014));
       batcher.add('vehicle-handles', HANDLE_GEO, trim,
-        instanceMatrix(parent, x + 0.23, 0.83, side * 0.916, 1, 1, 1, 0, 0, Math.PI / 2));
+        instanceMatrix(parent, x + 0.23, 0.83, side * (trimSide + 0.014),
+          1, 1, 1, 0, 0, Math.PI / 2));
     }
   }
 
-  for (const x of [-1.42, 1.42]) for (const side of [-1, 1]) {
+  // The glasshouse is a volume, not a dark decal pasted on each side. Angled front/rear
+  // panes, a visible interior and pillars prevent the profile from reading as two stacked
+  // boxes when the player approaches from either end.
+  const [frontX, rearX, frontTilt, rearTilt] = type.screen;
+  batcher.add(`vehicle-${type.key}-windscreen`, UNIT_BOX, wrecked ? shattered : glass,
+    instanceMatrix(parent, frontX, type.key === 'suv' ? 1.35 : 1.23, 0,
+      0.035, type.key === 'suv' ? 0.72 : 0.6, type.key === 'suv' ? 1.61 : 1.52,
+      0, 0, -frontTilt));
+  batcher.add(`vehicle-${type.key}-rear-glass`, UNIT_BOX, wrecked ? shattered : glass,
+    instanceMatrix(parent, rearX, type.key === 'suv' ? 1.39 : 1.24, 0,
+      0.035, type.key === 'suv' ? 0.65 : 0.52, type.key === 'suv' ? 1.59 : 1.48,
+      0, 0, rearTilt));
+  for (const side of [-0.45, 0.45]) {
+    batcher.add('vehicle-seats', UNIT_BOX, interior,
+      instanceMatrix(parent, 0.12, 0.96, side, 0.42, 0.58, 0.44, 0, 0, -0.08));
+    batcher.add('vehicle-headrests', HEADREST_GEO, interior,
+      instanceMatrix(parent, 0.18, 1.34, side, 0.9, 0.9, 0.9));
+  }
+
+  for (const x of type.wheels) for (const side of [-1, 1]) {
+    batcher.add('vehicle-wheel-wells', ARCH_GEO, interior,
+      instanceMatrix(parent, x, 0.4, side * (wheelSide - 0.02), 1, 1, 1, Math.PI / 2));
     batcher.add('vehicle-tyres', TYRE_GEO, rubber,
-      instanceMatrix(parent, x, 0.4, side * 0.89, 1, 1, 1), true);
+      instanceMatrix(parent, x, 0.4, side * wheelSide, 1, 1, 1), false);
     batcher.add('vehicle-hubs', HUB_GEO, rim,
-      instanceMatrix(parent, x, 0.4, side * 0.905, 1, 1, 1, Math.PI / 2));
+      instanceMatrix(parent, x, 0.4, side * (wheelSide + 0.025), 1, 1, 1, Math.PI / 2));
     batcher.add('vehicle-caps', CAP_GEO, trim,
-      instanceMatrix(parent, x, 0.4, side * 0.935, 1, 1, 1, Math.PI / 2));
+      instanceMatrix(parent, x, 0.4, side * (wheelSide + 0.055), 1, 1, 1, Math.PI / 2));
   }
 
   for (const side of [-0.56, 0.56]) {
-    batcher.add('vehicle-headlights', HEADLIGHT_GEO,
-      standard('headlamp', 0xeef4e8, 0.12, 0.08),
-      instanceMatrix(parent, -2.19, 0.67, side, 0.32, 0.65, 1));
+    batcher.add('vehicle-headlights', UNIT_BOX,
+      material('headlamp', () => new THREE.MeshPhysicalMaterial({
+        color: 0xdde8df, emissive: 0xa9b5ab, emissiveIntensity: 0.08,
+        roughness: 0.14, metalness: 0.06, clearcoat: 1,
+      })),
+      instanceMatrix(parent, type.front - 0.012, 0.67, side, 0.035, 0.17, 0.42));
     batcher.add('vehicle-taillights', UNIT_BOX,
       standard('taillamp', 0x8f1514, 0.18, 0),
-      instanceMatrix(parent, 2.18, 0.67, side, 0.05, 0.18, 0.4));
+      instanceMatrix(parent, type.rear + 0.012, 0.67, side, 0.035, 0.18, 0.4));
   }
-  for (const x of [-2.23, 2.23]) {
+  for (const x of [type.front - 0.025, type.rear + 0.025]) {
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
       instanceMatrix(parent, x, 0.34, 0, 0.12, 0.13, 1.58));
+  }
+  batcher.add('vehicle-grilles', UNIT_BOX, trim,
+    instanceMatrix(parent, type.front - 0.02, 0.52, 0, 0.035, 0.22, 0.86));
+  for (const z of [-0.31, -0.1, 0.1, 0.31]) {
+    batcher.add('vehicle-grille-slats', UNIT_BOX, rim,
+      instanceMatrix(parent, type.front - 0.042, 0.52, z, 0.02, 0.15, 0.025));
+  }
+  for (const x of [type.front - 0.05, type.rear + 0.05]) {
+    batcher.add('vehicle-plates', UNIT_BOX, plate,
+      instanceMatrix(parent, x, 0.39, 0, 0.018, 0.13, 0.42));
+  }
+  // Panel gaps and rocker trim give scale at first-person distance without unique textures.
+  for (const side of [-1, 1]) {
+    batcher.add('vehicle-panel-lines', UNIT_BOX, trim,
+      instanceMatrix(parent, -0.21, 0.68, side * trimSide, 0.018, 0.62, 0.012));
+    batcher.add('vehicle-rockers', UNIT_BOX, trim,
+      instanceMatrix(parent, 0, 0.28, side * trimSide, 3.38, 0.08, 0.035));
   }
 
   // Deterministic wear makes parked cars part of the battered district instead of pristine
@@ -202,19 +315,26 @@ function addVehicle(batcher, def) {
   if (!def.police) {
     for (const side of [-1, 1]) {
       batcher.add('vehicle-grime', UNIT_BOX, grime,
-        instanceMatrix(parent, 0.05, 0.46, side * 0.916, 3.75, 0.23, 0.018));
+        instanceMatrix(parent, 0.05, 0.46, side * (trimSide + 0.01), 3.75, 0.23, 0.018));
     }
     if (damage <= 2) {
       const side = damage % 2 ? -1 : 1;
-      batcher.add('vehicle-shattered', CAR_WINDOW, shattered,
-        instanceMatrix(parent, 0, 0.008, side * 0.824, 0.98, 0.96, 1));
+      batcher.add(`vehicle-${type.key}-shattered`, type.window, shattered,
+        instanceMatrix(parent, 0, 0.008, side * (glassSide + 0.006), 0.98, 0.96, 1));
       batcher.add('vehicle-dent', UNIT_BOX, grime,
-        instanceMatrix(parent, 1.22, 0.71, -side * 0.916, 0.58, 0.32, 0.022,
+        instanceMatrix(parent, 1.22, 0.71, -side * (trimSide + 0.01), 0.58, 0.32, 0.022,
           0, 0, damage === 2 ? 0.11 : -0.08));
     }
-    if (damage === 0) {
+    if (wrecked) {
       batcher.add('vehicle-missing-hub', CAP_GEO, rubber,
-        instanceMatrix(parent, 1.42, 0.4, 0.942, 1.35, 1.35, 1.1, Math.PI / 2));
+        instanceMatrix(parent, type.wheels[1], 0.4, wheelSide + 0.065,
+          1.35, 1.35, 1.1, Math.PI / 2));
+      // Ash on the bonnet and a dropped bumper sell an abandoned strike-damaged shell.
+      batcher.add('vehicle-burn-scars', UNIT_BOX, grime,
+        instanceMatrix(parent, -1.38, 0.91, 0, 0.82, 0.025, 1.16, 0, 0, -0.08));
+      batcher.add('vehicle-dropped-bumpers', UNIT_BOX, trim,
+        instanceMatrix(parent, type.rear + 0.03, 0.2, 0.17,
+          0.12, 0.11, 1.5, 0.16, 0.04, 0.12));
     }
   }
 
@@ -226,6 +346,14 @@ function addVehicle(batcher, def) {
     }
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
       instanceMatrix(parent, 0.18, 1.59, 0, 0.32, 0.07, 1.34));
+    batcher.add('vehicle-trim-box', UNIT_BOX, trim,
+      instanceMatrix(parent, type.front - 0.16, 0.54, 0, 0.07, 0.09, 1.52));
+    batcher.add('vehicle-trim-box', UNIT_BOX, trim,
+      instanceMatrix(parent, type.front - 0.16, 0.88, 0, 0.07, 0.09, 1.52));
+    for (const z of [-0.52, 0.52]) {
+      batcher.add('vehicle-trim-box', UNIT_BOX, trim,
+        instanceMatrix(parent, type.front - 0.14, 0.78, z, 0.1, 0.76, 0.08));
+    }
     for (const [z, col] of [[-0.38, 0xd51f28], [0.38, 0x245dff]]) {
       batcher.add(`police-lens-${col}`, UNIT_BOX,
         material(`police-lens-${col}`, () => new THREE.MeshBasicMaterial({

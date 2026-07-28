@@ -305,8 +305,10 @@ export const LEVELS = [
       g.push(...hydrant(-13.8, 12), ...hydrant(13.8, -16));
       g.push(...bench(-13.2, 26, true), ...bench(13.2, 8, true));
       // street clutter
-      g.push(...car(-4 + v * 0.45, 25)); g.push(...car(3, 5 - v * 0.7, true));
-      g.push(...car(-2 - v * 0.5, -18)); g.push(...car(5, -35 + v * 0.6, true));
+      g.push(...car(-4 + v * 0.45, 25, false, null, { variant: 2, damage: 4 }));
+      g.push(...car(3, 5 - v * 0.7, true, null, { variant: 1, damage: 3 }));
+      g.push(...car(-2 - v * 0.5, -18, false, null, { variant: 1, damage: 0 }));
+      g.push(...car(5, -35 + v * 0.6, true, null, { variant: 0, damage: 5 }));
       // First responders got here before you did. The light bar is the only moving light in
       // the level and it does a lot of work on a static night street.
       g.push(...policeCar(-6, 33, false, window.__bpBeacons));
