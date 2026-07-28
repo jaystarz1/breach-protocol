@@ -69,13 +69,17 @@ def main():
         }
         assert not errors
         assert result["repeatStable"]
-        assert set(first["parts"]) == set(expected)
+        assert set(expected).issubset(first["parts"])
         assert all(
             first["parts"][name]["count"] == count
             for name, count in expected.items()
         )
         assert all(row["instanced"] for row in first["parts"].values())
         assert first["parts"]["watch-post-pitched-roofs"]["vertices"] > 24
+        assert sum(
+            row["count"] for name, row in first["parts"].items()
+            if name.startswith("watch-post-gate-rubble-")
+        ) == 28
         assert first["calls"] <= 340
         browser.close()
 

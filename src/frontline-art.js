@@ -4,6 +4,134 @@
 import * as THREE from 'three';
 import { quality } from './quality.js';
 import { rng } from './world.js';
+import { photoSurfaces, surfaces } from './textures.js';
+
+let materialKit = null;
+
+function frontlineMaterials() {
+  if (materialKit) return materialKit;
+  const photos = photoSurfaces();
+  const procedural = surfaces();
+  materialKit = {
+    concrete: new THREE.MeshStandardMaterial({
+      color: 0x888a84,
+      map: photos?.concrete?.map || procedural.concrete.map,
+      normalMap: photos?.concrete?.normalMap || procedural.concrete.normalMap,
+      roughnessMap: photos?.concrete?.roughnessMap || procedural.concrete.roughnessMap,
+      normalScale: new THREE.Vector2(0.42, 0.42),
+      roughness: 0.97,
+      metalness: 0,
+    }),
+    brick: new THREE.MeshStandardMaterial({
+      color: 0x966653,
+      map: photos?.brick?.map || procedural.concrete.map,
+      bumpMap: photos?.brick?.height || null,
+      bumpScale: photos?.brick?.height ? 0.035 : 0,
+      roughness: 0.98,
+      metalness: 0,
+    }),
+    sandbag: new THREE.MeshStandardMaterial({
+      color: 0x9a825d,
+      map: procedural.fabric.map,
+      normalMap: procedural.fabric.normalMap,
+      roughnessMap: procedural.fabric.roughnessMap,
+      normalScale: new THREE.Vector2(0.32, 0.32),
+      roughness: 0.97,
+      metalness: 0,
+    }),
+    rebar: new THREE.MeshStandardMaterial({
+      color: 0x4b3028, roughness: 0.82, metalness: 0.58,
+    }),
+    barrierSteel: new THREE.MeshStandardMaterial({
+      color: 0x5b6262,
+      map: procedural.metal.map,
+      normalMap: procedural.metal.normalMap,
+      roughnessMap: procedural.metal.roughnessMap,
+      normalScale: new THREE.Vector2(0.38, 0.38),
+      roughness: 0.72,
+      metalness: 0.52,
+      side: THREE.DoubleSide,
+    }),
+  };
+  materialKit.concreteDark = materialKit.concrete.clone();
+  materialKit.concreteDark.color.setHex(0x656762);
+  return materialKit;
+}
+
+function distressedBoxGeometry(width, height, depth, seed) {
+  // Displace shared logical corners consistently, retaining the box UV islands for the photo
+  // surface. These pieces read as broken masonry slabs instead of smooth fantasy rocks.
+  const geometry = new THREE.BoxGeometry(width, height, depth);
+  const positions = geometry.attributes.position;
+  const R = rng(seed);
+  const offsets = new Map();
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
+    const key = `${x.toFixed(3)}:${y.toFixed(3)}:${z.toFixed(3)}`;
+    let offset = offsets.get(key);
+    if (!offset) {
+      offset = [
+        (R() - 0.5) * width * 0.28,
+        (R() - 0.5) * height * 0.34,
+        (R() - 0.5) * depth * 0.28,
+      ];
+      offsets.set(key, offset);
+    }
+    positions.setXYZ(i, x + offset[0], y + offset[1], z + offset[2]);
+  }
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+const RUBBLE_GEOMETRIES = [
+  distressedBoxGeometry(0.52, 0.3, 0.44, 7101),
+  distressedBoxGeometry(0.38, 0.24, 0.62, 7102),
+  distressedBoxGeometry(0.66, 0.2, 0.34, 7103),
+];
+const REBAR_GEO = new THREE.CylinderGeometry(0.014, 0.018, 0.7, 7);
+const CORRUGATED_PANEL_GEO = (() => {
+  // Sixteen subdivisions sample the peaks and troughs of four waves. Eight sampled only
+  // the zero crossings, silently collapsing the "corrugated" panel back into a flat card.
+  const geometry = new THREE.PlaneGeometry(0.52, 2.66, 16, 1);
+  const positions = geometry.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i);
+    positions.setZ(i, Math.sin((x / 0.52 + 0.5) * Math.PI * 8) * 0.032);
+  }
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+})();
+const SANDBAG_GEO = (() => {
+  // Authored along local Y because existing rows rotate the bag onto X/Z. A flattened,
+  // pinched ellipsoid reads as a filled woven sack; a capsule keeps a constant circular
+  // section and inevitably reads as a pill or sausage regardless of its texture.
+  const geometry = new THREE.SphereGeometry(0.5, 16, 10);
+  const positions = geometry.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i);
+    const y = positions.getY(i);
+    const z = positions.getZ(i);
+    const end = Math.min(1, Math.abs(y) / 0.5);
+    const pinch = 1 - end * 0.18;
+    positions.setXYZ(
+      i,
+      x * 0.42 * pinch,
+      y * 0.84,
+      z * 0.62 * pinch,
+    );
+  }
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+})();
 
 function instanced(scene, geometry, material, transforms, shadows = true) {
   const out = new THREE.InstancedMesh(geometry, material, transforms.length);
@@ -95,10 +223,9 @@ function droneModel() {
 export function addFrontlineStreetArt(scene) {
   if (!quality.desktop) return;
   const R = rng(20260728);
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x5a5b57, roughness: 0.96 });
+  const frontline = frontlineMaterials();
   const darkConcrete = new THREE.MeshStandardMaterial({ color: 0x292c2d, roughness: 0.98 });
   const char = new THREE.MeshStandardMaterial({ color: 0x141515, roughness: 1 });
-  const sand = new THREE.MeshStandardMaterial({ color: 0x716b56, roughness: 0.94 });
   const steel = new THREE.MeshStandardMaterial({ color: 0x30373a, roughness: 0.62, metalness: 0.62 });
   const timber = new THREE.MeshStandardMaterial({ color: 0x67503a, roughness: 0.9 });
 
@@ -111,20 +238,36 @@ export function addFrontlineStreetArt(scene) {
     scene.add(scar);
   }
 
-  const rubble = [];
+  const rubble = [[], [], []];
+  const exposedRebar = [];
   for (let i = 0; i < 115; i++) {
     const cluster = i % 3;
     const bases = [[-3.6, 14], [5.4, -8], [-4.8, -39]];
     const [bx, bz] = bases[cluster];
     const a = R() * Math.PI * 2;
     const d = 1 + R() * 2.6;
-    rubble.push([
+    rubble[i % rubble.length].push([
       bx + Math.cos(a) * d, 0.08 + R() * 0.14, bz + Math.sin(a) * d,
       R() * 2, R() * 2, R() * 2,
       0.45 + R() * 0.7, 0.25 + R() * 0.45, 0.45 + R() * 0.7,
     ]);
+    if (i % 8 === 0) {
+      exposedRebar.push([
+        bx + Math.cos(a) * (d + 0.08), 0.18 + R() * 0.12,
+        bz + Math.sin(a) * (d + 0.08),
+        R() * 1.4 - 0.7, R() * Math.PI, R() * 1.4 - 0.7,
+        0.8 + R() * 0.45, 0.65 + R() * 0.75, 0.8 + R() * 0.45,
+      ]);
+    }
   }
-  instanced(scene, new THREE.DodecahedronGeometry(0.22, 0), concrete, rubble, false);
+  for (let i = 0; i < rubble.length; i++) {
+    const chunks = instanced(scene, RUBBLE_GEOMETRIES[i],
+      i === 1 ? frontline.brick : i === 2 ? frontline.concreteDark : frontline.concrete,
+      rubble[i], false);
+    chunks.name = `frontline-rubble-${i === 1 ? 'brick' : `concrete-${i}`}`;
+  }
+  const rebar = instanced(scene, REBAR_GEO, frontline.rebar, exposedRebar, false);
+  rebar.name = 'frontline-rubble-rebar';
 
   // Blast/scorch marks on both occupied façades. These are intentionally large and irregular:
   // damage at this scale must alter the read of the street, not look like decorative dirt.
@@ -147,7 +290,8 @@ export function addFrontlineStreetArt(scene) {
   for (let i = 0; i < 8; i++) {
     bags.push([-13.5 + i * 0.62, 0.64, -43.6, 0, 0, Math.PI / 2, 1, 1, 1]);
   }
-  instanced(scene, new THREE.CapsuleGeometry(0.19, 0.42, 4, 8), sand, bags);
+  const sandbags = instanced(scene, SANDBAG_GEO, frontline.sandbag, bags);
+  sandbags.name = 'frontline-op-sandbags';
 
   const table = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.13, 0.92), timber);
   table.position.set(-11.15, 1.05, -41.6);
@@ -182,6 +326,44 @@ export function addFrontlineStreetArt(scene) {
   ];
   instanced(scene, new THREE.BoxGeometry(0.75, 0.52, 0.48), darkConcrete, cases);
 
+  // Skin the authoritative 32m metal collision wall with a field-built barricade. Individual
+  // corrugations, bent panels and exposed posts break the huge blank rectangle while the
+  // original wall keeps handling cover, bullets and the six-metre access gap.
+  const panels = [];
+  const posts = [];
+  const barrierBags = [];
+  let panelIndex = 0;
+  for (let x = -15.72; x <= 15.72; x += 0.52) {
+    if (x > -6.15 && x < 0.15) continue;
+    const damaged = panelIndex % 17 === 6 || panelIndex % 23 === 9;
+    if (!damaged) {
+      panels.push([
+        x, 1.48 + (panelIndex % 13 === 4 ? -0.11 : 0), -49.79,
+        0, (panelIndex % 19 === 7 ? 0.16 : 0), (panelIndex % 13 === 4 ? -0.055 : 0),
+        1, panelIndex % 11 === 5 ? 0.92 : 1, 1,
+      ]);
+    }
+    if (panelIndex % 4 === 0) {
+      posts.push([x - 0.24, 1.48, -49.7, 0, 0, 0, 1, 1, 1]);
+    }
+    if (panelIndex % 3 === 0) {
+      barrierBags.push([
+        x, 0.23, -49.34, 0, 0, Math.PI / 2 + (panelIndex % 2 ? 0.05 : -0.04),
+        0.92, 0.92, 0.92,
+      ]);
+    }
+    panelIndex++;
+  }
+  const barrierPanels = instanced(
+    scene, CORRUGATED_PANEL_GEO, frontline.barrierSteel, panels);
+  barrierPanels.name = 'frontline-barricade-panels';
+  const barrierPosts = instanced(
+    scene, new THREE.BoxGeometry(0.09, 2.92, 0.13), steel, posts);
+  barrierPosts.name = 'frontline-barricade-posts';
+  const barrierSandbags = instanced(
+    scene, SANDBAG_GEO, frontline.sandbag, barrierBags);
+  barrierSandbags.name = 'frontline-barricade-sandbags';
+
   // Sagging field cable from the relay into the launch table.
   const cablePoints = [];
   for (let i = 0; i < 18; i++) {
@@ -203,9 +385,9 @@ export function addFrontlineStreetArt(scene) {
 export function addFrontlineAmbientArt(scene, levelId, bounds) {
   if (!quality.desktop || !bounds || levelId === 2) return;
   const R = rng(81001 + levelId * 997);
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x555956, roughness: 0.98 });
+  const frontline = frontlineMaterials();
   const char = new THREE.MeshStandardMaterial({ color: 0x17191a, roughness: 1 });
-  const chunks = [];
+  const chunks = [[], [], []];
   const craters = [];
   const radius = Math.max(10, Math.min(bounds.r * 0.78, 42));
 
@@ -218,7 +400,7 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
     for (let i = 0; i < 18; i++) {
       const a = R() * Math.PI * 2;
       const d = 0.7 + R() * 2.1;
-      chunks.push([
+      chunks[(cluster + i) % chunks.length].push([
         x + Math.cos(a) * d, 0.08 + R() * 0.13, z + Math.sin(a) * d,
         R() * 2, R() * 2, R() * 2,
         0.3 + R() * 0.55, 0.22 + R() * 0.35, 0.3 + R() * 0.55,
@@ -232,7 +414,12 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
     scar.position.set(x, 0.028, z);
     scene.add(scar);
   }
-  instanced(scene, new THREE.DodecahedronGeometry(0.2, 0), concrete, chunks, false);
+  for (let i = 0; i < chunks.length; i++) {
+    const rubble = instanced(scene, RUBBLE_GEOMETRIES[i],
+      i === 1 ? frontline.brick : i === 2 ? frontline.concreteDark : frontline.concrete,
+      chunks[i], false);
+    rubble.name = `frontline-ambient-rubble-${i}`;
+  }
 
   if ([4, 5, 7, 10].includes(levelId)) {
     const steel = new THREE.MeshStandardMaterial({
@@ -271,7 +458,7 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
 }
 
 function addObservationPost(scene, x, y, z, yaw = 0) {
-  const sand = new THREE.MeshStandardMaterial({ color: 0x706b58, roughness: 0.96 });
+  const frontline = frontlineMaterials();
   const timber = new THREE.MeshStandardMaterial({ color: 0x5c4733, roughness: 0.9 });
   const steel = new THREE.MeshStandardMaterial({ color: 0x262d30, roughness: 0.58, metalness: 0.62 });
   const equipment = new THREE.MeshStandardMaterial({ color: 0x252b2a, roughness: 0.76 });
@@ -283,7 +470,8 @@ function addObservationPost(scene, x, y, z, yaw = 0) {
       bags.push([x + c * i * 0.5, y + 0.48, z - s * i * 0.5, 0, yaw, Math.PI / 2, 1, 1, 1]);
     }
   }
-  instanced(scene, new THREE.CapsuleGeometry(0.17, 0.38, 4, 8), sand, bags);
+  const sandbags = instanced(scene, SANDBAG_GEO, frontline.sandbag, bags);
+  sandbags.name = 'frontline-mission-op-sandbags';
 
   const table = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.11, 0.78), timber);
   table.position.set(x, y + 0.86, z + 1.25);
@@ -314,8 +502,8 @@ function addObservationPost(scene, x, y, z, yaw = 0) {
 
 export function addFrontlineMissionArt(scene, levelId) {
   if (!quality.desktop) return;
+  const frontline = frontlineMaterials();
   const dark = new THREE.MeshStandardMaterial({ color: 0x2b302f, roughness: 0.86 });
-  const sand = new THREE.MeshStandardMaterial({ color: 0x706b58, roughness: 0.96 });
   const steel = new THREE.MeshStandardMaterial({ color: 0x30373a, roughness: 0.58, metalness: 0.58 });
 
   if (levelId === 3) addObservationPost(scene, -2, 9.2, -6, 0);
@@ -354,7 +542,8 @@ export function addFrontlineMissionArt(scene, levelId) {
       bags.push([side * (3.2 + i * 0.5), 0.2, 34, 0, 0, Math.PI / 2, 1, 1, 1]);
       if (i < 7) bags.push([side * (3.5 + i * 0.5), 0.48, 34, 0, 0, Math.PI / 2, 1, 1, 1]);
     }
-    instanced(scene, new THREE.CapsuleGeometry(0.17, 0.38, 4, 8), sand, bags);
+    const fallbackBags = instanced(scene, SANDBAG_GEO, frontline.sandbag, bags);
+    fallbackBags.name = 'frontline-fallback-sandbags';
 
     // The compound's old municipal wall has been converted into a fighting position. These
     // silhouettes sit above the collision shell and turn the blank slab into a defended gate.
@@ -443,8 +632,7 @@ export function addFrontlineMissionArt(scene, levelId) {
     ladders.name = 'watch-post-ladders';
     const rails = instanced(scene, new THREE.BoxGeometry(1, 1, 1), steel, towerRails);
     rails.name = 'watch-post-rails';
-    const fortification = instanced(
-      scene, new THREE.CapsuleGeometry(0.16, 0.34, 4, 8), sand, platformBags);
+    const fortification = instanced(scene, SANDBAG_GEO, frontline.sandbag, platformBags);
     fortification.name = 'watch-post-sandbags';
 
     const gateScars = [
@@ -463,6 +651,12 @@ export function addFrontlineMissionArt(scene, levelId) {
         0.42 + (i % 4) * 0.12, 0.28 + (i % 3) * 0.11, 0.38 + (i % 5) * 0.08,
       ]);
     }
-    instanced(scene, new THREE.DodecahedronGeometry(0.19, 0), dark, gateRubble, false);
+    for (let i = 0; i < RUBBLE_GEOMETRIES.length; i++) {
+      const subset = gateRubble.filter((_, index) => index % RUBBLE_GEOMETRIES.length === i);
+      const rubble = instanced(scene, RUBBLE_GEOMETRIES[i],
+        i === 1 ? frontline.brick : i === 2 ? frontline.concreteDark : frontline.concrete,
+        subset, false);
+      rubble.name = `watch-post-gate-rubble-${i}`;
+    }
   }
 }

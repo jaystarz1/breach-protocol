@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v50-recessed-window-interiors';
+const CACHE = 'breach-protocol-v51-authored-frontline-rubble';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

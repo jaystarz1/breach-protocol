@@ -30,6 +30,19 @@ def main():
         }""")
         page.wait_for_timeout(350)
         page.screenshot(path=args.output)
+        art = page.evaluate("""() => {
+          const named = {};
+          BP.world.staticMesh.parent.traverse(object => {
+            if (!object.name || !object.name.startsWith('frontline-')) return;
+            named[object.name] = {
+              instances: object.count || object.userData.instanceCount || 1,
+              vertices: object.geometry?.attributes?.position?.count || 0,
+              photoMap: !!object.material?.map,
+              relief: !!(object.material?.normalMap || object.material?.bumpMap),
+            };
+          });
+          return named;
+        }""")
 
         page.evaluate("""() => {
           if (BP.world.reinf) BP.world.reinf.sent = BP.world.reinf.max;
@@ -39,6 +52,15 @@ def main():
           }
         }""")
         page.wait_for_function("() => BP.world.objectiveIdx === 1", timeout=5000)
+        output_path = Path(args.output)
+        op_path = output_path.with_name(f"{output_path.stem}-op{output_path.suffix}")
+        page.evaluate("""() => {
+          BP.player.pos.set(-7, 0, -38.5);
+          BP.player.yaw = 0.93;
+          BP.player.pitch = -0.08;
+        }""")
+        page.wait_for_timeout(180)
+        page.screenshot(path=str(op_path))
         page.evaluate("""() => {
           const hold = setInterval(() => BP.player.pos.set(-11.2, 0.1, -41.6), 16);
           setTimeout(() => clearInterval(hold), 750);
@@ -52,7 +74,6 @@ def main():
           targets: BP.world.drone.targets.length,
           overlay: !!document.querySelector('.drone-frame'),
         })""")
-        output_path = Path(args.output)
         drone_path = output_path.with_name(f"{output_path.stem}-drone{output_path.suffix}")
         page.screenshot(path=str(drone_path))
         page.evaluate("""() => {
@@ -68,12 +89,27 @@ def main():
 
         output = {
             "screenshot": str(Path(args.output)),
+            "opScreenshot": str(op_path),
             "droneScreenshot": str(drone_path),
             "droneStarted": drone_started,
             "droneFinished": drone_finished,
+            "frontlineArt": art,
             "errors": errors[:8],
         }
         print(json.dumps(output, indent=2))
+        assert not errors
+        assert art["frontline-rubble-concrete-0"]["instances"] > 30
+        assert art["frontline-rubble-brick"]["instances"] > 30
+        assert art["frontline-rubble-concrete-2"]["instances"] > 30
+        assert art["frontline-rubble-rebar"]["instances"] > 10
+        assert art["frontline-op-sandbags"]["instances"] > 20
+        assert art["frontline-barricade-panels"]["instances"] > 40
+        assert art["frontline-barricade-posts"]["instances"] > 8
+        assert art["frontline-barricade-sandbags"]["instances"] > 10
+        assert art["frontline-rubble-concrete-0"]["photoMap"]
+        assert art["frontline-rubble-concrete-0"]["relief"]
+        assert drone_started["active"] and drone_started["locked"]
+        assert drone_finished["controllerDisposed"] and drone_finished["playerRestored"]
         browser.close()
 
 
