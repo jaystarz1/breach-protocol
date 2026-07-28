@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v44-photographic-concrete';
+const CACHE = 'breach-protocol-v45-authored-viewmodel-gloves';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

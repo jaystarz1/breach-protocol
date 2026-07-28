@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from '../lib/BufferGeometryUtils.js';
 import { quality } from './quality.js';
 import { surfaces } from './textures.js';
 import { sfx } from './audio.js';
@@ -148,22 +149,122 @@ const guard = (mat, y, z, w = 0.05) => [
   bx(mat, w, 0.05, 0.016, 0, y - 0.026, z + 0.042),
 ];
 
-const PALM_GEO = new THREE.SphereGeometry(0.045, 14, 10);
-const FINGER_GEO = new THREE.CapsuleGeometry(0.009, 0.045, 4, 8);
-const THUMB_GEO = new THREE.CapsuleGeometry(0.011, 0.042, 4, 8);
-const CUFF_GEO = new THREE.CylinderGeometry(0.047, 0.052, 0.045, 12);
-
-function limbBetween(mat, from, to, r0, r1) {
+function geometryBetween(from, to, r0, r1, radialSegments = 10) {
   const a = new THREE.Vector3(...from);
   const b = new THREE.Vector3(...to);
   const delta = b.clone().sub(a);
-  const out = new THREE.Mesh(
-    new THREE.CylinderGeometry(r1, r0, delta.length(), 12, 1),
-    mat,
+  const geometry = new THREE.CylinderGeometry(r1, r0, delta.length(), radialSegments, 1);
+  const matrix = new THREE.Matrix4().compose(
+    a.add(b).multiplyScalar(0.5),
+    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize()),
+    new THREE.Vector3(1, 1, 1),
   );
-  out.position.copy(a).add(b).multiplyScalar(0.5);
-  out.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize());
-  return out;
+  geometry.applyMatrix4(matrix);
+  return geometry;
+}
+
+function transformedGeometry(geometry, position, rotation = [0, 0, 0], scale = [1, 1, 1]) {
+  const matrix = new THREE.Matrix4().compose(
+    new THREE.Vector3(...position),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+    new THREE.Vector3(...scale),
+  );
+  geometry.applyMatrix4(matrix);
+  return geometry;
+}
+
+function mergeParts(parts) {
+  const merged = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+const gloveGeometries = new Map();
+function gloveGeometry(side, support) {
+  const key = `${side}:${support ? 1 : 0}`;
+  if (gloveGeometries.has(key)) return gloveGeometries.get(key);
+  const parts = [];
+
+  // One continuous palm mass, flattened across the back of the hand and long enough to meet
+  // the cuff. The old sphere was the source of the oven-mitt silhouette.
+  parts.push(transformedGeometry(
+    new THREE.CapsuleGeometry(0.036, 0.052, 6, 12),
+    [0, 0, 0.006], [Math.PI / 2, 0, 0], [1.05, 0.66, 1],
+  ));
+
+  // Four two-bone fingers. The middle joint moves below the palm and the tip turns back
+  // toward it, so the silhouette actually closes around a grip instead of ending in four
+  // parallel sausages.
+  for (let i = 0; i < 4; i++) {
+    const x = (i - 1.5) * 0.0175;
+    const lengthBias = 1 - Math.abs(i - 1.5) * 0.055;
+    const base = [x, -0.004, -0.036];
+    const middle = [
+      x + side * (i - 1.5) * 0.0008,
+      support ? -0.031 : -0.022,
+      (support ? -0.044 : -0.058) * lengthBias,
+    ];
+    const tip = [
+      x + side * 0.002,
+      support ? -0.061 : -0.041,
+      (support ? -0.032 : -0.078) * lengthBias,
+    ];
+    parts.push(geometryBetween(base, middle, 0.0094, 0.0084, 8));
+    parts.push(geometryBetween(middle, tip, 0.0084, 0.0067, 8));
+    parts.push(transformedGeometry(
+      new THREE.SphereGeometry(1, 8, 6),
+      middle, [0, 0, 0], [0.009, 0.008, 0.009],
+    ));
+    // Low-profile knuckle protection breaks up the back of the glove in the most visible area.
+    parts.push(transformedGeometry(
+      new THREE.SphereGeometry(1, 8, 5),
+      [x, 0.022, -0.029], [0, 0, 0], [0.011, 0.0045, 0.014],
+    ));
+  }
+
+  // Articulated thumb across the side of the grip, with a real change of direction at the
+  // joint. Mirroring by `side` keeps the same authored shape for both hands.
+  const thumbBase = [side * 0.035, 0.002, -0.003];
+  const thumbJoint = [side * 0.053, -0.012, -0.025];
+  const thumbTip = [side * 0.048, -0.032, -0.048];
+  parts.push(geometryBetween(thumbBase, thumbJoint, 0.0115, 0.0102, 9));
+  parts.push(geometryBetween(thumbJoint, thumbTip, 0.0102, 0.0074, 9));
+  parts.push(transformedGeometry(
+    new THREE.SphereGeometry(1, 8, 6),
+    thumbJoint, [0, 0, 0], [0.011, 0.01, 0.011],
+  ));
+
+  // Cuff and closure tab. Both are part of the same merged glove draw.
+  parts.push(transformedGeometry(
+    new THREE.CylinderGeometry(0.049, 0.045, 0.04, 12),
+    [0, 0, 0.067], [Math.PI / 2, 0, 0], [1, 0.78, 1],
+  ));
+  parts.push(transformedGeometry(
+    new THREE.BoxGeometry(0.065, 0.012, 0.035),
+    [side * 0.015, 0.025, 0.067], [0.08, 0, side * 0.08],
+  ));
+
+  const merged = mergeParts(parts);
+  merged.userData = { authoredGlove: true, segments: parts.length };
+  gloveGeometries.set(key, merged);
+  return merged;
+}
+
+function sleeveGeometry(wrist, elbow, side) {
+  const a = new THREE.Vector3(...wrist);
+  const b = new THREE.Vector3(...elbow);
+  const middle = a.clone().lerp(b, 0.54);
+  middle.x += side * 0.014;
+  middle.y -= 0.016;
+  return mergeParts([
+    geometryBetween(wrist, middle.toArray(), 0.048, 0.058, 12),
+    geometryBetween(middle.toArray(), elbow, 0.058, 0.068, 12),
+    transformedGeometry(
+      new THREE.CylinderGeometry(0.052, 0.055, 0.026, 12),
+      wrist, [Math.PI / 2, 0, 0], [1, 0.82, 1],
+    ),
+  ]);
 }
 
 // A weapon floating by itself always reads like a debug prop. These compact rigs keep the
@@ -175,31 +276,20 @@ function addGlovedArm(parent, M, {
   const hand = new THREE.Group();
   hand.position.fromArray(palm);
   hand.rotation.set(...palmRot);
-
-  const shell = new THREE.Mesh(PALM_GEO, M.glove);
-  shell.scale.set(1.03, 0.62, 1.28);
-  hand.add(shell);
-  for (let i = 0; i < 4; i++) {
-    const finger = new THREE.Mesh(FINGER_GEO, M.glove);
-    finger.position.set((i - 1.5) * 0.018, -0.014, -0.042 + Math.abs(i - 1.5) * 0.003);
-    finger.rotation.x = support ? 1.18 : 0.92;
-    finger.rotation.z = (i - 1.5) * 0.035;
-    finger.scale.y = spread * (1 - Math.abs(i - 1.5) * 0.045);
-    hand.add(finger);
-  }
-  const thumb = new THREE.Mesh(THUMB_GEO, M.glove);
-  thumb.position.set(side * 0.043, -0.002, -0.008);
-  thumb.rotation.set(0.72, 0, side * 0.78);
-  hand.add(thumb);
-
-  const cuff = new THREE.Mesh(CUFF_GEO, M.glove);
-  cuff.position.set(0, 0, 0.062);
-  cuff.rotation.x = Math.PI / 2;
-  hand.add(cuff);
+  hand.scale.set(1, 1, spread);
+  const glove = new THREE.Mesh(gloveGeometry(side, support), M.glove);
+  glove.name = support ? 'authored-support-glove' : 'authored-trigger-glove';
+  glove.userData.authoredViewmodelGlove = true;
+  glove.userData.side = side;
+  glove.userData.support = support;
+  hand.add(glove);
   parent.add(hand);
 
-  const wrist = [palm[0], palm[1], palm[2] + 0.068];
-  parent.add(limbBetween(M.sleeve, wrist, elbow, 0.05, 0.066));
+  const wrist = [palm[0], palm[1], palm[2] + 0.075];
+  const sleeve = new THREE.Mesh(sleeveGeometry(wrist, elbow, side), M.sleeve);
+  sleeve.name = support ? 'authored-support-sleeve' : 'authored-trigger-sleeve';
+  sleeve.userData.authoredViewmodelSleeve = true;
+  parent.add(sleeve);
 }
 
 function gunMesh(kind) {
