@@ -1,16 +1,30 @@
 # Vehicle asset notices
 
-The desktop vehicle fleet includes the following models by Quaternius, distributed through
-Poly Pizza under CC0 1.0:
+The retained offline vehicle fallbacks include the following models by Quaternius, distributed
+through Poly Pizza under CC0 1.0:
 
 - `CarSedan.glb` — “Car”: https://poly.pizza/m/unqqkULtRU
 - `CarSUV.glb` — “SUV”: https://poly.pizza/m/xsMtZhBkxL
 - `BrokenCar.glb` — “Broken Car”: https://poly.pizza/m/Y67erogmR9
 
-At load time, each source model's material parts are collapsed into a vertex-coloured,
-single-draw instanced geometry. The intact body colour is deterministically replaced by the
-mission's authored vehicle palette; windows, lights, tyres, rims and trim retain the source
-colour separation.
+The intact desktop sedan uses “Kiri '10 - Low poly model” by Daniel Zhabotinsky under
+CC BY 4.0:
+
+- Source: https://sketchfab.com/3d-models/7fd6e15785fa4aa9bfd6e31eb7c97ba6
+- Author: https://sketchfab.com/DanielZhabotinsky
+- License: https://creativecommons.org/licenses/by/4.0/
+
+The intact desktop SUV uses “Lowpoly Generic SUV” by mk2design under CC BY 4.0:
+
+- Source: https://sketchfab.com/3d-models/lowpoly-generic-suv-edc994ad28ed438cb365c0e0389ac177
+- Author: https://sketchfab.com/mk2design
+- License: https://creativecommons.org/licenses/by/4.0/
+
+Both browser-ready glTF archives are distributed by the public
+Objaverse 1.0 mirror (https://objaverse.allenai.org/docs/objaverse-1.0/). Their authored glass,
+lamps, tyres, trim, interiors and PBR detail materials remain intact. Geometry sharing and
+instancing keep each material role to one draw across all cars of that type, while the paint
+role receives the mission's deterministic vehicle colour per instance.
 
 The desktop wreck/abandoned-vehicle slot preferentially uses Poly Haven’s “Covered Car” by
 Jenelle van Heerden, distributed under CC0:

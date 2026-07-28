@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v76-photographic-street-fleet';
+const CACHE = 'breach-protocol-v77-detailed-intact-fleet';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -32,6 +32,8 @@ const ASSETS = [
   'assets/vehicles/CarSedan.glb',
   'assets/vehicles/CarSUV.glb',
   'assets/vehicles/BrokenCar.glb',
+  'assets/vehicles/kiri_sedan/kiri10.glb',
+  'assets/vehicles/generic_suv/generic_suv.glb',
   'assets/vehicles/covered_car/covered_car_1k.gltf',
   'assets/vehicles/covered_car/covered_car.bin',
   'assets/vehicles/covered_car/textures/covered_car_diff_1k.jpg',

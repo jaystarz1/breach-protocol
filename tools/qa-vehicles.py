@@ -87,12 +87,16 @@ def main():
             if (object.geometry.userData.authoredVehicle) {
               object.geometry.computeBoundingBox();
               const box = object.geometry.boundingBox;
+              const authoredBounds = object.geometry.userData.authoredBounds;
                 authored.push({
                 name: object.name,
                 kind: object.geometry.userData.kind,
                 instances: object.userData.instanceCount,
                 sourceParts: object.geometry.userData.sourceParts,
-                vertices: object.geometry.attributes.position.count,
+                vertices: object.geometry.userData.assemblyVertices
+                  || object.geometry.attributes.position.count,
+                geometryVertices: object.geometry.attributes.position.count,
+                nativePartCount: object.geometry.userData.nativePartCount || 0,
                 vertexColors: object.geometry.attributes.color?.count || 0,
                 surfaceMasks: [
                   'vehiclePaint', 'vehicleGlass', 'vehicleRubber',
@@ -108,11 +112,11 @@ def main():
                   ]
                   : null,
                 material: object.material?.name,
-                bounds: [
+                bounds: (authoredBounds || [
                   box.max.x - box.min.x,
                   box.max.y - box.min.y,
                   box.max.z - box.min.z,
-                ].map(value => +value.toFixed(3)),
+                ]).map(value => +value.toFixed(3)),
               });
             }
           }
@@ -120,6 +124,9 @@ def main():
             meshes, police, vertexCounts, authored,
             authoredInstances: authored.reduce((sum, item) => sum + item.instances, 0),
             bodyTypes: [...new Set(authored.map(item => item.kind))].sort(),
+            nativeParts: Object.keys(meshes)
+              .filter(name => /vehicle-authored-(sedan|suv)-native-/.test(name))
+              .sort(),
             calls: BP.performance.render.calls,
             triangles: BP.performance.render.triangles,
           };
@@ -163,11 +170,19 @@ def main():
         assert not errors
         assert set(("sedan", "hatch", "suv", "wreck")).issubset(coverage["bodyTypes"])
         assert coverage["authoredInstances"] >= 6
-        assert len(coverage["authored"]) >= 5  # colour variants stay batched independently
+        # Native body colours are now per-instance, so colour variation no longer forces
+        # duplicate authored geometries.
+        assert len(coverage["authored"]) >= 4
         assert all(item["sourceParts"] >= 4 for item in coverage["authored"])
         assert all(item["vertices"] > 9_000 for item in coverage["authored"])
         assert all(
             (
+                item["kind"] in ("sedan", "suv")
+                and item["nativePartCount"] >= 4
+                and item["material"]
+                == f"authored-vehicle-{item['kind']}-native-paint"
+            )
+            or (
                 item["vertexColors"] == item["vertices"]
                 and item["surfaceMasks"] == 5
                 and item["material"] == "authored-vehicle-layered-finish"
@@ -186,10 +201,26 @@ def main():
             )
             for item in coverage["authored"]
         )
+        assert len(coverage["nativeParts"]) >= 10
         assert all(item["bounds"][0] > 4 and item["bounds"][2] > 1.8
                    for item in coverage["authored"])
-        assert coverage["calls"] < 260
-        assert coverage["triangles"] < 430_000
+        expected_visual_bounds = {
+            "sedan": (4.60, 1.62, 1.94),
+            "suv": (4.76, 1.84, 2.06),
+        }
+        for item in coverage["authored"]:
+            if item["kind"] not in expected_visual_bounds:
+                continue
+            assert all(
+                abs(actual - expected) <= 0.01
+                for actual, expected in zip(
+                    item["bounds"], expected_visual_bounds[item["kind"]]
+                )
+            )
+        # This close sweep deliberately keeps the whole mixed fleet visible. The separate
+        # frame-time profile remains the authoritative GPU gate.
+        assert coverage["calls"] < 270
+        assert coverage["triangles"] < 470_000
         assert coverage["police"].get("police-doors", 0) == 4
         assert coverage["police"].get("police-side-stripes", 0) == 4
         assert coverage["police"].get("police-roundels", 0) == 4

@@ -10,7 +10,9 @@ let authoredVehicleSources = null;
 if (quality.desktop) {
   try {
     const loader = new GLTFLoader();
-    const [sedan, suv, wreck, covered, abandonedSedan] = await Promise.all([
+    const [
+      fallbackSedan, fallbackSuv, wreck, covered, abandonedSedan, intactSedan, intactSuv,
+    ] = await Promise.all([
       loader.loadAsync('./assets/vehicles/CarSedan.glb'),
       loader.loadAsync('./assets/vehicles/CarSUV.glb'),
       loader.loadAsync('./assets/vehicles/BrokenCar.glb'),
@@ -22,6 +24,16 @@ if (quality.desktop) {
       loader.loadAsync('./assets/vehicles/abandoned_sedan/scene.gltf')
         .catch(error => {
           console.warn('[bp] photographic abandoned sedan unavailable; using intact hatch', error);
+          return null;
+        }),
+      loader.loadAsync('./assets/vehicles/kiri_sedan/kiri10.glb')
+        .catch(error => {
+          console.warn('[bp] detailed intact sedan unavailable; using blockout sedan', error);
+          return null;
+        }),
+      loader.loadAsync('./assets/vehicles/generic_suv/generic_suv.glb')
+        .catch(error => {
+          console.warn('[bp] detailed intact SUV unavailable; using blockout SUV', error);
           return null;
         }),
     ]);
@@ -37,15 +49,21 @@ if (quality.desktop) {
     });
     authoredVehicleSources = {
       sedan: {
-        scene: sedan.scene,
-        bodyMaterials: new Set(['LightBlue']),
-        scale: new THREE.Vector3(1.39, 1.42, 1.18),
+        scene: intactSedan?.scene || fallbackSedan.scene,
+        bodyMaterials: intactSedan
+          ? new Set(['solar_body'])
+          : new Set(['LightBlue']),
+        scale: intactSedan
+          ? new THREE.Vector3(0.02682, 0.028568, 0.028867)
+          : new THREE.Vector3(1.39, 1.42, 1.18),
+        rotationY: intactSedan ? 0 : -Math.PI / 2,
+        nativeParts: !!intactSedan,
       },
       hatch: {
         // A photographed, genuinely damaged sedan occupies the hatch-sized collision slot.
         // It brings a modeled cabin, engine bay, open panels and baked deterioration into the
         // ordinary street fleet without increasing draw calls or inventing another collider.
-        scene: abandonedSedan?.scene || sedan.scene,
+        scene: abandonedSedan?.scene || fallbackSedan.scene,
         bodyMaterials: abandonedSedan ? new Set() : new Set(['LightBlue']),
         scale: abandonedSedan
           ? new THREE.Vector3(0.2, 0.217, 0.152)
@@ -56,9 +74,13 @@ if (quality.desktop) {
         materialTint: 0xffffff,
       },
       suv: {
-        scene: suv.scene,
-        bodyMaterials: new Set(['White']),
-        scale: new THREE.Vector3(1.13, 1.2, 0.976),
+        scene: intactSuv?.scene || fallbackSuv.scene,
+        bodyMaterials: intactSuv ? new Set(['Body']) : new Set(['White']),
+        scale: intactSuv
+          ? new THREE.Vector3(1.00283, 1.11223, 0.98476)
+          : new THREE.Vector3(1.13, 1.2, 0.976),
+        rotationY: -Math.PI / 2,
+        nativeParts: !!intactSuv,
       },
       wreck: {
         scene: covered?.scene || wreck.scene,
@@ -403,7 +425,8 @@ function authoredVehicleGeometry(kind, tint) {
   // Source vehicles face -Z; the game's local vehicle convention faces -X. Non-uniform scale
   // fits the existing authoritative collision dimensions without making the wheels or cabin
   // unnaturally wide simply to reach the correct bumper-to-bumper length.
-  geometry.applyMatrix4(new THREE.Matrix4().makeRotationY(-Math.PI / 2));
+  geometry.applyMatrix4(new THREE.Matrix4().makeRotationY(
+    source.rotationY ?? -Math.PI / 2));
   geometry.scale(source.scale.x, source.scale.y, source.scale.z);
   geometry.computeBoundingBox();
   geometry.translate(0, -geometry.boundingBox.min.y, 0);
@@ -420,6 +443,133 @@ function authoredVehicleGeometry(kind, tint) {
   geometry.userData.kind = kind;
   source.cache.set(key, geometry);
   return geometry;
+}
+
+function nativeVehiclePaintMaterial(source, kind) {
+  return material(`authored-vehicle-${kind}-native-paint`, () => {
+    let sourceMaterial = null;
+    source.scene.traverse(object => {
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : [object.material];
+      sourceMaterial ||= materials.find(candidate =>
+        source.bodyMaterials.has(candidate?.name));
+    });
+    const out = new THREE.MeshPhysicalMaterial({
+      name: `authored-vehicle-${kind}-native-paint`,
+      color: 0xffffff,
+      normalMap: sourceMaterial?.normalMap || null,
+      normalScale: sourceMaterial?.normalScale?.clone() || new THREE.Vector2(1, 1),
+      roughness: 0.38,
+      roughnessMap: sourceMaterial?.roughnessMap || null,
+      metalness: 0.12,
+      metalnessMap: sourceMaterial?.metalnessMap || null,
+      clearcoat: 0.62,
+      clearcoatRoughness: 0.24,
+      envMapIntensity: 1.05,
+    });
+    for (const texture of [
+      out.normalMap, out.roughnessMap, out.metalnessMap,
+    ]) {
+      if (texture) texture.anisotropy = Math.min(quality.maxAnisotropy || 4, 8);
+    }
+    return out;
+  });
+}
+
+function nativeVehiclePartMaterial(sourceMaterial, kind, role) {
+  if (role === 'body') return nativeVehiclePaintMaterial(
+    authoredVehicleSources[kind], kind);
+  const key = `authored-vehicle-${kind}-native-${role}`;
+  return material(key, () => {
+    const out = sourceMaterial.clone();
+    out.name = key;
+    out.side = THREE.DoubleSide;
+    out.depthWrite = !out.transparent;
+    for (const texture of [
+      out.map, out.normalMap, out.roughnessMap, out.metalnessMap, out.aoMap,
+    ]) {
+      if (texture) texture.anisotropy = Math.min(quality.maxAnisotropy || 4, 8);
+    }
+    return out;
+  });
+}
+
+function authoredNativeVehicleParts(kind) {
+  const source = authoredVehicleSources?.[kind];
+  if (!source?.nativeParts) return null;
+  if (source.nativePartsCache) return source.nativePartsCache;
+
+  const groups = new Map();
+  let sourceParts = 0;
+  source.scene.traverse(object => {
+    if (!object.isMesh || !object.geometry) return;
+    const sourceMaterial = Array.isArray(object.material)
+      ? object.material[0]
+      : object.material;
+    if (!sourceMaterial || /shadow/i.test(sourceMaterial.name)) return;
+    const role = source.bodyMaterials.has(sourceMaterial.name)
+      ? 'body'
+      : (sourceMaterial.name || object.name || 'detail')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+    const key = `${role}:${sourceMaterial.uuid}`;
+    if (!groups.has(key)) {
+      groups.set(key, { role, sourceMaterial, geometries: [] });
+    }
+    const geometry = object.geometry.index
+      ? object.geometry.toNonIndexed()
+      : object.geometry.clone();
+    for (const name of Object.keys(geometry.attributes)) {
+      if (!['position', 'normal', 'uv'].includes(name)) geometry.deleteAttribute(name);
+    }
+    geometry.applyMatrix4(object.matrixWorld);
+    geometry.applyMatrix4(new THREE.Matrix4().makeRotationY(
+      source.rotationY ?? -Math.PI / 2));
+    geometry.scale(source.scale.x, source.scale.y, source.scale.z);
+    groups.get(key).geometries.push(geometry);
+    sourceParts++;
+  });
+
+  const aggregateBounds = new THREE.Box3();
+  let assemblyVertices = 0;
+  for (const group of groups.values()) {
+    for (const geometry of group.geometries) {
+      geometry.computeBoundingBox();
+      aggregateBounds.union(geometry.boundingBox);
+      assemblyVertices += geometry.attributes.position.count;
+    }
+  }
+  const lift = -aggregateBounds.min.y;
+  const assemblySize = aggregateBounds.getSize(new THREE.Vector3());
+  const parts = [];
+  for (const group of groups.values()) {
+    let geometry = mergeGeometries(group.geometries, false);
+    for (const sourceGeometry of group.geometries) sourceGeometry.dispose();
+    if (!geometry) continue;
+    geometry.translate(0, lift, 0);
+    geometry.clearGroups();
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    geometry.userData.kind = kind;
+    geometry.userData.assemblyPart = group.role;
+    if (group.role === 'body') {
+      geometry.userData.authoredVehicle = true;
+      geometry.userData.sourceParts = sourceParts;
+      geometry.userData.nativePartCount = groups.size;
+      geometry.userData.assemblyVertices = assemblyVertices;
+      geometry.userData.authoredBounds = assemblySize.toArray();
+    }
+    parts.push({
+      role: group.role,
+      geometry,
+      material: nativeVehiclePartMaterial(
+        group.sourceMaterial, kind, group.role),
+    });
+  }
+  source.nativePartsCache = parts;
+  return parts;
 }
 
 function loftedVehicleShell(stations, topWidth = 0.78) {
@@ -986,6 +1136,30 @@ function addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked) {
   if (!authoredVehicleSources) return false;
   const kind = wrecked ? 'wreck' : type.key;
   const source = authoredVehicleSources[kind];
+  if (source?.nativeParts) {
+    const parts = authoredNativeVehicleParts(kind);
+    if (!parts?.length) return false;
+    for (const part of parts) {
+      batcher.add(
+        `vehicle-authored-${kind}-native-${part.role}`,
+        part.geometry,
+        part.material,
+        parent,
+        false,
+        part.role === 'body' ? bodyColor : null,
+      );
+    }
+    for (const wheelX of type.wheels) {
+      for (const side of [-1, 1]) {
+        batcher.add('vehicle-soft-contact-shadows', VEHICLE_CONTACT_GEO,
+          vehicleContactMaterial(),
+          instanceMatrix(parent, wheelX, 0.018, side * type.bodyHalf * 0.78,
+            0.84, 0.42, 1, -Math.PI / 2, 0, 0));
+      }
+    }
+    if (def.police) addPoliceVehicleDetails(batcher, parent, type);
+    return true;
+  }
   const geometry = authoredVehicleGeometry(kind, bodyColor);
   if (!geometry) return false;
   const fixedColour = wrecked ? 'fixed' : new THREE.Color(bodyColor).getHexString();
