@@ -25,7 +25,9 @@ export class Civilian {
     this.random = seededRandom(def._seed);
     this.hostage = !!def.hostage;
     this.wasHostage = this.hostage;
-    this.mesh = makeCharacter({ hostile: false, hostage: this.hostage });
+    this.mesh = makeCharacter({
+      hostile: false, hostage: this.hostage, variant: def._seed,
+    });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
     this.mesh.rotation.y = (def.yaw ?? this.random() * 360) * Math.PI / 180;
     scene.add(this.mesh);

@@ -29,6 +29,7 @@ export class Enemy {
     this.concealed = !!def.concealed;
     this.mesh = makeCharacter({
       hostile: true, silhouette: !!def.silhouette, concealed: this.concealed,
+      variant: def._seed,
     });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
     scene.add(this.mesh);

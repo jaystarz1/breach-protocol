@@ -47,6 +47,7 @@ def main():
             page.wait_for_timeout(80)
             signatures.append(market_signature())
 
+        page.screenshot(path=str(output / "market-covert.png"))
         reaction = page.evaluate(
             """() => {
               const before = BP.world.civilians.map(c => ({ x: c.pos.x, z: c.pos.z }));
@@ -70,15 +71,31 @@ def main():
               };
             }"""
         )
+        rig_coverage = page.evaluate(
+            """() => BP.world.civilians.reduce((coverage, civilian) => {
+              const rig = civilian.mesh.userData.rig;
+              const key = String(rig?.civilianSource);
+              coverage[key] ||= {
+                authored: !!rig?.authored,
+                hasIdle: !!rig?.actions?.idle,
+                hasWalk: !!rig?.actions?.walk,
+                hasRun: !!rig?.actions?.run,
+              };
+              return coverage;
+            }, {})"""
+        )
 
         reveal = page.evaluate(
             """() => {
               const enemy = BP.world.enemies.find(e => e.concealed && !e.dead);
               if (!enemy) return null;
+              const beforeRig = enemy.mesh.userData.rig;
               const beforeHealth = enemy.health;
               enemy.damage(1, BP.world, false, false);
               const rig = enemy.mesh.userData.rig;
               return {
+                beforeCivilian: !!beforeRig?.civilian,
+                beforeRifleVisible: !!beforeRig?.rifle?.visible,
                 concealed: enemy.concealed,
                 state: enemy.state,
                 beforeHealth,
@@ -90,6 +107,14 @@ def main():
         )
         page.wait_for_timeout(180)
         page.screenshot(path=str(output / "market-contact.png"))
+        civilian_death = page.evaluate(
+            """() => {
+              const civilian = BP.world.civilians.find(c => !c.dead);
+              civilian.kill();
+              civilian.update(0.1, BP.world);
+              return { dead: civilian.dead, deathAnim: civilian.deathAnim };
+            }"""
+        )
 
         page.evaluate("() => BP.startLevel(1)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
@@ -129,9 +154,11 @@ def main():
             "variantRepeatStable": signatures[0]["civilians"] == signatures[3]["civilians"],
             "concealedPerVariant": [signature["concealed"] for signature in signatures],
             "crowdReaction": reaction,
+            "rigCoverage": rig_coverage,
             "concealedReveal": reveal,
+            "civilianDeath": civilian_death,
             "escort": escort,
-            "screenshot": "market-contact.png",
+            "screenshots": ["market-covert.png", "market-contact.png"],
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
@@ -142,8 +169,15 @@ def main():
         assert reaction["crossers"] > 0
         assert reaction["panicked"] >= reaction["total"] - 2
         assert reaction["moved"] >= reaction["total"] - 2
+        assert sorted(rig_coverage.keys()) == ["0", "1", "2"]
+        assert all(
+            rig["authored"] and rig["hasIdle"] and rig["hasWalk"] and rig["hasRun"]
+            for rig in rig_coverage.values()
+        )
         assert reveal and not reveal["concealed"] and reveal["state"] == "alert"
+        assert reveal["beforeCivilian"] and not reveal["beforeRifleVisible"]
         assert reveal["authored"] or reveal["rifleVisible"]
+        assert civilian_death["dead"] and civilian_death["deathAnim"] > 0
         assert escort["rescued"] and escort["escort"] and escort["protected"]
         assert not escort["stillBound"]
         assert escort["afterFollow"] < escort["beforeFollow"] - 3

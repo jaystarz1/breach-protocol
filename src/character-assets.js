@@ -7,17 +7,16 @@ let soldierSource = null;
 let soldierClips = [];
 let soldierFloor = 0;
 let soldierScale = 1;
-let civilianSource = null;
-let civilianClips = [];
-let civilianFloor = 0;
-let civilianScale = 1;
+let civilianSources = [];
 
 if (quality.desktop) {
   try {
     const loader = new GLTFLoader();
-    const [soldier, civilian] = await Promise.all([
+    const [soldier, ...civilians] = await Promise.all([
       loader.loadAsync('./assets/characters/Soldier.glb'),
-      loader.loadAsync('./assets/characters/Xbot.glb'),
+      loader.loadAsync('./assets/characters/CivilianCasual.glb'),
+      loader.loadAsync('./assets/characters/CivilianLongSleeve.glb'),
+      loader.loadAsync('./assets/characters/CivilianWoman.glb'),
     ]);
     soldierSource = soldier.scene;
     soldierClips = soldier.animations;
@@ -26,24 +25,25 @@ if (quality.desktop) {
     soldierScale = 1.78 / Math.max(0.1, soldierBox.max.y - soldierBox.min.y);
     soldierFloor = soldierBox.min.y;
 
-    civilianSource = civilian.scene;
-    civilianClips = civilian.animations;
-    civilianSource.updateMatrixWorld(true);
-    const civilianBox = new THREE.Box3().setFromObject(civilianSource);
-    civilianScale = 1.7 / Math.max(0.1, civilianBox.max.y - civilianBox.min.y);
-    civilianFloor = civilianBox.min.y;
+    civilianSources = civilians.map(civilian => {
+      civilian.scene.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(civilian.scene);
+      return {
+        scene: civilian.scene,
+        clips: civilian.animations,
+        scale: 1.7 / Math.max(0.1, box.max.y - box.min.y),
+        floor: box.min.y,
+      };
+    });
   } catch (error) {
     console.warn('[bp] authored character asset unavailable; using procedural fallback', error);
   }
 }
 
 const factionMaterials = new Map();
-const CIVILIAN_TINTS = [0x58616a, 0x505d59, 0x625b51, 0x4c5661, 0x625a60, 0x5a5449];
-const CIVILIAN_COATS = [0x34434d, 0x48524a, 0x51463c, 0x393f4a, 0x50434a, 0x484137];
-const CIVILIAN_SKIN = [0xb78b70, 0x8d624b, 0xd0a183, 0x704b3d, 0xc29270, 0x9d6d52];
-const COAT_UPPER = new THREE.CapsuleGeometry(0.29, 0.45, 6, 12);
-const COAT_LOWER = new THREE.CylinderGeometry(0.31, 0.39, 0.5, 12);
-const CIVILIAN_CAP = new THREE.SphereGeometry(0.17, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.58);
+const CIVILIAN_PANTS = [0x29333d, 0x31382f, 0x40382f, 0x283345, 0x373a33, 0x37352d];
+const CIVILIAN_TOPS = [0x43505a, 0x4a584c, 0x5e5042, 0x38475a, 0x545044, 0x4f463b];
+const CIVILIAN_SHOES = [0x24282b, 0x302924, 0x232a30, 0x362b27, 0x27282a, 0x312f2b];
 function factionMaterial(original, faction, silhouette, objectName = '') {
   if (silhouette) {
     const key = `silhouette:${original.uuid}`;
@@ -61,9 +61,19 @@ function factionMaterial(original, faction, silhouette, objectName = '') {
     let tint = faction === 'black' ? 0x25292d : faction === 'friendly' ? 0x3b4650 : 0x73765e;
     if (faction.startsWith('civilian-')) {
       const variant = Number(faction.slice(9)) || 0;
-      tint = /joint/i.test(objectName) ? 0x343b42 : CIVILIAN_TINTS[variant % CIVILIAN_TINTS.length];
+      const label = `${objectName} ${original.name || ''}`.toLowerCase();
+      // Preserve anatomical materials. Only clothes are recolored, by garment rather than
+      // globally, so a variant retains skin, hair, eyes and brows instead of becoming a
+      // monochrome faction pawn.
+      if (!/(skin|eye|eyebrow|hair)/.test(label)) {
+        if (/(feet|shoe|sock)/.test(label)) tint = CIVILIAN_SHOES[variant % CIVILIAN_SHOES.length];
+        else if (/(legs|pants|trouser)/.test(label)) tint = CIVILIAN_PANTS[variant % CIVILIAN_PANTS.length];
+        else tint = CIVILIAN_TOPS[variant % CIVILIAN_TOPS.length];
+        out.color.set(tint);
+      }
+    } else {
+      out.color.multiply(new THREE.Color(tint));
     }
-    out.color.multiply(new THREE.Color(tint));
   }
   out.roughness = Math.max(0.72, out.roughness ?? 0.8);
   out.metalness = Math.min(0.08, out.metalness ?? 0);
@@ -178,53 +188,52 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
 }
 
 let civilianSequence = 0;
-export function createCivilianCharacter() {
-  if (!civilianSource) return null;
+export function createCivilianCharacter({ concealed = false, variant: requestedVariant } = {}) {
+  if (!civilianSources.length) return null;
   const root = new THREE.Group();
-  const visual = cloneSkeleton(civilianSource);
-  const variant = civilianSequence++ % CIVILIAN_TINTS.length;
+  const sequence = requestedVariant ?? civilianSequence++;
+  const variant = Math.abs(sequence) % CIVILIAN_TOPS.length;
+  const source = civilianSources[Math.abs(sequence) % civilianSources.length];
+  const visual = cloneSkeleton(source.scene);
   const faction = `civilian-${variant}`;
-  visual.scale.setScalar(civilianScale);
-  visual.position.y = -civilianFloor * civilianScale;
+  visual.scale.setScalar(source.scale);
+  visual.position.y = -source.floor * source.scale;
   visual.traverse(object => {
     if (!object.isMesh) return;
     object.castShadow = object.receiveShadow = quality.shadows;
     if (Array.isArray(object.material)) {
       object.material = object.material.map(mat =>
-        factionMaterial(mat, faction, false, object.name));
+        factionMaterial(mat, faction, false, `${object.name}:${mat.name}`));
     } else {
-      object.material = factionMaterial(object.material, faction, false, object.name);
+      object.material = factionMaterial(
+        object.material, faction, false, `${object.name}:${object.material?.name || ''}`);
     }
   });
   root.add(visual);
 
-  // Xbot provides a lightweight skinned silhouette and reliable locomotion, but reads as a
-  // training mannequin on its own. Layered winter clothing gives the crowd a grounded
-  // frontline identity without loading a unique high-poly outfit for every civilian.
-  const coat = new THREE.MeshStandardMaterial({
-    color: CIVILIAN_COATS[variant], roughness: 0.92, metalness: 0,
-  });
-  const upper = new THREE.Mesh(COAT_UPPER, coat);
-  upper.position.set(0, 1.18, 0);
-  upper.scale.set(1.05, 1, 0.72);
-  const lower = new THREE.Mesh(COAT_LOWER, coat);
-  lower.position.set(0, 0.92, 0);
-  lower.scale.z = 0.72;
-  const cap = new THREE.Mesh(CIVILIAN_CAP, new THREE.MeshStandardMaterial({
-    color: variant % 2 ? CIVILIAN_SKIN[variant] : CIVILIAN_COATS[(variant + 2) % CIVILIAN_COATS.length],
-    roughness: 0.94,
-  }));
-  cap.position.set(0, 1.63, -0.01);
-  cap.rotation.x = -0.08;
-  for (const layer of [upper, lower, cap]) {
-    layer.castShadow = layer.receiveShadow = quality.shadows;
-    root.add(layer);
+  // Concealed shooters use this exact civilian presentation—same source model, palette and
+  // clothing. The hidden rifle exists only as the reveal contract consumed by levelgen; it
+  // never renders before the enemy presents a weapon.
+  let rifle = null;
+  if (concealed) {
+    rifle = new THREE.Mesh(RIFLE_GEO, RIFLE_MAT);
+    rifle.visible = false;
+    root.add(rifle);
   }
 
   const mixer = new THREE.AnimationMixer(visual);
   const actions = {};
-  for (const clip of civilianClips) actions[clip.name.toLowerCase()] = mixer.clipAction(clip);
-  const idle = actions.idle;
+  for (const clip of source.clips) {
+    const action = mixer.clipAction(clip);
+    const full = clip.name.toLowerCase();
+    const short = full.split('|').pop();
+    actions[full] = action;
+    actions[short] = action;
+    if (short.endsWith('_idle')) actions.idle = action;
+    if (short.endsWith('_run')) actions.run = action;
+    if (short.endsWith('_walk')) actions.walk = action;
+  }
+  const idle = actions.idle || actions.idle_neutral;
   if (idle) idle.play();
   root.userData.rig = {
     authored: true,
@@ -233,10 +242,12 @@ export function createCivilianCharacter() {
     actions,
     currentAction: idle || null,
     lastAnimationTime: performance.now(),
-    rifle: null,
+    rifle,
     hostile: false,
     friendly: false,
     civilian: true,
+    civilianSource: civilianSources.indexOf(source),
+    concealed,
     baseVisualY: visual.position.y,
   };
   root.userData.bob = 0;
@@ -275,6 +286,6 @@ export function stopAuthoredCharacter(root) {
   const rig = root.userData.rig;
   if (!rig?.authored) return false;
   rig.mixer.stopAllAction();
-  rig.rifle.rotation.z += 0.7;
+  if (rig.rifle) rig.rifle.rotation.z += 0.7;
   return true;
 }

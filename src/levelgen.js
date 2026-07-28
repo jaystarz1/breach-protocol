@@ -339,10 +339,10 @@ const OD_PANTS = [0x343a25, 0x3b4129, 0x2e3320];
 // him back into a grey figure and the whole "he is inside an unlit room" read collapses.
 const SILHOUETTE_MAT = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
-export function makeCharacter({ hostile, hostage, friendly, black, silhouette, concealed }) {
+export function makeCharacter({ hostile, hostage, friendly, black, silhouette, concealed, variant }) {
   const armed = !!hostile || !!friendly;
-  if (!armed && !hostage) {
-    const civilian = createCivilianCharacter();
+  if ((!armed || concealed) && !hostage) {
+    const civilian = createCivilianCharacter({ concealed: !!concealed, variant });
     if (civilian) return civilian;
   }
   if (armed && !concealed && !hostage) {

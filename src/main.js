@@ -493,7 +493,10 @@ function startLevel(id) {
       defs.push({ ...src, pos: [...src.pos] });
     }
   }
-  world.enemies = defs.map(d => new Enemy(scene, d, diff));
+  world.enemies = defs.map((d, index) => new Enemy(scene, {
+    ...d,
+    _seed: L.id * 200003 + missionVariant * 2017 + index * 193,
+  }, diff));
 
   // Reinforcements. The clock is the pressure: dawdle and more men arrive, so a fast clean
   // sweep is rewarded with a smaller fight. The cap is HARD and scales with difficulty — an
