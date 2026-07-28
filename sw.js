@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v49-lofted-vehicle-shells';
+const CACHE = 'breach-protocol-v50-recessed-window-interiors';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

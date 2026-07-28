@@ -35,10 +35,15 @@ def main():
               const windows = (counts['recess-dark'] || 0)
                 + (counts['recess-warm'] || 0)
                 + (counts['recess-cool'] || 0);
+              const litWindows = (counts['recess-warm'] || 0)
+                + (counts['recess-cool'] || 0);
               return {
                 counts,
                 windows,
+                litWindows,
+                litRatio: +(litWindows / windows).toFixed(3),
                 framesPerWindow: +((counts['window-frames'] || 0) / windows).toFixed(2),
+                revealsPerWindow: +((counts['window-reveals'] || 0) / windows).toFixed(2),
                 visiblySecuredOrDestroyed: +(
                   ((counts['window-boards'] || 0) / 3
                     + (counts['window-bent-frames'] || 0)) / windows
@@ -54,7 +59,7 @@ def main():
         page.screenshot(path=str(output / "street-facades.png"))
         page.evaluate("""() => {
           BP.player.pos.set(-3.5, 0, 5);
-          BP.player.yaw = Math.PI / 2;
+          BP.player.yaw = 2.1;
           BP.player.pitch = 0.13;
         }""")
         page.wait_for_timeout(180)
@@ -89,6 +94,10 @@ def main():
         assert counts.get("window-boards", 0) > 0
         assert counts.get("window-shards", 0) > 0
         assert counts.get("window-bent-frames", 0) > 0
+        assert counts.get("pane-architectural", 0) > 0
+        assert counts.get("window-curtains", 0) > 0
+        assert counts.get("window-blinds", 0) > 0
+        assert counts.get("window-interior-furniture", 0) > 0
         assert counts.get("facade-soot", 0) > 0
         assert counts.get("facade-parapets", 0) > 0
         assert counts.get("facade-parapets-damaged", 0) > 0
@@ -99,6 +108,8 @@ def main():
         assert tower["counts"].get("facade-floor-ledges", 0) > 0
         assert tower["counts"].get("facade-parapets", 0) > 0
         assert 4 <= first["framesPerWindow"] < 5.7
+        assert first["revealsPerWindow"] == 4
+        assert 0.02 <= first["litRatio"] <= 0.2
         assert first["visiblySecuredOrDestroyed"] >= 0.2
         browser.close()
 
