@@ -207,7 +207,11 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
   const R = rng(seed);
   const stats = {
     buildings: 0, masses: 0, panes: 0,
-    profiles: { monolith: 0, stepped: 0, split: 0, penthouse: 0 },
+    profiles: {
+      monolith: 0, stepped: 0, split: 0, penthouse: 0,
+      gabled: 0, industrial: 0, collapsed: 0,
+    },
+    roofProfiles: { gabled: 0, industrial: 0, collapsed: 0 },
   };
   const inner = Math.max(bounds.r + 10, fogFar * 0.42);
   const outer = Math.max(inner + 70, fogFar * 0.8);
@@ -233,7 +237,9 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
       const bz = bounds.cz + Math.sin(a) * rr;
       const w = arc * (0.55 + R() * 0.4), d = arc * (0.5 + R() * 0.35);
       const h = 12 + R() * (24 + t * 46);
-      const profile = quality.desktop ? Math.floor(R() * 4) : 0;
+      // Walk a coprime sequence rather than rolling independently. Every desktop ring gets
+      // the complete authored silhouette library, while the seed still changes its phase.
+      const profile = quality.desktop ? (i * 5 + ring * 3 + (seed >>> 0)) % 7 : 0;
       const buildingTint = new THREE.Color(tint)
         .multiplyScalar(0.91 + R() * 0.15).getHex();
       const masses = [];
@@ -291,6 +297,23 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
             w: w * 0.48, d: d * 0.5, yBase: lowerH, h: h - lowerH,
           },
         );
+      } else if (profile === 4) {
+        effectiveProfile = 'gabled';
+        const bodyH = h * 0.82;
+        masses.push({ x: bx, z: bz, w, d, yBase: 0, h: bodyH });
+      } else if (profile === 5) {
+        effectiveProfile = 'industrial';
+        // A low, broad factory or rail shed interrupts the accidental downtown-tower rhythm.
+        const bodyH = Math.min(h, 13 + R() * 9);
+        masses.push({
+          x: bx, z: bz,
+          w: w * (1.08 + R() * 0.12), d: d * (1.02 + R() * 0.1),
+          yBase: 0, h: bodyH,
+        });
+      } else if (profile === 6) {
+        effectiveProfile = 'collapsed';
+        const bodyH = h * 0.9;
+        masses.push({ x: bx, z: bz, w, d, yBase: 0, h: bodyH });
       } else {
         masses.push({ x: bx, z: bz, w, d, yBase: 0, h });
       }
@@ -305,6 +328,29 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
       const roof = masses.reduce((highest, mass) =>
         mass.yBase + mass.h > highest.yBase + highest.h ? mass : highest);
       const roofY = roof.yBase + roof.h;
+      const roofStyle = ['gabled', 'industrial', 'collapsed'].includes(effectiveProfile)
+        ? effectiveProfile
+        : null;
+      if (quality.desktop && window.__bpVisualProps && roofStyle) {
+        const profileHeight = roofStyle === 'gabled'
+          ? Math.max(2.2, Math.min(6.5, h - roofY))
+          : roofStyle === 'industrial'
+            ? Math.max(2.0, Math.min(4.2, Math.min(roof.w, roof.d) * 0.24))
+            : Math.max(1.6, Math.min(4.8, h - roofY + 0.8));
+        window.__bpVisualProps.push({
+          kind: 'skyline-roof-profile',
+          style: roofStyle,
+          x: roof.x,
+          z: roof.z,
+          y: roofY,
+          w: roof.w,
+          d: roof.d,
+          h: profileHeight,
+          yaw: roof.w < roof.d ? Math.PI / 2 : 0,
+          color: new THREE.Color(buildingTint).multiplyScalar(0.76).getHex(),
+        });
+        stats.roofProfiles[roofStyle]++;
+      }
       if (quality.desktop && window.__bpVisualProps
           && roofY < 30 && (i + ring * 2) % 5 === 0) {
         window.__bpVisualProps.push({

@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v47-degraded-facade-shells';
+const CACHE = 'breach-protocol-v48-authored-skyline-profiles';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

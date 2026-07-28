@@ -218,6 +218,36 @@ const DAMAGED_PARAPET_GEO = (() => {
   geometry.computeVertexNormals();
   return geometry;
 })();
+function extrudedSkylineProfile(points) {
+  const shape = new THREE.Shape();
+  shape.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) shape.lineTo(points[i][0], points[i][1]);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 1,
+    steps: 1,
+    bevelEnabled: false,
+  });
+  geometry.translate(0, 0, -0.5);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+const SKYLINE_GABLE_GEO = extrudedSkylineProfile([
+  [-0.5, 0], [0.5, 0], [0.5, 0.08], [0, 0.5], [-0.5, 0.08],
+]);
+const SKYLINE_SAWTOOTH_GEO = extrudedSkylineProfile([
+  [-0.5, 0], [0.5, 0], [0.5, 0.1],
+  [0.32, 0.45], [0.32, 0.1],
+  [0.13, 0.42], [0.13, 0.1],
+  [-0.06, 0.47], [-0.06, 0.1],
+  [-0.25, 0.4], [-0.25, 0.1],
+  [-0.43, 0.43], [-0.5, 0.14],
+]);
+const SKYLINE_COLLAPSED_GEO = extrudedSkylineProfile([
+  [-0.5, 0], [0.5, 0], [0.5, 0.23], [0.38, 0.19],
+  [0.27, 0.4], [0.1, 0.16], [-0.05, 0.34], [-0.18, 0.11],
+  [-0.34, 0.28], [-0.5, 0.17],
+]);
 const DRAIN_GEO = new THREE.CylinderGeometry(0.055, 0.065, 1, 8);
 const AC_FAN_GEO = new THREE.CylinderGeometry(0.22, 0.22, 0.035, 12);
 const ROOF_CAP_GEO = (() => {
@@ -729,6 +759,28 @@ function addRoofCap(batcher, def) {
     false, def.color);
 }
 
+function addSkylineRoofProfile(batcher, def) {
+  const geometries = {
+    gabled: SKYLINE_GABLE_GEO,
+    industrial: SKYLINE_SAWTOOTH_GEO,
+    collapsed: SKYLINE_COLLAPSED_GEO,
+  };
+  const geometry = geometries[def.style];
+  if (!geometry) return;
+  const mat = standard('skyline-profile', 0xffffff, 0.96, 0.01);
+  const parent = new THREE.Matrix4().compose(
+    // The profile geometry is authored from y=0 upward; its origin sits directly on the
+    // highest body mass so there is no floating half-height gap under a distant roof.
+    new THREE.Vector3(def.x, def.y, def.z),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), def.yaw || 0),
+    new THREE.Vector3(1, 1, 1),
+  );
+  batcher.add(`skyline-profile-${def.style}`, geometry, mat,
+    instanceMatrix(parent, 0, 0, 0, def.w, def.h * 2, def.d),
+    false,
+    def.color);
+}
+
 function addCeilingFixture(batcher, def) {
   const parent = new THREE.Matrix4().makeTranslation(def.x, def.y, def.z);
   const housing = standard('fixture-housing', 0x2b3033, 0.62, 0.42);
@@ -1127,6 +1179,7 @@ export function addVisualProps(scene, props = []) {
     else if (def.kind === 'facade') addFacade(batcher, def);
     else if (def.kind === 'market-stall') addMarketStall(batcher, scene, def, marketIndex++);
     else if (def.kind === 'roof-cap') addRoofCap(batcher, def);
+    else if (def.kind === 'skyline-roof-profile') addSkylineRoofProfile(batcher, def);
     else if (def.kind === 'ceiling-fixture') addCeilingFixture(batcher, def);
     else if (def.kind === 'wall-decal') wallDecals.push(def);
     else if (def.kind === 'skyline-stats') scene.userData.skylineStats = def.stats;

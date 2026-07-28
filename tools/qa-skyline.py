@@ -24,26 +24,43 @@ def main():
         page.goto(args.url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_function("() => !!window.BP", timeout=90000)
 
-        def capture(level):
+        def capture(level, screenshot=None):
             page.evaluate("(id) => BP.startLevel(id)", level)
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             page.wait_for_timeout(220)
-            return page.evaluate("""() => ({
-              stats: BP.world.staticMesh.parent.userData.skylineStats,
-              familyDraws: BP.world.staticMesh.children.length,
-              calls: BP.performance.render.calls,
-            })""")
+            result = page.evaluate("""() => {
+              const profileBatches = {};
+              BP.world.staticMesh.parent.traverse(object => {
+                if (object.name?.startsWith('skyline-profile-')) {
+                  profileBatches[object.name] = object.userData.instanceCount || 0;
+                }
+              });
+              return {
+                stats: BP.world.staticMesh.parent.userData.skylineStats,
+                profileBatches,
+                familyDraws: BP.world.staticMesh.children.length,
+                calls: BP.performance.render.calls,
+              };
+            }""")
+            if screenshot:
+                page.screenshot(path=str(output / screenshot))
+            return result
 
-        levels = {str(level): capture(level) for level in [2, 5, 10]}
+        levels = {
+            "2": capture(2, "street-skyline.png"),
+            "5": capture(5, "market-skyline.png"),
+            "10": capture(10, "finale-skyline.png"),
+        }
         first_market = levels["5"]["stats"]
         repeat_market = capture(5)["stats"]
-        page.screenshot(path=str(output / "market-skyline.png"))
 
         result = {
             "levels": levels,
             "marketRepeatStable": first_market == repeat_market,
             "errors": errors[:8],
-            "screenshots": ["market-skyline.png"],
+            "screenshots": [
+                "street-skyline.png", "market-skyline.png", "finale-skyline.png"
+            ],
         }
         print(json.dumps(result, indent=2))
 
@@ -55,6 +72,8 @@ def main():
             assert stats["masses"] >= stats["buildings"] * 1.35
             assert stats["panes"] > 0
             assert all(count > 0 for count in stats["profiles"].values())
+            assert all(count > 0 for count in stats["roofProfiles"].values())
+            assert len(row["profileBatches"]) == 3
             assert row["familyDraws"] <= 8
         browser.close()
 
