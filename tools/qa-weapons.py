@@ -35,16 +35,37 @@ def main():
             rigs[name] = page.evaluate("""() => {
               const mesh = BP.weapons.meshes[BP.weapons.current];
               const gloves = [];
+              const armor = [];
               const sleeves = [];
+              const sleeveDetails = [];
               mesh.traverse(node => {
                 if (node.userData.authoredViewmodelGlove) gloves.push({
                   name: node.name,
                   vertices: node.geometry.attributes.position.count,
                   support: node.userData.support,
                 });
+                if (node.userData.authoredViewmodelGloveArmor) armor.push({
+                  name: node.name,
+                  vertices: node.geometry.attributes.position.count,
+                  support: node.userData.support,
+                  layer: node.layers.mask,
+                });
                 if (node.userData.authoredViewmodelSleeve) sleeves.push(node.name);
+                if (node.userData.authoredViewmodelSleeveDetail) sleeveDetails.push({
+                  name: node.name,
+                  vertices: node.geometry.attributes.position.count,
+                  support: node.userData.support,
+                });
               });
-              return { gloves, sleeves };
+              return {
+                gloves, armor, sleeves, sleeveDetails,
+                meshLayer: mesh.layers.mask,
+                cameraLayers: BP.weapons.camera.layers.mask,
+                lightLayers: [
+                  BP.weapons.viewFill.layers.mask,
+                  BP.weapons.viewKey.layers.mask,
+                ],
+              };
             }""")
             page.screenshot(path=str(output / f"{name}-hip.png"))
             captures.append(f"{name}-hip.png")
@@ -114,9 +135,18 @@ def main():
         assert not errors
         for rig in rigs.values():
             assert len(rig["gloves"]) == 2
+            assert len(rig["armor"]) == 2
             assert len(rig["sleeves"]) == 2
-            assert all(glove["vertices"] > 600 for glove in rig["gloves"])
+            assert len(rig["sleeveDetails"]) == 2
+            assert all(glove["vertices"] > 1_500 for glove in rig["gloves"])
+            assert all(piece["vertices"] > 400 for piece in rig["armor"])
             assert {glove["support"] for glove in rig["gloves"]} == {True, False}
+            assert {piece["support"] for piece in rig["armor"]} == {True, False}
+            assert all(piece["vertices"] > 100 for piece in rig["sleeveDetails"])
+            assert {piece["support"] for piece in rig["sleeveDetails"]} == {True, False}
+            assert rig["meshLayer"] == 2
+            assert rig["cameraLayers"] & 2
+            assert rig["lightLayers"] == [2, 2]
         assert reload_state["active"]
         assert abs(reload_state["holderCant"]) > 0.1
         assert reload_state["holderDrop"] < -0.25

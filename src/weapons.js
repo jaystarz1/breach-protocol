@@ -51,21 +51,26 @@ function gunMaterials() {
     tan: std(0x6d5f45, 0.82, 0.04, false),      // sniper furniture
     glove: quality.pbr
       ? new THREE.MeshStandardMaterial({
-        color: 0x363d41, roughness: 0.9, metalness: 0.01,
+        color: 0x242a2d, roughness: 0.91, metalness: 0.01,
         map: s?.fabric.map || null,
         normalMap: s?.fabric.normalMap || null,
-        normalScale: new THREE.Vector2(0.16, 0.16),
+        normalScale: new THREE.Vector2(0.22, 0.22),
       })
-      : new THREE.MeshLambertMaterial({ color: 0x363d41 }),
+      : new THREE.MeshLambertMaterial({ color: 0x242a2d }),
+    gloveArmor: quality.pbr
+      ? new THREE.MeshStandardMaterial({
+        color: 0x101619, roughness: 0.68, metalness: 0.08,
+      })
+      : new THREE.MeshLambertMaterial({ color: 0x101619 }),
     sleeve: quality.pbr
       ? new THREE.MeshStandardMaterial({
-        color: 0x22272a, roughness: 0.96, metalness: 0,
+        color: 0x171c1f, roughness: 0.96, metalness: 0,
         map: s?.fabric.map || null,
         roughnessMap: s?.fabric.roughnessMap || null,
         normalMap: s?.fabric.normalMap || null,
         normalScale: new THREE.Vector2(0.24, 0.24),
       })
-      : new THREE.MeshLambertMaterial({ color: 0x22272a }),
+      : new THREE.MeshLambertMaterial({ color: 0x171c1f }),
     // Optic glass has to be SEE-THROUGH. An opaque lens disc is geometrically honest and
     // completely unusable: aiming down the sight put a solid green coin exactly where the
     // target was. Transparent, additive, and depthWrite off so it tints the view instead of
@@ -189,7 +194,7 @@ function gloveGeometry(side, support) {
   // One continuous palm mass, flattened across the back of the hand and long enough to meet
   // the cuff. The old sphere was the source of the oven-mitt silhouette.
   parts.push(transformedGeometry(
-    new THREE.CapsuleGeometry(0.036, 0.052, 6, 12),
+    new THREE.CapsuleGeometry(0.036, 0.052, 8, 18),
     [0, 0, 0.006], [Math.PI / 2, 0, 0], [1.05, 0.66, 1],
   ));
 
@@ -210,15 +215,15 @@ function gloveGeometry(side, support) {
       support ? -0.061 : -0.041,
       (support ? -0.032 : -0.078) * lengthBias,
     ];
-    parts.push(geometryBetween(base, middle, 0.0094, 0.0084, 8));
-    parts.push(geometryBetween(middle, tip, 0.0084, 0.0067, 8));
+    parts.push(geometryBetween(base, middle, 0.0094, 0.0084, 11));
+    parts.push(geometryBetween(middle, tip, 0.0084, 0.0067, 11));
     parts.push(transformedGeometry(
-      new THREE.SphereGeometry(1, 8, 6),
+      new THREE.SphereGeometry(1, 11, 8),
       middle, [0, 0, 0], [0.009, 0.008, 0.009],
     ));
     // Low-profile knuckle protection breaks up the back of the glove in the most visible area.
     parts.push(transformedGeometry(
-      new THREE.SphereGeometry(1, 8, 5),
+      new THREE.SphereGeometry(1, 11, 7),
       [x, 0.022, -0.029], [0, 0, 0], [0.011, 0.0045, 0.014],
     ));
   }
@@ -228,16 +233,16 @@ function gloveGeometry(side, support) {
   const thumbBase = [side * 0.035, 0.002, -0.003];
   const thumbJoint = [side * 0.053, -0.012, -0.025];
   const thumbTip = [side * 0.048, -0.032, -0.048];
-  parts.push(geometryBetween(thumbBase, thumbJoint, 0.0115, 0.0102, 9));
-  parts.push(geometryBetween(thumbJoint, thumbTip, 0.0102, 0.0074, 9));
+  parts.push(geometryBetween(thumbBase, thumbJoint, 0.0115, 0.0102, 12));
+  parts.push(geometryBetween(thumbJoint, thumbTip, 0.0102, 0.0074, 12));
   parts.push(transformedGeometry(
-    new THREE.SphereGeometry(1, 8, 6),
+    new THREE.SphereGeometry(1, 12, 8),
     thumbJoint, [0, 0, 0], [0.011, 0.01, 0.011],
   ));
 
   // Cuff and closure tab. Both are part of the same merged glove draw.
   parts.push(transformedGeometry(
-    new THREE.CylinderGeometry(0.049, 0.045, 0.04, 12),
+    new THREE.CylinderGeometry(0.049, 0.045, 0.04, 16),
     [0, 0, 0.067], [Math.PI / 2, 0, 0], [1, 0.78, 1],
   ));
   parts.push(transformedGeometry(
@@ -251,6 +256,49 @@ function gloveGeometry(side, support) {
   return merged;
 }
 
+const gloveArmorGeometries = new Map();
+function gloveArmorGeometry(side, support) {
+  const key = `${side}:${support ? 1 : 0}`;
+  if (gloveArmorGeometries.has(key)) return gloveArmorGeometries.get(key);
+  const parts = [];
+
+  // A flexible impact plate across the back of the hand gives the glove a second readable
+  // material and breaks up the single grey palm mass. It stays low enough not to change the
+  // grip silhouette or intersect the receiver during recoil.
+  parts.push(transformedGeometry(
+    new THREE.CapsuleGeometry(0.018, 0.044, 5, 12),
+    [0, 0.027, -0.004], [Math.PI / 2, 0, 0], [1.55, 0.42, 1],
+  ));
+  for (let i = 0; i < 4; i++) {
+    const x = (i - 1.5) * 0.0175;
+    parts.push(transformedGeometry(
+      new THREE.SphereGeometry(1, 10, 7),
+      [x, 0.029, -0.03], [0, 0, 0], [0.0095, 0.004, 0.012],
+    ));
+    // Reinforcement strip over the first finger phalanx. Individual strips remain visible
+    // under oblique viewmodel light where a single broad plate turns into a featureless blob.
+    parts.push(geometryBetween(
+      [x, 0.014, -0.038],
+      [x + side * 0.0015, support ? -0.018 : -0.01, support ? -0.044 : -0.057],
+      0.0044, 0.0038, 8,
+    ));
+  }
+  // Wrist closure and its offset tab establish where glove ends and sleeve begins.
+  parts.push(transformedGeometry(
+    new THREE.CylinderGeometry(0.0505, 0.0505, 0.014, 16, 1, true),
+    [0, 0, 0.069], [Math.PI / 2, 0, 0], [1, 0.8, 1],
+  ));
+  parts.push(transformedGeometry(
+    new THREE.BoxGeometry(0.052, 0.008, 0.018),
+    [side * 0.018, 0.03, 0.069], [0.05, 0, side * 0.12],
+  ));
+
+  const merged = mergeParts(parts);
+  merged.userData = { authoredGloveArmor: true, segments: parts.length };
+  gloveArmorGeometries.set(key, merged);
+  return merged;
+}
+
 function sleeveGeometry(wrist, elbow, side) {
   const a = new THREE.Vector3(...wrist);
   const b = new THREE.Vector3(...elbow);
@@ -258,13 +306,37 @@ function sleeveGeometry(wrist, elbow, side) {
   middle.x += side * 0.014;
   middle.y -= 0.016;
   return mergeParts([
-    geometryBetween(wrist, middle.toArray(), 0.048, 0.058, 12),
-    geometryBetween(middle.toArray(), elbow, 0.058, 0.068, 12),
+    geometryBetween(wrist, middle.toArray(), 0.041, 0.048, 14),
+    geometryBetween(middle.toArray(), elbow, 0.048, 0.054, 14),
     transformedGeometry(
-      new THREE.CylinderGeometry(0.052, 0.055, 0.026, 12),
+      new THREE.CylinderGeometry(0.044, 0.047, 0.026, 14),
       wrist, [Math.PI / 2, 0, 0], [1, 0.82, 1],
     ),
   ]);
+}
+
+function sleeveDetailGeometry(wrist, elbow, side) {
+  const a = new THREE.Vector3(...wrist);
+  const b = new THREE.Vector3(...elbow);
+  const direction = b.clone().sub(a).normalize();
+  const parts = [];
+  for (const [t, radius] of [[0.18, 0.0445], [0.47, 0.0505], [0.72, 0.055]]) {
+    const center = a.clone().lerp(b, t);
+    const half = direction.clone().multiplyScalar(0.008);
+    parts.push(geometryBetween(
+      center.clone().sub(half).toArray(),
+      center.clone().add(half).toArray(),
+      radius, radius, 14,
+    ));
+  }
+  // Asymmetric closure tab prevents both arms from reading as identical lathed tubes.
+  const tabAt = a.clone().lerp(b, 0.5);
+  parts.push(transformedGeometry(
+    new THREE.BoxGeometry(0.038, 0.009, 0.062),
+    [tabAt.x + side * 0.032, tabAt.y + 0.008, tabAt.z],
+    [0.08, side * 0.08, side * 0.18],
+  ));
+  return mergeParts(parts);
 }
 
 // A weapon floating by itself always reads like a debug prop. These compact rigs keep the
@@ -273,6 +345,9 @@ function sleeveGeometry(wrist, elbow, side) {
 function addGlovedArm(parent, M, {
   side, palm, palmRot, elbow, spread = 1, support = false,
 }) {
+  const armRoot = new THREE.Group();
+  armRoot.name = support ? 'support-viewmodel-arm' : 'trigger-viewmodel-arm';
+  armRoot.userData.authoredViewmodelArm = true;
   const hand = new THREE.Group();
   hand.position.fromArray(palm);
   hand.rotation.set(...palmRot);
@@ -283,13 +358,31 @@ function addGlovedArm(parent, M, {
   glove.userData.side = side;
   glove.userData.support = support;
   hand.add(glove);
-  parent.add(hand);
+  const armor = new THREE.Mesh(gloveArmorGeometry(side, support), M.gloveArmor);
+  armor.name = support ? 'support-glove-reinforcement' : 'trigger-glove-reinforcement';
+  armor.userData.authoredViewmodelGloveArmor = true;
+  armor.userData.side = side;
+  armor.userData.support = support;
+  hand.add(armor);
+  armRoot.add(hand);
 
   const wrist = [palm[0], palm[1], palm[2] + 0.075];
-  const sleeve = new THREE.Mesh(sleeveGeometry(wrist, elbow, side), M.sleeve);
+  // Continue beyond the lower edge of the view instead of ending in a visible flat cylinder
+  // cap. The authored elbow remains the animation guide; this extension is visual only.
+  const sleeveElbow = [elbow[0], elbow[1] - 0.18, elbow[2] + 0.08];
+  const sleeve = new THREE.Mesh(sleeveGeometry(wrist, sleeveElbow, side), M.sleeve);
   sleeve.name = support ? 'authored-support-sleeve' : 'authored-trigger-sleeve';
   sleeve.userData.authoredViewmodelSleeve = true;
-  parent.add(sleeve);
+  armRoot.add(sleeve);
+  const sleeveDetail = new THREE.Mesh(
+    sleeveDetailGeometry(wrist, sleeveElbow, side), M.gloveArmor);
+  sleeveDetail.name = support ? 'support-sleeve-reinforcement' : 'trigger-sleeve-reinforcement';
+  sleeveDetail.userData.authoredViewmodelSleeveDetail = true;
+  sleeveDetail.userData.support = support;
+  armRoot.add(sleeveDetail);
+  parent.add(armRoot);
+  if (!parent.userData.viewmodelArms) parent.userData.viewmodelArms = [];
+  parent.userData.viewmodelArms.push(armRoot);
 }
 
 function gunMesh(kind) {
@@ -443,14 +536,29 @@ export class Weapons {
   constructor(camera) {
     this.camera = camera;
     this.holder = new THREE.Group();
+    // Layer 1 is reserved for the first-person rig. World lights remain on layer 0, while
+    // these measured camera-space lights keep black steel, polymer, fabric and reinforcement
+    // panels separated in every mission without brightening a single environment surface.
+    camera.layers.enable(1);
+    this.holder.layers.set(1);
     camera.add(this.holder);
     this.holder.position.set(0.22, -0.22, -0.45);
     this.meshes = {};
     for (const k of Object.keys(WEAPON_SPECS)) {
       this.meshes[k] = gunMesh(k);
       this.meshes[k].visible = false;
+      this.meshes[k].traverse(object => object.layers.set(1));
       this.holder.add(this.meshes[k]);
     }
+    this.viewFill = new THREE.HemisphereLight(0xb8c6cf, 0x11171b, 0.78);
+    this.viewFill.layers.set(1);
+    camera.add(this.viewFill);
+    this.viewKey = new THREE.DirectionalLight(0xffe8d2, 1.05);
+    this.viewKey.position.set(-0.8, 1.1, 0.7);
+    this.viewKey.layers.set(1);
+    this.viewKey.target.position.set(0, -0.12, -1.4);
+    this.viewKey.target.layers.set(1);
+    camera.add(this.viewKey, this.viewKey.target);
     // ---------- muzzle flash ----------
     // A short orange pop, not a white starburst.
     //
@@ -463,6 +571,7 @@ export class Weapons {
     // gun's 0.6-0.78, so 0.34m of plane at half a metre from the eye covered a third of the
     // screen. Petals are 0.095m now and the whole thing is scaled per weapon.
     this.flash = new THREE.PointLight(0xff9838, 0, 12);
+    this.flash.layers.set(1);
     this.flash.position.set(0, 0, -0.55);
     this.holder.add(this.flash);
     this.petalMat = new THREE.MeshBasicMaterial({
@@ -483,6 +592,7 @@ export class Weapons {
     // three crossed streaks floating in front of the barrel.
     this.flashMesh.add(new THREE.Mesh(new THREE.CircleGeometry(0.022, 10), this.coreMat));
     this.flashMesh.position.set(0, 0.02, -0.55);
+    this.flashMesh.traverse(object => object.layers.set(1));
     this.flashMesh.visible = false;
     this.flashLife = 0;
     this.flashSize = 1;
@@ -614,11 +724,20 @@ export class Weapons {
     // Further from the eye while aiming. The sight anchor keeps it centred at any z (a point
     // at camera-space x=y=0 projects to screen centre regardless of depth), so this is free
     // shrink: it cuts how much of the lower screen the receiver eats without moving the aim.
-    this.holder.position.z = (ads ? -0.7 : -0.45) + kick;
+    const adsDepth = this.current === 'pistol' ? -0.88
+      : this.current === 'm4' ? -0.95 : -0.7;
+    this.holder.position.z = (ads ? adsDepth : -0.45) + kick;
     this.holder.position.x = (ads ? (this.adsX ?? 0) : 0.22) + rl * 0.05;
     this.holder.position.y = (ads ? (this.adsY ?? -0.155) : -0.22) + Math.sin(t * 1.8) * 0.004 - rl * 0.12;
     this.holder.rotation.x = this.recoilKick * 0.06 + rl * 0.28;
     this.holder.rotation.z = -rl * 0.5;
+    // A procedural rigid arm cannot deform convincingly when it is lifted directly in front
+    // of the camera: sleeves converge like pipes or palms become floating discs. A dedicated
+    // first-person rig crops the arms at full ADS too, so reserve the complete authored arm
+    // silhouette for hip fire and reload and leave the sight picture clean while aiming.
+    for (const arm of (mesh.userData.viewmodelArms || [])) {
+      arm.visible = !ads;
+    }
     return fired;
   }
 }

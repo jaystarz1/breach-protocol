@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v64-authored-interior-missions';
+const CACHE = 'breach-protocol-v68-layered-viewmodel';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
