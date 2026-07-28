@@ -1,15 +1,13 @@
-// Procedural surface textures, drawn to canvas at boot.
-//
-// Deliberately no image files: this is an offline-capable PWA and every byte here would be
-// a download plus a cache entry plus a licence to track. Canvas noise costs a few ms once.
-//
-// Procedural maps stay greyscale-ish and are tinted at draw time. Photo surfaces use a small,
-// fixed material family set so texture changes add bounded draws rather than one material per box.
+// Shared surface textures. Photographed PBR families cover the large close surfaces; compact
+// procedural maps remain the offline fallback and cover metal, timber and fabric without
+// multiplying material variants. Every photo is shared by a whole family, so adding detail
+// does not add draw calls.
 import * as THREE from 'three';
 import { quality } from './quality.js';
 
 const SIZE = 256;
 const PHOTO_ROOT = './assets/street-sweep/';
+const MATERIAL_ROOT = './assets/materials/';
 
 let photoCache = null;
 if (quality.textures) {
@@ -30,6 +28,22 @@ if (quality.textures) {
       map.anisotropy = height.anisotropy = 8;
       photoCache[names[i]] = { map, height };
     }
+    const [concreteMap, concreteNormal, concreteRoughness] = await Promise.all([
+      loader.loadAsync(`${MATERIAL_ROOT}concrete/concrete-color.webp`),
+      loader.loadAsync(`${MATERIAL_ROOT}concrete/concrete-normal.webp`),
+      loader.loadAsync(`${MATERIAL_ROOT}concrete/concrete-roughness.webp`),
+    ]);
+    concreteMap.colorSpace = THREE.SRGBColorSpace;
+    concreteNormal.colorSpace = concreteRoughness.colorSpace = THREE.NoColorSpace;
+    for (const texture of [concreteMap, concreteNormal, concreteRoughness]) {
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.anisotropy = 8;
+    }
+    photoCache.concrete = {
+      map: concreteMap,
+      normalMap: concreteNormal,
+      roughnessMap: concreteRoughness,
+    };
   } catch (error) {
     console.warn('[bp] photographic surface set unavailable; using procedural materials', error);
   }

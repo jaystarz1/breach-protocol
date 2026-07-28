@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v43-hostage-commands';
+const CACHE = 'breach-protocol-v44-photographic-concrete';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -16,6 +16,10 @@ const ASSETS = [
   'assets/street-sweep/brick.jpg', 'assets/street-sweep/brick-height.jpg',
   'assets/street-sweep/plaster.jpg', 'assets/street-sweep/plaster-height.jpg',
   'assets/street-sweep/road-damage-atlas.webp',
+  'assets/materials/concrete/concrete-color.webp',
+  'assets/materials/concrete/concrete-normal.webp',
+  'assets/materials/concrete/concrete-roughness.webp',
+  'assets/materials/NOTICE.md',
   'assets/characters/Soldier.glb',
   'assets/characters/CivilianCasual.glb',
   'assets/characters/CivilianLongSleeve.glb',

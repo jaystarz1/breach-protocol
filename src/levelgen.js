@@ -45,7 +45,9 @@ function staticTint(color, family) {
     sidewalk: 0xb4b5b2,
     brick: 0xa99386,
     plaster: 0xa7adb0,
-    concrete: 0x9b9e9c,
+    // Concrete012 is a photographed, naturally grey surface rather than a neutral detail
+    // overlay. Keep its family tint pale so the photograph supplies the value structure.
+    concrete: 0xd5d2c9,
     metal: 0x727b80,
     timber: 0x927558,
   };
@@ -64,11 +66,19 @@ function staticMaterial(family) {
   const photos = photoSurfaces();
   let options = { vertexColors: true, roughness: 0.9, metalness: 0.02 };
   if (photos?.[family]) {
+    const photo = photos[family];
     options = {
       ...options,
-      map: photos[family].map,
-      bumpMap: photos[family].height,
-      bumpScale: family === 'brick' ? 0.055 : family === 'asphalt' ? 0.035 : 0.028,
+      map: photo.map,
+      roughnessMap: photo.roughnessMap || null,
+      normalMap: photo.normalMap || null,
+      normalScale: photo.normalMap
+        ? new THREE.Vector2(family === 'concrete' ? 0.52 : 0.32, family === 'concrete' ? 0.52 : 0.32)
+        : undefined,
+      bumpMap: photo.height || null,
+      bumpScale: photo.height
+        ? (family === 'brick' ? 0.055 : family === 'asphalt' ? 0.035 : 0.028)
+        : 0,
     };
   } else if (family === 'metal') {
     options = {
