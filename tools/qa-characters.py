@@ -71,6 +71,7 @@ def main():
                   let draws = 0;
                   let triangles = 0;
                   let carriedRifle = null;
+                  let combatantSurface = null;
                   row.actor.mesh.traverse(object => {
                     if (!object.isMesh || !object.visible) return;
                     meshes++;
@@ -99,6 +100,34 @@ def main():
                         size: size.map(value => +value.toFixed(3)),
                       };
                     }
+                    if (object.userData.mergedCombatant) {
+                      const fabric = object.geometry.attributes.fabricMask;
+                      const visor = object.geometry.attributes.visorMask;
+                      const values = attribute => {
+                        if (!attribute) return [];
+                        const out = [];
+                        for (let i = 0; i < attribute.count; i++) out.push(attribute.getX(i));
+                        return out;
+                      };
+                      const fabricValues = values(fabric);
+                      const visorValues = values(visor);
+                      const source = texture => texture?.image?.currentSrc
+                        || texture?.image?.src || '';
+                      combatantSurface = {
+                        material: object.material.name,
+                        normalMap: source(object.material.normalMap),
+                        roughnessMap: source(object.material.roughnessMap),
+                        normalRepeat: object.material.normalMap
+                          ? object.material.normalMap.repeat.toArray() : null,
+                        normalScale: object.material.normalScale?.toArray() || null,
+                        fabricRange: fabricValues.length
+                          ? [Math.min(...fabricValues), Math.max(...fabricValues)] : null,
+                        fabricVertices: fabricValues.filter(value => value > 0).length,
+                        visorRange: visorValues.length
+                          ? [Math.min(...visorValues), Math.max(...visorValues)] : null,
+                        visorVertices: visorValues.filter(value => value > 0).length,
+                      };
+                    }
                     for (const material of mats) materials.push({
                       object: object.name,
                       material: material?.name || '',
@@ -117,6 +146,7 @@ def main():
                     draws,
                     triangles,
                     carriedRifle,
+                    combatantSurface,
                     materials,
                   };
                 }""",
@@ -130,6 +160,15 @@ def main():
             page.wait_for_timeout(80)
             page.screenshot(path=str(output / f"{kind}.png"))
             if kind == "enemy" and args.action_study:
+                page.evaluate("""() => {
+                  const enemy = BP.world.enemies.find(actor => actor.mesh.visible);
+                  if (!enemy) return;
+                  const base = BP.player.pos;
+                  enemy.mesh.position.set(base.x, base.y, base.z - 2.55);
+                  enemy.mesh.rotation.y = -0.38;
+                }""")
+                page.wait_for_timeout(80)
+                page.screenshot(path=str(output / "enemy-material-close.png"))
                 for action_name in (
                     "idle_gun", "idle_gun_pointing", "idle_gun_shoot",
                     "gun_shoot", "run_shoot",
@@ -179,7 +218,9 @@ def main():
         result = {
             "captures": captures,
             "concealedReveal": revealed,
-            "screenshots": [f"{kind}.png" for kind in captures] + ["concealed-revealed.png"],
+            "screenshots": [f"{kind}.png" for kind in captures]
+            + (["enemy-material-close.png"] if args.action_study else [])
+            + ["concealed-revealed.png"],
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
@@ -197,6 +238,20 @@ def main():
             assert rifle["vertices"] > 10_000, result
             assert rifle["vertexColors"] == rifle["vertices"], result
             assert max(rifle["size"]) > 0.75, result
+            surface = captures[kind]["combatantSurface"]
+            assert surface and surface["material"] == "combatant-scanned-fabric", result
+            assert surface["normalMap"].endswith(
+                "assets/characters/materials/fabric074-normal.webp"
+            ), result
+            assert surface["roughnessMap"].endswith(
+                "assets/characters/materials/fabric074-roughness.webp"
+            ), result
+            assert surface["normalRepeat"] == [8, 8], result
+            assert surface["normalScale"] == [0.3, 0.3], result
+            assert surface["fabricRange"] == [0, 1], result
+            assert surface["fabricVertices"] > 1_000, result
+            assert surface["visorRange"] == [0, 1], result
+            assert surface["visorVertices"] > 0, result
         assert revealed and not revealed["concealed"] and revealed["visible"], result
         assert revealed["authored"] and revealed["authoredRifle"], result
         assert revealed["sourceParts"] >= 7 and revealed["vertices"] > 10_000, result

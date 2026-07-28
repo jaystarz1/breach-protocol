@@ -18,3 +18,11 @@ Quaternius, distributed as public-domain CC0 assets through Poly Pizza:
 - https://poly.pizza/m/qJ2gsTUBHL
 
 The models include their own human rigs, faces, separated garments, and locomotion clips.
+
+`materials/fabric074-normal.webp` and `materials/fabric074-roughness.webp` are resized,
+game-encoded derivatives of ambientCG's “Fabric 074” photometric-stereo material:
+
+https://ambientcg.com/view?id=Fabric074
+
+The source material is dedicated to the public domain under CC0 1.0. Only the OpenGL normal
+and roughness maps are shipped; combatant faction colour remains authored vertex data.

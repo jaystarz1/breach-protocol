@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v74-photographic-window-interiors';
+const CACHE = 'breach-protocol-v75-scanned-combatant-fabric';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -25,6 +25,8 @@ const ASSETS = [
   'assets/characters/CivilianLongSleeve.glb',
   'assets/characters/CivilianWoman.glb',
   'assets/characters/NOTICE.md',
+  'assets/characters/materials/fabric074-normal.webp',
+  'assets/characters/materials/fabric074-roughness.webp',
   'assets/weapons/AssaultRifleWest.glb',
   'assets/weapons/NOTICE.md',
   'assets/vehicles/CarSedan.glb',

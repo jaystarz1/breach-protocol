@@ -11,6 +11,8 @@ let soldierScale = 1;
 let civilianSources = [];
 let authoredRifleGeometry = null;
 let authoredRifleSourceParts = 0;
+let combatantFabricNormal = null;
+let combatantFabricRoughness = null;
 
 if (quality.desktop) {
   try {
@@ -51,6 +53,24 @@ if (quality.desktop) {
     }
   } catch (error) {
     console.warn('[bp] authored character asset unavailable; using procedural fallback', error);
+  }
+}
+
+if (quality.desktop) {
+  try {
+    const loader = new THREE.TextureLoader();
+    [combatantFabricNormal, combatantFabricRoughness] = await Promise.all([
+      loader.loadAsync('./assets/characters/materials/fabric074-normal.webp'),
+      loader.loadAsync('./assets/characters/materials/fabric074-roughness.webp'),
+    ]);
+    for (const texture of [combatantFabricNormal, combatantFabricRoughness]) {
+      texture.colorSpace = THREE.NoColorSpace;
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(8, 8);
+      texture.anisotropy = Math.min(quality.maxAnisotropy || 4, 8);
+    }
+  } catch (error) {
+    console.warn('[bp] scanned combatant fabric unavailable; using flat gear material', error);
   }
 }
 
@@ -121,19 +141,81 @@ const MERGED_CIVILIAN_MATERIAL = new THREE.MeshStandardMaterial({
   roughness: 0.86,
   metalness: 0.01,
 });
+const MERGED_COMBATANT_MATERIAL = new THREE.MeshStandardMaterial({
+  name: 'combatant-scanned-fabric',
+  vertexColors: true,
+  roughness: 0.88,
+  metalness: 0.025,
+  normalMap: combatantFabricNormal,
+  normalScale: new THREE.Vector2(0.3, 0.3),
+  roughnessMap: combatantFabricRoughness,
+});
+MERGED_COMBATANT_MATERIAL.onBeforeCompile = shader => {
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      '#include <common>',
+      `#include <common>
+attribute float fabricMask;
+attribute float visorMask;
+varying float vFabricMask;
+varying float vVisorMask;`,
+    )
+    .replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+vFabricMask = fabricMask;
+vVisorMask = visorMask;`,
+    );
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      '#include <common>',
+      `#include <common>
+varying float vFabricMask;
+varying float vVisorMask;`,
+    )
+    .replace(
+      '#include <roughnessmap_fragment>',
+      `#include <roughnessmap_fragment>
+roughnessFactor = mix(roughness, roughnessFactor, vFabricMask);
+roughnessFactor = mix(roughnessFactor, 0.32, vVisorMask);`,
+    )
+    .replace(
+      '#include <metalnessmap_fragment>',
+      `#include <metalnessmap_fragment>
+metalnessFactor = mix(metalnessFactor, 0.2, vVisorMask);`,
+    )
+    .replace(
+      '#include <normal_fragment_maps>',
+      `vec3 bpBaseNormal = normal;
+#include <normal_fragment_maps>
+normal = normalize(mix(bpBaseNormal, normal, vFabricMask));`,
+    );
+};
+MERGED_COMBATANT_MATERIAL.customProgramCacheKey = () => 'bp-combatant-surface-v1';
 const MERGED_SILHOUETTE_MATERIAL = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
-function bakeVertexColor(geometry, material) {
+function bakeVertexColor(geometry, material, surfaceRoles = false) {
   const materials = Array.isArray(material) ? material : [material];
   const count = geometry.attributes.position.count;
   const values = new Float32Array(count * 3);
+  const fabricValues = surfaceRoles ? new Float32Array(count) : null;
+  const visorValues = surfaceRoles ? new Float32Array(count) : null;
   const fill = (start, length, source) => {
     const color = source?.color || new THREE.Color(0xffffff);
+    const label = source?.name?.toLowerCase() || '';
+    const fabric = label.includes('skin') || label.includes('visor')
+      ? 0
+      : label.includes('black') ? 0.38 : 1;
+    const visor = label.includes('visor') ? 1 : 0;
     const end = Math.min(count, start + length);
     for (let i = start; i < end; i++) {
       values[i * 3] = color.r;
       values[i * 3 + 1] = color.g;
       values[i * 3 + 2] = color.b;
+      if (surfaceRoles) {
+        fabricValues[i] = fabric;
+        visorValues[i] = visor;
+      }
     }
   };
   fill(0, count, materials[0]);
@@ -144,6 +226,10 @@ function bakeVertexColor(geometry, material) {
     fill(group.start, group.count, materials[group.materialIndex] || materials[0]);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+  if (surfaceRoles) {
+    geometry.setAttribute('fabricMask', new THREE.BufferAttribute(fabricValues, 1));
+    geometry.setAttribute('visorMask', new THREE.BufferAttribute(visorValues, 1));
+  }
 }
 
 function prepareCarriedRifleGeometry(source) {
@@ -220,7 +306,7 @@ function mergeCivilianVisual(visual, cacheKey, {
             geometry.deleteAttribute(name);
           }
         }
-        bakeVertexColor(geometry, piece.material);
+        bakeVertexColor(geometry, piece.material, !civilian);
         geometries.push(geometry);
       }
       const geometry = mergeGeometries(geometries, false);
@@ -243,7 +329,10 @@ function mergeCivilianVisual(visual, cacheKey, {
   // Although the exported pieces live below different named groups, their final transform
   // relative to `visual` is identical. Recreate that transform once on the merged skin.
   const relative = visual.matrixWorld.clone().invert().multiply(first.matrixWorld);
-  const merged = new THREE.SkinnedMesh(cached.geometry, MERGED_CIVILIAN_MATERIAL);
+  const merged = new THREE.SkinnedMesh(
+    cached.geometry,
+    civilian ? MERGED_CIVILIAN_MATERIAL : MERGED_COMBATANT_MATERIAL,
+  );
   relative.decompose(merged.position, merged.quaternion, merged.scale);
   merged.bindMode = first.bindMode;
   merged.bind(first.skeleton, first.bindMatrix);
