@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v71-field-fortifications';
+const CACHE = 'breach-protocol-v72-authored-carried-rifle';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -25,6 +25,8 @@ const ASSETS = [
   'assets/characters/CivilianLongSleeve.glb',
   'assets/characters/CivilianWoman.glb',
   'assets/characters/NOTICE.md',
+  'assets/weapons/AssaultRifleWest.glb',
+  'assets/weapons/NOTICE.md',
   'icons/icon-192.png', 'icons/icon-512.png',
 ];
 

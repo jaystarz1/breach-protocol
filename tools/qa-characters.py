@@ -70,6 +70,7 @@ def main():
                   let meshes = 0;
                   let draws = 0;
                   let triangles = 0;
+                  let carriedRifle = null;
                   row.actor.mesh.traverse(object => {
                     if (!object.isMesh || !object.visible) return;
                     meshes++;
@@ -81,6 +82,23 @@ def main():
                     const count = object.geometry?.index?.count
                       || object.geometry?.attributes?.position?.count || 0;
                     triangles += Math.round(count / 3);
+                    if (object.userData.authoredCarriedRifle) {
+                      object.geometry.computeBoundingBox();
+                      const box = object.geometry.boundingBox;
+                      const size = [
+                        box.max.x - box.min.x,
+                        box.max.y - box.min.y,
+                        box.max.z - box.min.z,
+                      ];
+                      carriedRifle = {
+                        name: object.name,
+                        sourceParts: object.userData.sourceParts,
+                        vertices: object.geometry.attributes.position.count,
+                        triangles: Math.round(count / 3),
+                        vertexColors: object.geometry.attributes.color?.count || 0,
+                        size: size.map(value => +value.toFixed(3)),
+                      };
+                    }
                     for (const material of mats) materials.push({
                       object: object.name,
                       material: material?.name || '',
@@ -98,6 +116,7 @@ def main():
                     meshes,
                     draws,
                     triangles,
+                    carriedRifle,
                     materials,
                   };
                 }""",
@@ -138,9 +157,29 @@ def main():
             page.wait_for_timeout(80)
             page.screenshot(path=str(output / f"{kind}.png"))
 
+        revealed = page.evaluate("""() => {
+          const enemy = BP.world.enemies.find(actor => actor.mesh.visible && actor.concealed);
+          if (!enemy) return null;
+          enemy.revealWeapon();
+          const rig = enemy.mesh.userData.rig;
+          const rifle = rig?.rifle;
+          if (!rifle) return null;
+          return {
+            concealed: enemy.concealed,
+            authored: !!rig.authored,
+            visible: rifle.visible,
+            authoredRifle: !!rifle.userData.authoredCarriedRifle,
+            sourceParts: rifle.userData.sourceParts,
+            vertices: rifle.geometry.attributes.position.count,
+          };
+        }""")
+        page.wait_for_timeout(80)
+        page.screenshot(path=str(output / "concealed-revealed.png"))
+
         result = {
             "captures": captures,
-            "screenshots": [f"{kind}.png" for kind in captures],
+            "concealedReveal": revealed,
+            "screenshots": [f"{kind}.png" for kind in captures] + ["concealed-revealed.png"],
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
@@ -152,6 +191,15 @@ def main():
         assert captures["friendly"]["mergedCombatant"], result
         assert captures["enemy"]["draws"] <= 3, result
         assert captures["friendly"]["draws"] <= 4, result
+        for kind in ("enemy", "friendly"):
+            rifle = captures[kind]["carriedRifle"]
+            assert rifle and rifle["sourceParts"] >= 7, result
+            assert rifle["vertices"] > 10_000, result
+            assert rifle["vertexColors"] == rifle["vertices"], result
+            assert max(rifle["size"]) > 0.75, result
+        assert revealed and not revealed["concealed"] and revealed["visible"], result
+        assert revealed["authored"] and revealed["authoredRifle"], result
+        assert revealed["sourceParts"] >= 7 and revealed["vertices"] > 10_000, result
         browser.close()
 
 

@@ -9,16 +9,24 @@ let soldierClips = [];
 let soldierFloor = 0;
 let soldierScale = 1;
 let civilianSources = [];
+let authoredRifleGeometry = null;
+let authoredRifleSourceParts = 0;
 
 if (quality.desktop) {
   try {
     const loader = new GLTFLoader();
-    const [soldier, ...civilians] = await Promise.all([
+    const [soldier, ...civiliansAndRifle] = await Promise.all([
       loader.loadAsync('./assets/characters/SWAT.glb'),
       loader.loadAsync('./assets/characters/CivilianCasual.glb'),
       loader.loadAsync('./assets/characters/CivilianLongSleeve.glb'),
       loader.loadAsync('./assets/characters/CivilianWoman.glb'),
+      loader.loadAsync('./assets/weapons/AssaultRifleWest.glb').catch(error => {
+        console.warn('[bp] authored carried rifle unavailable; using procedural fallback', error);
+        return null;
+      }),
     ]);
+    const rifleAsset = civiliansAndRifle.pop();
+    const civilians = civiliansAndRifle;
     soldierSource = soldier.scene;
     soldierClips = soldier.animations;
     soldierSource.updateMatrixWorld(true);
@@ -36,6 +44,11 @@ if (quality.desktop) {
         floor: box.min.y,
       };
     });
+    if (rifleAsset) {
+      const prepared = prepareCarriedRifleGeometry(rifleAsset.scene);
+      authoredRifleGeometry = prepared?.geometry || null;
+      authoredRifleSourceParts = prepared?.sourceParts || 0;
+    }
   } catch (error) {
     console.warn('[bp] authored character asset unavailable; using procedural fallback', error);
   }
@@ -131,6 +144,44 @@ function bakeVertexColor(geometry, material) {
     fill(group.start, group.count, materials[group.materialIndex] || materials[0]);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+}
+
+function prepareCarriedRifleGeometry(source) {
+  // The CC0 source is one logical rifle split into seven material primitives. Keeping that
+  // hierarchy would turn every combatant into seven extra draws. Bake those colours into
+  // vertices, apply the source node transform, and collapse the weapon to one static mesh.
+  source.updateMatrixWorld(true);
+  const geometries = [];
+  let sourceParts = 0;
+  source.traverse(object => {
+    if (!object.isMesh || !object.geometry) return;
+    let geometry = object.geometry.index
+      ? object.geometry.toNonIndexed()
+      : object.geometry.clone();
+    for (const name of Object.keys(geometry.attributes)) {
+      if (!['position', 'normal', 'uv'].includes(name)) geometry.deleteAttribute(name);
+    }
+    bakeVertexColor(geometry, object.material);
+    geometry.applyMatrix4(object.matrixWorld);
+    geometries.push(geometry);
+    sourceParts += Array.isArray(object.material)
+      ? Math.max(1, object.geometry.groups?.length || object.material.length)
+      : 1;
+  });
+  if (!geometries.length) return null;
+  const geometry = mergeGeometries(geometries, false);
+  for (const part of geometries) part.dispose();
+  if (!geometry) return null;
+  // The source is authored at roughly 70 cm overall. A modest uniform scale brings it to the
+  // 82 cm service-rifle silhouette expected by the existing hand pose without moving the
+  // receiver away from the source origin.
+  geometry.scale(1.17, 1.17, 1.17);
+  geometry.clearGroups();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  geometry.userData.authoredCarriedRifle = true;
+  geometry.userData.sourceParts = sourceParts;
+  return { geometry, sourceParts };
 }
 
 // Quaternius' civilians are authored as 7–10 skinned garment/anatomy pieces that all use
@@ -230,7 +281,7 @@ function mergedBoxGeometry(parts) {
   return out;
 }
 
-const RIFLE_GEO = mergedBoxGeometry([
+const PROCEDURAL_RIFLE_GEO = mergedBoxGeometry([
   [0, 0, -0.12, 0.075, 0.11, 0.3],
   [0, 0, -0.39, 0.06, 0.075, 0.27],
   [0, 0, -0.68, 0.025, 0.025, 0.34],
@@ -239,8 +290,12 @@ const RIFLE_GEO = mergedBoxGeometry([
   [0, -0.11, -0.14, 0.065, 0.18, 0.1],
   [0, 0.09, -0.22, 0.055, 0.07, 0.13],
 ]);
+const RIFLE_GEO = authoredRifleGeometry || PROCEDURAL_RIFLE_GEO;
 const RIFLE_MAT = new THREE.MeshStandardMaterial({
-  color: 0x0b0e11, roughness: 0.44, metalness: 0.58,
+  color: authoredRifleGeometry ? 0xffffff : 0x0b0e11,
+  vertexColors: !!authoredRifleGeometry,
+  roughness: 0.5,
+  metalness: 0.5,
 });
 const RESTRAINT_MAT = new THREE.MeshStandardMaterial({
   color: 0x5b574f, roughness: 0.84, metalness: 0.08,
@@ -457,9 +512,12 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
   // Low-ready on the actor's forward axis. The previous ninety-degree rotation made the gun
   // a broad rectangular bar floating across the chest whenever an enemy faced the player.
   // A real rifle aimed at you foreshortens; posture and faction kit carry identification.
-  rifle.position.set(0.03, 1.22, 0.26);
-  rifle.rotation.set(0.03, Math.PI - 0.16, -0.04);
+  rifle.position.set(0.03, 1.29, 0.28);
+  rifle.rotation.set(0.11, Math.PI - 0.28, -0.04);
   rifle.castShadow = quality.shadows;
+  rifle.name = 'combatant-carried-rifle';
+  rifle.userData.authoredCarriedRifle = !!authoredRifleGeometry;
+  rifle.userData.sourceParts = authoredRifleSourceParts;
   root.add(rifle);
 
   if (!silhouette && friendly) {
@@ -541,6 +599,9 @@ export function createCivilianCharacter({
   if (concealed) {
     rifle = new THREE.Mesh(RIFLE_GEO, RIFLE_MAT);
     rifle.visible = false;
+    rifle.name = 'concealed-carried-rifle';
+    rifle.userData.authoredCarriedRifle = !!authoredRifleGeometry;
+    rifle.userData.sourceParts = authoredRifleSourceParts;
     root.add(rifle);
   }
 
