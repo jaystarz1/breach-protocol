@@ -941,6 +941,12 @@ export function debris(x, z, radius = 2.2, n = 7, seed = 3) {
 }
 
 export function shopSign(x, z, w = 2.2, y = 3.4, rot = false) {
+  const dir = rot ? (x >= 0 ? -1 : 1) : (z >= 0 ? -1 : 1);
+  const seed = 701 + Math.round(Math.abs(x * 31 + z * 17));
+  const decal = wallDecal({
+    kind: 'wall-decal', style: 'shop-sign', x, y, z, w, h: 0.7, rot, dir, seed,
+  });
+  if (decal) return decal;
   return [
     box(x, y, z, rot ? 0.12 : w, 0.7, rot ? w : 0.12, P.dark, false),
     box(x + (rot ? 0.09 : 0), y, z + (rot ? 0 : 0.09), rot ? 0.05 : w - 0.3, 0.44, rot ? w - 0.3 : 0.05, P.sign, false, true),

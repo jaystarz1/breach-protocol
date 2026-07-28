@@ -812,6 +812,50 @@ function paintPicture(ctx, R, size) {
   dirtyTile(ctx, R, size, 20);
 }
 
+function paintShopSign(ctx, def, R, size) {
+  const palettes = [
+    ['#263f43', '#c8d2c4', '#8f3d32'],
+    ['#473d2c', '#ded3ae', '#677d72'],
+    ['#3c3339', '#d4c9bc', '#8b6940'],
+  ];
+  const labels = ['МАГАЗИН', 'СЕРВІС', 'АПТЕКА'];
+  const palette = palettes[def.seed % palettes.length];
+  const label = labels[def.seed % labels.length];
+  ctx.fillStyle = '#202628';
+  ctx.fillRect(2, 6, size - 4, size - 12);
+  const wash = ctx.createLinearGradient(7, 8, size - 8, size - 9);
+  wash.addColorStop(0, palette[0]);
+  wash.addColorStop(0.58, palette[2]);
+  wash.addColorStop(1, palette[0]);
+  ctx.fillStyle = wash;
+  ctx.fillRect(7, 11, size - 14, size - 22);
+  ctx.strokeStyle = 'rgba(225,218,191,.35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(10, 14, size - 20, size - 28);
+
+  // The square atlas tile maps onto a very wide sign. Horizontally compress the glyphs in
+  // texture space so the world transform restores normal letter proportions.
+  const aspect = Math.max(2.8, def.w / def.h);
+  ctx.save();
+  ctx.translate(size / 2, size / 2);
+  ctx.scale(1 / aspect, 1);
+  ctx.fillStyle = palette[1];
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '800 78px Arial, sans-serif';
+  ctx.fillText(label, 0, 1);
+  ctx.restore();
+
+  ctx.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 22; i++) {
+    ctx.globalAlpha = 0.12 + R() * 0.38;
+    ctx.fillRect(8 + R() * (size - 16), 12 + R() * (size - 24), 1 + R() * 5, 1 + R() * 2);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  dirtyTile(ctx, R, size, 38);
+}
+
 function addWallDecals(scene, defs) {
   if (!defs.length) return;
   const tile = 128, cols = 8;
@@ -841,6 +885,7 @@ function addWallDecals(scene, defs) {
     else if (def.style === 'whiteboard') paintWhiteboard(ctx, R, tile);
     else if (def.style === 'graffiti') paintGraffiti(ctx, def, R, tile);
     else if (def.style === 'picture') paintPicture(ctx, R, tile);
+    else if (def.style === 'shop-sign') paintShopSign(ctx, def, R, tile);
     ctx.restore();
 
     counts[def.style] = (counts[def.style] || 0) + 1;

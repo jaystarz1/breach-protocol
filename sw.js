@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v41-road-surface-atlas';
+const CACHE = 'breach-protocol-v42-authored-storefronts';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

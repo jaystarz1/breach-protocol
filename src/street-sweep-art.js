@@ -112,6 +112,14 @@ function materials() {
       depthWrite: false, blending: THREE.MultiplyBlending,
     }),
   };
+  // A separate tint with the same uploaded plaster maps gives the shop interiors less bounce
+  // without allocating another base/height texture pair.
+  kit.shopInterior = kit.plaster.clone();
+  kit.shopInterior.color.setHex(0x4d5150);
+  kit.shopInterior.roughness = 0.96;
+  kit.storefrontMetal = new THREE.MeshStandardMaterial({
+    color: 0x33383a, roughness: 0.68, metalness: 0.48,
+  });
   return kit;
 }
 
@@ -157,6 +165,39 @@ function groundBatch(scene, name, items, material) {
   return out;
 }
 
+function wallBatch(scene, name, items, material, sourceRepeat = [1, 1]) {
+  const positions = [], normals = [], uvs = [], indices = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const nx = item.nx, nz = item.nz;
+    const right = [nz, 0, -nx];
+    const hw = item.w / 2, hh = item.h / 2;
+    const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]];
+    for (const [side, up] of corners) {
+      positions.push(item.x + right[0] * side, item.y + up, item.z + right[2] * side);
+      normals.push(nx, 0, nz);
+    }
+    const targetU = item.repeatU ?? Math.max(1, item.w / 2.4);
+    const targetV = item.repeatV ?? Math.max(1, item.h / 2.1);
+    const u1 = targetU / sourceRepeat[0], v1 = targetV / sourceRepeat[1];
+    uvs.push(0, 0, u1, 0, u1, v1, 0, v1);
+    const base = i * 4;
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  const out = new THREE.Mesh(geometry, material);
+  out.name = name;
+  out.castShadow = out.receiveShadow = quality.shadows;
+  out.userData.itemCount = items.length;
+  scene.add(out);
+  return out;
+}
+
 function instanceBatch(scene, name, geometry, material, items, shadows = true) {
   const out = new THREE.InstancedMesh(geometry, material, items.length);
   const dummy = new THREE.Object3D();
@@ -175,6 +216,109 @@ function instanceBatch(scene, name, geometry, material, items, shadows = true) {
   out.receiveShadow = quality.shadows;
   scene.add(out);
   return out;
+}
+
+function storefronts(scene) {
+  const m = materials();
+  const shops = [
+    { x: 11, z: 20, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 0 },
+    { x: 11, z: -5, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 1 },
+    { x: -11, z: -25, w: 9, d: 7, face: 'e', finish: 'brick', damage: 2 },
+  ];
+  const plaster = [], brick = [], interiors = [];
+  const frames = [], shutters = [], thresholds = [], bollards = [];
+  let slatCount = 0;
+
+  const worldPart = (shop, cx, cz, yaw, lx, y, lz, w, h, d, extra = {}) => {
+    const cos = Math.cos(yaw), sin = Math.sin(yaw);
+    return {
+      x: cx + cos * lx + sin * lz,
+      y,
+      z: cz - sin * lx + cos * lz,
+      w, h, d, ry: yaw, ...extra,
+    };
+  };
+
+  for (const shop of shops) {
+    const west = shop.face === 'w';
+    const nx = west ? -1 : 1;
+    const faceX = shop.x + nx * (shop.w / 2 + 0.161);
+    const rearX = shop.x - nx * (shop.w / 2 + 0.161);
+    const rearInsideX = shop.x - nx * (shop.w / 2 - 0.161);
+    const yaw = west ? -Math.PI / 2 : Math.PI / 2;
+    const finish = shop.finish === 'brick' ? brick : plaster;
+
+    // Photographic exterior skins over the two blank side walls, the rear return, the solid
+    // one-metre storefront piers and the lintel. The collision boxes remain authoritative.
+    for (const side of [-1, 1]) {
+      finish.push({
+        x: shop.x, y: 1.5, z: shop.z + side * (shop.d / 2 + 0.161),
+        w: shop.w, h: 3, nx: 0, nz: side,
+      });
+      finish.push({
+        x: faceX, y: 1.5, z: shop.z + side * 3,
+        w: 1, h: 3, nx, nz: 0, repeatU: 1, repeatV: 1.4,
+      });
+    }
+    finish.push({ x: rearX, y: 1.5, z: shop.z, w: shop.d, h: 3, nx: -nx, nz: 0 });
+    finish.push({
+      x: faceX, y: 2.8, z: shop.z, w: shop.d - 2, h: 0.4,
+      nx, nz: 0, repeatU: 2, repeatV: 1,
+    });
+    // The real rear collision wall is visible through the five-metre opening. A darker copy
+    // of the same plaster maps creates convincing room depth without a black cardboard plane.
+    interiors.push({
+      x: rearInsideX + nx * 0.012, y: 1.5, z: shop.z,
+      w: shop.d - 0.5, h: 2.9, nx, nz: 0,
+    });
+
+    const cx = faceX, cz = shop.z;
+    for (const lx of [-2.43, 2.43]) {
+      frames.push(worldPart(shop, cx, cz, yaw, lx, 1.34, 0.055, 0.13, 2.68, 0.16));
+    }
+    frames.push(worldPart(shop, cx, cz, yaw, 0, 2.66, 0.055, 4.98, 0.13, 0.16));
+    thresholds.push(worldPart(shop, cx, cz, yaw, 0, 0.055, 0.11, 4.82, 0.08, 0.34));
+    shutters.push(worldPart(shop, cx, cz, yaw, 0, 2.82, 0.02, 5.18, 0.28, 0.3));
+    for (let i = 0; i < 7; i++) {
+      const bent = shop.damage === 1 && i > 4;
+      shutters.push(worldPart(
+        shop, cx, cz, yaw,
+        bent ? 0.1 + (i - 4) * 0.12 : 0,
+        2.58 - i * 0.085,
+        0.105,
+        4.76 - (bent ? (i - 4) * 0.22 : 0),
+        0.055,
+        0.045,
+        { rz: bent ? -0.025 * (i - 4) : 0 },
+      ));
+      slatCount++;
+    }
+    for (const lx of [-1.72, 1.72]) {
+      const part = worldPart(shop, cx, cz, yaw, lx, 0.42, 0.72, 1, 1, 1);
+      bollards.push({ ...part, w: 1, h: 1, d: 1 });
+    }
+  }
+
+  wallBatch(scene, 'storefront-plaster-shells', plaster, m.plaster, [17, 2.4]);
+  wallBatch(scene, 'storefront-brick-shells', brick, m.brick, [22, 3]);
+  wallBatch(scene, 'storefront-interior-backs', interiors, m.shopInterior, [17, 2.4]);
+  instanceBatch(scene, 'storefront-frames', new THREE.BoxGeometry(1, 1, 1),
+    m.storefrontMetal, frames);
+  instanceBatch(scene, 'storefront-shutters', new THREE.BoxGeometry(1, 1, 1),
+    m.storefrontMetal, shutters);
+  instanceBatch(scene, 'storefront-thresholds', new THREE.BoxGeometry(1, 1, 1),
+    m.stone, thresholds, false);
+  instanceBatch(scene, 'storefront-bollards', new THREE.CylinderGeometry(0.075, 0.095, 0.84, 10),
+    m.storefrontMetal, bollards);
+  scene.userData.storefrontStats = {
+    shops: shops.length,
+    shellPanels: plaster.length + brick.length,
+    interiorBacks: interiors.length,
+    frames: frames.length,
+    shutters: shutters.length,
+    slats: slatCount,
+    bollards: bollards.length,
+  };
 }
 
 function plane(scene, w, h, material, x, y, z, rx = -Math.PI / 2, ry = 0, rz = 0) {
@@ -308,6 +452,7 @@ export function addStreetSweepArt(scene) {
     m.stone, facadeBatches.stone);
   instanceBatch(scene, 'facade-pilasters', new THREE.BoxGeometry(1, 1, 1),
     m.trim, facadeBatches.trim);
+  storefronts(scene);
   roadDamage(scene);
   roadMarkings(scene);
   wetAndContact(scene);
