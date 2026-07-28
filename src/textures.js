@@ -3,11 +3,41 @@
 // Deliberately no image files: this is an offline-capable PWA and every byte here would be
 // a download plus a cache entry plus a licence to track. Canvas noise costs a few ms once.
 //
-// Each texture is generated greyscale-ish and TINTED at draw time by the mesh's existing
-// vertex colours, so the whole level still renders in one draw call with one material.
+// Procedural maps stay greyscale-ish and are tinted at draw time. Photo surfaces use a small,
+// fixed material family set so texture changes add bounded draws rather than one material per box.
 import * as THREE from 'three';
+import { quality } from './quality.js';
 
 const SIZE = 256;
+const PHOTO_ROOT = './assets/street-sweep/';
+
+let photoCache = null;
+if (quality.textures) {
+  try {
+    const loader = new THREE.TextureLoader();
+    const names = ['asphalt', 'sidewalk', 'brick', 'plaster'];
+    const loaded = await Promise.all(names.flatMap(name => [
+      loader.loadAsync(`${PHOTO_ROOT}${name}.jpg`),
+      loader.loadAsync(`${PHOTO_ROOT}${name}-height.jpg`),
+    ]));
+    photoCache = {};
+    for (let i = 0; i < names.length; i++) {
+      const map = loaded[i * 2];
+      const height = loaded[i * 2 + 1];
+      map.colorSpace = THREE.SRGBColorSpace;
+      height.colorSpace = THREE.NoColorSpace;
+      map.wrapS = map.wrapT = height.wrapS = height.wrapT = THREE.RepeatWrapping;
+      map.anisotropy = height.anisotropy = 8;
+      photoCache[names[i]] = { map, height };
+    }
+  } catch (error) {
+    console.warn('[bp] photographic surface set unavailable; using procedural materials', error);
+  }
+}
+
+export function photoSurfaces() {
+  return photoCache;
+}
 
 function canvas2d() {
   const c = document.createElement('canvas');
@@ -175,6 +205,24 @@ function fabricRoughCanvas() {
   return c;
 }
 
+function timberCanvas() {
+  const { c, x } = canvas2d();
+  x.fillStyle = '#a9a29a';
+  x.fillRect(0, 0, SIZE, SIZE);
+  for (let i = 0; i < 1100; i++) {
+    const y = Math.random() * SIZE;
+    const wave = Math.sin(y * 0.075) * 7;
+    x.strokeStyle = Math.random() > 0.45
+      ? `rgba(255,255,255,${0.025 + Math.random() * 0.055})`
+      : `rgba(30,20,14,${0.025 + Math.random() * 0.07})`;
+    x.beginPath();
+    x.moveTo(-10, y);
+    x.bezierCurveTo(70, y + wave, 175, y - wave, 270, y + Math.sin(y) * 3);
+    x.stroke();
+  }
+  return c;
+}
+
 // ---------- Environment ----------
 // A metal with nothing to reflect renders BLACK, which is why naive PBR conversions look
 // worse than the Lambert they replaced. three's RoomEnvironment lives in examples/jsm and
@@ -233,11 +281,13 @@ export function surfaces() {
   const cc = concreteCanvas(), cr = concreteRoughCanvas();
   const mc = metalMap(), mr = metalRough();
   const fc = fabricCanvas(), fr = fabricRoughCanvas();
+  const wc = timberCanvas();
   cache = {
     // The colour canvas is reused as the height field: its luminance variation IS the relief.
     concrete: { map: finish(cc), roughnessMap: finish(cr), normalMap: heightToNormal(cc, 1.4) },
     metal: { map: finish(mc), roughnessMap: finish(mr), normalMap: heightToNormal(mc, 1.1) },
     fabric: { map: finish(fc, 2), roughnessMap: finish(fr, 2), normalMap: heightToNormal(fc, 0.72) },
+    timber: { map: finish(wc), normalMap: heightToNormal(wc, 0.82) },
   };
   return cache;
 }

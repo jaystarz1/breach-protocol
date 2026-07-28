@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v26-frontline-campaign';
+const CACHE = 'breach-protocol-v27-surface-and-civilian-pass';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -15,7 +15,7 @@ const ASSETS = [
   'assets/street-sweep/sidewalk.jpg', 'assets/street-sweep/sidewalk-height.jpg',
   'assets/street-sweep/brick.jpg', 'assets/street-sweep/brick-height.jpg',
   'assets/street-sweep/plaster.jpg', 'assets/street-sweep/plaster-height.jpg',
-  'assets/characters/Soldier.glb', 'assets/characters/NOTICE.md',
+  'assets/characters/Soldier.glb', 'assets/characters/Xbot.glb', 'assets/characters/NOTICE.md',
   'icons/icon-192.png', 'icons/icon-512.png',
 ];
 

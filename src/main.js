@@ -348,7 +348,7 @@ function startLevel(id) {
     console.warn(`[bp] level ${L.id}: ${roomLights.length - used.length} of ${roomLights.length} fixtures dropped (cap ${LIGHT_CAP})`);
   }
 
-  const { solids, litMesh } = buildStaticGeometry(scene, geo);
+  const { solids, mesh: staticMesh, litMesh } = buildStaticGeometry(scene, geo);
   addVisualProps(scene, visualProps);
   if (!indoor) addFrontlineAmbientArt(scene, L.id, bounds);
   addFrontlineMissionArt(scene, L.id);
@@ -405,7 +405,7 @@ function startLevel(id) {
   }
 
   world = {
-    level: L, diff, solids, doors, nav, litMesh, missionVariant,
+    level: L, diff, solids, doors, nav, staticMesh, litMesh, missionVariant,
     enemies: [], civilians: [], allies: [], grenades: [], effects: [],
     playerPos: player.pos, playerYaw: player.yaw, playerSpeed: 0, playerAds: false, playerCrouched: false,
     combatHeat: 0, slowmo: 0, blind: 0,

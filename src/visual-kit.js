@@ -110,8 +110,17 @@ const CAP_GEO = new THREE.CylinderGeometry(0.075, 0.075, 0.052, 16);
 const MIRROR_GEO = new THREE.SphereGeometry(0.11, 12, 8);
 const HANDLE_GEO = new THREE.CapsuleGeometry(0.018, 0.11, 3, 8);
 const HEADLIGHT_GEO = new THREE.SphereGeometry(0.16, 14, 8);
+const SHARD_GEO = (() => {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    -0.5, -0.5, 0, 0.5, -0.35, 0, -0.18, 0.5, 0,
+  ], 3));
+  geometry.computeVertexNormals();
+  return geometry;
+})();
 
 function addVehicle(batcher, def) {
+  const damage = Math.abs(Math.round(def.x * 17 + def.z * 31)) % 5;
   const parent = new THREE.Matrix4().compose(
     new THREE.Vector3(def.x, 0.01, def.z),
     new THREE.Quaternion().setFromAxisAngle(
@@ -127,6 +136,8 @@ function addVehicle(batcher, def) {
     transmission: 0.18, transparent: true, opacity: 0.72,
     clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.8,
   }));
+  const grime = standard('vehicle-road-grime', 0x282824, 0.98, 0.01);
+  const shattered = standard('vehicle-shattered-glass', 0x10171b, 0.88, 0.03);
 
   batcher.add('vehicle-lower', CAR_LOWER, paint, parent, true, def.color);
   batcher.add('vehicle-cabin', CAR_CABIN, paint, parent, true, def.color);
@@ -167,6 +178,27 @@ function addVehicle(batcher, def) {
   for (const x of [-2.23, 2.23]) {
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
       instanceMatrix(parent, x, 0.34, 0, 0.12, 0.13, 1.58));
+  }
+
+  // Deterministic wear makes parked cars part of the battered district instead of pristine
+  // showroom props. It stays instanced, so an entire street still costs only a few draws.
+  if (!def.police) {
+    for (const side of [-1, 1]) {
+      batcher.add('vehicle-grime', UNIT_BOX, grime,
+        instanceMatrix(parent, 0.05, 0.46, side * 0.916, 3.75, 0.23, 0.018));
+    }
+    if (damage <= 2) {
+      const side = damage % 2 ? -1 : 1;
+      batcher.add('vehicle-shattered', CAR_WINDOW, shattered,
+        instanceMatrix(parent, 0, 0.008, side * 0.824, 0.98, 0.96, 1));
+      batcher.add('vehicle-dent', UNIT_BOX, grime,
+        instanceMatrix(parent, 1.22, 0.71, -side * 0.916, 0.58, 0.32, 0.022,
+          0, 0, damage === 2 ? 0.11 : -0.08));
+    }
+    if (damage === 0) {
+      batcher.add('vehicle-missing-hub', CAP_GEO, rubber,
+        instanceMatrix(parent, 1.42, 0.4, 0.942, 1.35, 1.35, 1.1, Math.PI / 2));
+    }
   }
 
   if (def.police) {
@@ -225,6 +257,12 @@ function addFacade(batcher, def) {
   }));
   const sillMat = standard('window-sill', 0x8f969a, 0.82, 0.02);
   const blindMat = standard('blind', 0xb9ae9d, 0.9, 0);
+  const boardMat = standard('window-boards', 0x5a4533, 0.94, 0);
+  const brokenMat = standard('window-void', 0x030506, 1, 0);
+  const shardMat = material('window-shards', () => new THREE.MeshPhysicalMaterial({
+    color: 0x7892a1, roughness: 0.18, metalness: 0.08,
+    transparent: true, opacity: 0.58, side: THREE.DoubleSide,
+  }));
 
   for (let fy = def.yBase + 1.2; fy < def.yBase + def.height - 1.3; fy += floorH) {
     for (let s = 1.8; s < len - 1.8; s += step) {
@@ -240,8 +278,9 @@ function addFacade(batcher, def) {
       );
       const lit = R() < litChance;
       const warm = R() < 0.72;
+      const damaged = R();
       const roomMat = lit ? (warm ? warmRoom : coolRoom) : recessMat;
-      const paneMat = lit ? (warm ? warmPane : coolPane) : glassDark;
+      const paneMat = damaged < 0.18 ? brokenMat : (lit ? (warm ? warmPane : coolPane) : glassDark);
       batcher.add(
         lit ? (warm ? 'recess-warm' : 'recess-cool') : 'recess-dark',
         UNIT_BOX, roomMat, instanceMatrix(parent, 0, 0, -0.12, 1.96, 1.74, 0.18));
@@ -258,7 +297,20 @@ function addFacade(batcher, def) {
       }
       batcher.add('window-sills', UNIT_BOX, sillMat,
         instanceMatrix(parent, 0, -0.88, 0.1, 2.16, 0.11, 0.32));
-      if (lit && R() < 0.58) {
+      if (damaged < 0.09) {
+        for (const offset of [-0.36, 0.36]) {
+          batcher.add('window-boards', UNIT_BOX, boardMat,
+            instanceMatrix(parent, 0, offset, 0.14, 1.88, 0.14, 0.09,
+              0, 0, offset < 0 ? 0.13 : -0.09));
+        }
+      } else if (damaged < 0.18) {
+        for (const [x, y, rz, sx] of [
+          [-0.54, -0.45, 0.18, 0.55], [0.5, -0.52, -0.12, 0.62], [0.56, 0.45, 0.2, 0.42],
+        ]) {
+          batcher.add('window-shards', SHARD_GEO, shardMat,
+            instanceMatrix(parent, x, y, 0.13, sx, 0.48, 1, 0, 0, rz));
+        }
+      } else if (lit && R() < 0.58) {
         const partial = R() < 0.5;
         batcher.add('window-blinds', UNIT_PLANE, blindMat,
           instanceMatrix(parent, partial ? -0.47 : 0, 0.37, 0.045,

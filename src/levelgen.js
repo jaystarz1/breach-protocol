@@ -1,20 +1,105 @@
 import * as THREE from 'three';
 import { makeBox } from './physics.js';
 import { quality } from './quality.js';
-import { surfaces } from './textures.js';
+import { photoSurfaces, surfaces } from './textures.js';
 import {
   animateAuthoredCharacter,
   createAuthoredCharacter,
+  createCivilianCharacter,
   kneelAuthoredCharacter,
   stopAuthoredCharacter,
 } from './character-assets.js';
 
 // Texels per world metre. Every face is projected at this scale regardless of box size,
 // so a 20m wall and a 0.5m crate share the same grain and nothing stretches.
-const TEXELS_PER_M = 0.5;
+const TEXELS_PER_M = {
+  asphalt: 0.16,
+  sidewalk: 0.24,
+  brick: 0.42,
+  plaster: 0.2,
+  concrete: 0.28,
+  metal: 0.45,
+  timber: 0.5,
+  plain: 0.5,
+  compatibility: 0.5,
+};
+
+const staticMaterials = new Map();
+
+function staticSurfaceFamily(color) {
+  if (color === C.street) return 'asphalt';
+  if (color === C.sidewalk || color === C.platform || color === C.interiorFloor) return 'sidewalk';
+  if (color === C.building) return 'brick';
+  if (color === C.buildingB || color === C.interiorWall) return 'plaster';
+  if (color === C.concrete || color === C.tunnel) return 'concrete';
+  if (color === C.metal || color === C.roof) return 'metal';
+  if (color === C.crate || color === C.accent) return 'timber';
+  return 'plain';
+}
+
+function staticTint(color, family) {
+  const fixed = {
+    asphalt: 0x92979a,
+    sidewalk: 0xb4b5b2,
+    brick: 0xa99386,
+    plaster: 0xa7adb0,
+    concrete: 0x9b9e9c,
+    metal: 0x727b80,
+    timber: 0x927558,
+  };
+  return fixed[family] ?? color;
+}
+
+function staticMaterial(family) {
+  if (!quality.pbr) {
+    if (!staticMaterials.has('compatibility')) {
+      staticMaterials.set('compatibility', new THREE.MeshLambertMaterial({ vertexColors: true }));
+    }
+    return staticMaterials.get('compatibility');
+  }
+  if (staticMaterials.has(family)) return staticMaterials.get(family);
+  const procedural = surfaces();
+  const photos = photoSurfaces();
+  let options = { vertexColors: true, roughness: 0.9, metalness: 0.02 };
+  if (photos?.[family]) {
+    options = {
+      ...options,
+      map: photos[family].map,
+      bumpMap: photos[family].height,
+      bumpScale: family === 'brick' ? 0.055 : family === 'asphalt' ? 0.035 : 0.028,
+    };
+  } else if (family === 'metal') {
+    options = {
+      ...options, roughness: 0.58, metalness: 0.52,
+      map: procedural.metal.map,
+      roughnessMap: procedural.metal.roughnessMap,
+      normalMap: procedural.metal.normalMap,
+      normalScale: new THREE.Vector2(0.22, 0.22),
+    };
+  } else if (family === 'timber') {
+    options = {
+      ...options, roughness: 0.84,
+      map: procedural.timber.map,
+      normalMap: procedural.timber.normalMap,
+      normalScale: new THREE.Vector2(0.2, 0.2),
+    };
+  } else {
+    options = {
+      ...options,
+      map: procedural.concrete.map,
+      roughnessMap: procedural.concrete.roughnessMap,
+      normalMap: procedural.concrete.normalMap,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+    };
+  }
+  const material = new THREE.MeshStandardMaterial(options);
+  staticMaterials.set(family, material);
+  return material;
+}
 
 // geo entries: [x, y, z, w, h, d, color, solid=true, emissive=false]
-// Merges all static boxes into one mesh with vertex colors for a single draw call.
+// Merges static boxes into a bounded set of material-family meshes. This preserves batching while
+// allowing asphalt, masonry, metal and timber to have genuinely different surface responses.
 //
 // Emissive entries go into a SECOND merged mesh drawn with MeshBasicMaterial. Lighting a
 // window pane the same way as the wall around it makes it a pale grey rectangle; drawing it
@@ -22,24 +107,30 @@ const TEXELS_PER_M = 0.5;
 export function buildStaticGeometry(scene, geo) {
   const solids = [];
   const lit = [];
-  const positions = [], normals = [], colors = [], uvs = [], indices = [];
-  let vtx = 0;
+  const buckets = new Map();
   const c = new THREE.Color();
   for (const entry of geo) {
     const [x, y, z, w, h, d, color, solid, emissive, visible] = entry;
     if (solid !== false) solids.push(makeBox(x, y, z, w, h, d));
     if (visible === false) continue;
     if (emissive) { lit.push(entry); continue; }
+    const family = quality.pbr ? staticSurfaceFamily(color) : 'compatibility';
+    let bucket = buckets.get(family);
+    if (!bucket) {
+      bucket = { positions: [], normals: [], colors: [], uvs: [], indices: [], vtx: 0 };
+      buckets.set(family, bucket);
+    }
     const g = new THREE.BoxGeometry(w, h, d);
     g.translate(x, y, z);
     const pos = g.attributes.position, norm = g.attributes.normal, idx = g.index;
-    c.setHex(color);
+    c.setHex(staticTint(color, family));
+    const density = TEXELS_PER_M[family] ?? 0.5;
     for (let i = 0; i < pos.count; i++) {
       const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
       const nx = norm.getX(i), ny = norm.getY(i), nz = norm.getZ(i);
-      positions.push(px, py, pz);
-      normals.push(nx, ny, nz);
-      colors.push(c.r, c.g, c.b);
+      bucket.positions.push(px, py, pz);
+      bucket.normals.push(nx, ny, nz);
+      bucket.colors.push(c.r, c.g, c.b);
       // Planar-project onto whichever axis this face points along. Boxes are all
       // axis-aligned, so the dominant normal component picks the projection plane and
       // world coordinates become UVs directly — uniform texel density, no seams to fix.
@@ -48,38 +139,27 @@ export function buildStaticGeometry(scene, geo) {
       if (ay >= ax && ay >= az) { u = px; v = pz; }        // floors and ceilings
       else if (ax >= az) { u = pz; v = py; }               // walls facing X
       else { u = px; v = py; }                             // walls facing Z
-      uvs.push(u * TEXELS_PER_M, v * TEXELS_PER_M);
+      bucket.uvs.push(u * density, v * density);
     }
-    for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + vtx);
-    vtx += pos.count;
+    for (let i = 0; i < idx.count; i++) bucket.indices.push(idx.getX(i) + bucket.vtx);
+    bucket.vtx += pos.count;
     g.dispose();
   }
-  const merged = new THREE.BufferGeometry();
-  merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  merged.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  merged.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  merged.setIndex(indices);
-
-  let mat;
-  if (quality.pbr) {
-    const s = surfaces();
-    mat = new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.92, metalness: 0.04,
-      map: quality.textures ? s.concrete.map : null,
-      roughnessMap: quality.textures ? s.concrete.roughnessMap : null,
-      // Colour and roughness alone leave every surface geometrically dead flat no matter how
-      // it is lit. The normal map is what puts relief in the grain.
-      normalMap: quality.textures ? s.concrete.normalMap : null,
-      // 0.35, not 0.7: at 0.7 the speckle and crack relief turns close-range walls into
-      // popcorn stucco. Surface relief should be felt at a glance, not itemised.
-      normalScale: quality.textures ? new THREE.Vector2(0.35, 0.35) : undefined,
-    });
-  } else {
-    mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const mesh = new THREE.Group();
+  for (const [family, bucket] of buckets) {
+    const merged = new THREE.BufferGeometry();
+    merged.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
+    merged.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.normals, 3));
+    merged.setAttribute('color', new THREE.Float32BufferAttribute(bucket.colors, 3));
+    merged.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
+    merged.setIndex(bucket.indices);
+    merged.computeBoundingSphere();
+    const part = new THREE.Mesh(merged, staticMaterial(family));
+    part.castShadow = quality.shadows && !['asphalt', 'sidewalk'].includes(family);
+    part.receiveShadow = quality.shadows;
+    part.userData.surfaceFamily = family;
+    mesh.add(part);
   }
-  const mesh = new THREE.Mesh(merged, mat);
-  mesh.castShadow = mesh.receiveShadow = quality.shadows;
   scene.add(mesh);
 
   let litMesh = null;
@@ -261,6 +341,10 @@ const SILHOUETTE_MAT = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
 export function makeCharacter({ hostile, hostage, friendly, black, silhouette, concealed }) {
   const armed = !!hostile || !!friendly;
+  if (!armed && !hostage) {
+    const civilian = createCivilianCharacter();
+    if (civilian) return civilian;
+  }
   if (armed && !concealed && !hostage) {
     const authored = createAuthoredCharacter({ friendly, black, silhouette });
     if (authored) return authored;

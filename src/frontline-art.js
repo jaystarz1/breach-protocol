@@ -215,6 +215,41 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
     scene.add(scar);
   }
   instanced(scene, new THREE.DodecahedronGeometry(0.2, 0), concrete, chunks, false);
+
+  if ([4, 5, 7, 10].includes(levelId)) {
+    const steel = new THREE.MeshStandardMaterial({
+      color: 0x252a2b, roughness: 0.72, metalness: 0.46,
+    });
+    const poles = [];
+    const polePositions = [];
+    for (let i = 0; i < 4; i++) {
+      const side = i % 2 ? -1 : 1;
+      const along = (i < 2 ? -0.32 : 0.32) * radius;
+      const x = bounds.cx + side * radius * 0.7;
+      const z = bounds.cz + along;
+      const lean = (R() - 0.5) * 0.14;
+      polePositions.push([x, z]);
+      poles.push([x, 3.5, z, lean, 0, lean * 0.35, 1, 1, 1]);
+    }
+    instanced(scene, new THREE.CylinderGeometry(0.08, 0.12, 7, 8), steel, poles);
+    for (let i = 0; i < polePositions.length; i += 2) {
+      const [ax, az] = polePositions[i];
+      const [bx, bz] = polePositions[i + 1];
+      const points = [];
+      for (let p = 0; p < 14; p++) {
+        const t = p / 13;
+        points.push(new THREE.Vector3(
+          ax + (bx - ax) * t,
+          6.55 - Math.sin(t * Math.PI) * (0.65 + (i / 2) * 0.22),
+          az + (bz - az) * t,
+        ));
+      }
+      scene.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({ color: 0x101213 }),
+      ));
+    }
+  }
 }
 
 function addObservationPost(scene, x, y, z, yaw = 0) {
