@@ -10,11 +10,20 @@ let authoredVehicleSources = null;
 if (quality.desktop) {
   try {
     const loader = new GLTFLoader();
-    const [sedan, suv, wreck] = await Promise.all([
+    const [sedan, suv, wreck, covered] = await Promise.all([
       loader.loadAsync('./assets/vehicles/CarSedan.glb'),
       loader.loadAsync('./assets/vehicles/CarSUV.glb'),
       loader.loadAsync('./assets/vehicles/BrokenCar.glb'),
+      loader.loadAsync('./assets/vehicles/covered_car/covered_car_1k.gltf')
+        .catch(error => {
+          console.warn('[bp] photographic covered vehicle unavailable; using damaged shell', error);
+          return null;
+        }),
     ]);
+    let coveredMaterial = null;
+    covered?.scene.traverse(object => {
+      if (!coveredMaterial && object.isMesh) coveredMaterial = object.material;
+    });
     authoredVehicleSources = {
       sedan: {
         scene: sedan.scene,
@@ -35,9 +44,13 @@ if (quality.desktop) {
         scale: new THREE.Vector3(1.13, 1.2, 0.976),
       },
       wreck: {
-        scene: wreck.scene,
+        scene: covered?.scene || wreck.scene,
         bodyMaterials: new Set(),
-        scale: new THREE.Vector3(0.775, 0.955, 0.731),
+        scale: covered
+          ? new THREE.Vector3(0.972, 1.19, 1.078)
+          : new THREE.Vector3(0.775, 0.955, 0.731),
+        photographic: !!covered,
+        sourceMaterial: coveredMaterial,
       },
     };
     for (const source of Object.values(authoredVehicleSources)) {
@@ -285,13 +298,29 @@ function mesh(geometry, mat, shadows = true) {
   return out;
 }
 
-function bakeVehicleVertexColors(geometry, sourceMaterial, bodyMaterials, tint) {
+function bakeVehicleSurfaceData(
+  geometry, sourceMaterial, bodyMaterials, tint, objectName = '',
+) {
   const position = geometry.attributes.position;
   const values = new Float32Array(position.count * 3);
+  const paintValues = new Float32Array(position.count);
+  const glassValues = new Float32Array(position.count);
+  const rubberValues = new Float32Array(position.count);
+  const metalValues = new Float32Array(position.count);
+  const lightValues = new Float32Array(position.count);
   const materials = Array.isArray(sourceMaterial) ? sourceMaterial : [sourceMaterial];
   const tintColor = new THREE.Color(tint).lerp(new THREE.Color(0xffffff), 0.08);
   const fill = (start, count, source) => {
-    const colour = bodyMaterials.has(source?.name)
+    const materialName = source?.name || '';
+    const label = `${objectName} ${materialName}`.toLowerCase();
+    const paint = bodyMaterials.has(materialName);
+    const glass = /(window|windscreen|windshield|glass)/.test(label);
+    const light = /(headlight|taillight|tail.?light|lamp|material\.007)/.test(label);
+    const wheelPart = /(wheel|tyre|tire)/.test(objectName.toLowerCase());
+    const rubber = wheelPart && /(black|rubber|tyre|tire)/.test(label);
+    const metal = !paint && !glass && !rubber && !light
+      && /(grey|gray|chrome|metal|rim|hub)/.test(label);
+    const colour = paint
       ? tintColor
       : source?.color || new THREE.Color(0xffffff);
     const end = Math.min(position.count, start + count);
@@ -299,6 +328,11 @@ function bakeVehicleVertexColors(geometry, sourceMaterial, bodyMaterials, tint) 
       values[i * 3] = colour.r;
       values[i * 3 + 1] = colour.g;
       values[i * 3 + 2] = colour.b;
+      paintValues[i] = paint ? 1 : 0;
+      glassValues[i] = glass ? 1 : 0;
+      rubberValues[i] = rubber ? 1 : 0;
+      metalValues[i] = metal ? 1 : 0;
+      lightValues[i] = light ? 1 : 0;
     }
   };
   if (geometry.groups?.length) {
@@ -309,6 +343,11 @@ function bakeVehicleVertexColors(geometry, sourceMaterial, bodyMaterials, tint) 
     fill(0, position.count, materials[0]);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+  geometry.setAttribute('vehiclePaint', new THREE.BufferAttribute(paintValues, 1));
+  geometry.setAttribute('vehicleGlass', new THREE.BufferAttribute(glassValues, 1));
+  geometry.setAttribute('vehicleRubber', new THREE.BufferAttribute(rubberValues, 1));
+  geometry.setAttribute('vehicleMetal', new THREE.BufferAttribute(metalValues, 1));
+  geometry.setAttribute('vehicleLight', new THREE.BufferAttribute(lightValues, 1));
 }
 
 function authoredVehicleGeometry(kind, tint) {
@@ -327,8 +366,10 @@ function authoredVehicleGeometry(kind, tint) {
     for (const name of Object.keys(geometry.attributes)) {
       if (!['position', 'normal', 'uv'].includes(name)) geometry.deleteAttribute(name);
     }
-    bakeVehicleVertexColors(
-      geometry, object.material, source.bodyMaterials, tint);
+    if (!source.photographic) {
+      bakeVehicleSurfaceData(
+        geometry, object.material, source.bodyMaterials, tint, object.name);
+    }
     geometry.applyMatrix4(object.matrixWorld);
     geometries.push(geometry);
     sourceParts += Array.isArray(object.material)
@@ -347,7 +388,11 @@ function authoredVehicleGeometry(kind, tint) {
   geometry.scale(source.scale.x, source.scale.y, source.scale.z);
   geometry.computeBoundingBox();
   geometry.translate(0, -geometry.boundingBox.min.y, 0);
-  if (kind !== 'wreck') geometry = toCreasedNormals(geometry, Math.PI * 0.25);
+  // Preserve door and glass boundaries, but smooth the broad low-poly bonnet and quarter-panel
+  // triangulation. The previous 45-degree crease exposed every source facet under street lamps.
+  if (kind !== 'wreck' && !source.photographic) {
+    geometry = toCreasedNormals(geometry, Math.PI * 0.38);
+  }
   geometry.clearGroups();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
@@ -588,6 +633,18 @@ const VEHICLE_LAMP_GEO = new THREE.SphereGeometry(0.5, 14, 9);
 const VEHICLE_BUMPER_GEO = new THREE.CapsuleGeometry(0.08, 1.3, 4, 10);
 const POLICE_PUSH_BAR_GEO = new THREE.CapsuleGeometry(0.045, 0.68, 4, 9);
 const POLICE_LIGHTBAR_GEO = new THREE.CapsuleGeometry(0.055, 0.42, 4, 10);
+const VEHICLE_CONTACT_GEO = new THREE.PlaneGeometry(1, 1);
+const POLICE_DOOR_PANEL_GEO = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.5, -0.42);
+  shape.lineTo(0.46, -0.42);
+  shape.lineTo(0.5, 0.34);
+  shape.lineTo(-0.38, 0.5);
+  shape.lineTo(-0.5, 0.2);
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
+})();
+const POLICE_ROUNDEL_GEO = new THREE.CircleGeometry(0.5, 20);
 const VEHICLE_BURN_SCAR_GEO = (() => {
   const shape = new THREE.Shape();
   const points = [
@@ -710,10 +767,18 @@ const ROOF_CAP_GEO = (() => {
 
 function addPoliceVehicleDetails(batcher, parent, type) {
   const trim = standard('vehicle-trim', 0x11161a, 0.54, 0.16);
-  const white = standard('police-white', 0xe5eaed, 0.38, 0.18);
+  const white = standard('police-white', 0xd8dde0, 0.46, 0.12);
+  const blue = standard('police-blue', 0x1d5687, 0.38, 0.18);
+  const yellow = standard('police-yellow', 0xd4ae3d, 0.42, 0.12);
   for (const side of [-1, 1]) {
-    batcher.add('police-doors', UNIT_PLANE, white,
-      instanceMatrix(parent, 0.15, 0.67, side * 0.998, 1.45, 0.5, 1,
+    batcher.add('police-doors', POLICE_DOOR_PANEL_GEO, white,
+      instanceMatrix(parent, 0.15, 0.68, side * 0.998, 1.42, 0.56, 1,
+        0, side < 0 ? Math.PI : 0));
+    batcher.add('police-side-stripes', UNIT_PLANE, blue,
+      instanceMatrix(parent, 0.12, 0.69, side * 1.001, 1.15, 0.08, 1,
+        0, side < 0 ? Math.PI : 0));
+    batcher.add('police-roundels', POLICE_ROUNDEL_GEO, yellow,
+      instanceMatrix(parent, 0.2, 0.79, side * 1.004, 0.17, 0.17, 1,
         0, side < 0 ? Math.PI : 0));
   }
   batcher.add('police-lightbar-base', VEHICLE_BUMPER_GEO, trim,
@@ -739,15 +804,11 @@ function addPoliceVehicleDetails(batcher, parent, type) {
   }
 }
 
-function addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked) {
-  if (!authoredVehicleSources) return false;
-  const kind = wrecked ? 'wreck' : type.key;
-  const geometry = authoredVehicleGeometry(kind, bodyColor);
-  if (!geometry) return false;
-  const fixedColour = wrecked ? 'fixed' : new THREE.Color(bodyColor).getHexString();
-  const vehicleMat = material(
-    wrecked ? 'authored-vehicle-wreck' : 'authored-vehicle-finish',
-    () => new THREE.MeshPhysicalMaterial({
+function authoredVehicleMaterial(wrecked) {
+  const key = wrecked ? 'authored-vehicle-wreck' : 'authored-vehicle-layered-finish';
+  return material(key, () => {
+    const out = new THREE.MeshPhysicalMaterial({
+      name: key,
       color: 0xffffff,
       vertexColors: true,
       roughness: wrecked ? 0.78 : 0.42,
@@ -755,9 +816,170 @@ function addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked) {
       clearcoat: wrecked ? 0.04 : 0.55,
       clearcoatRoughness: 0.3,
       envMapIntensity: wrecked ? 0.62 : 1.05,
-    }),
-  );
+    });
+    if (wrecked) return out;
+    out.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+attribute float vehiclePaint;
+attribute float vehicleGlass;
+attribute float vehicleRubber;
+attribute float vehicleMetal;
+attribute float vehicleLight;
+varying float vVehiclePaint;
+varying float vVehicleGlass;
+varying float vVehicleRubber;
+varying float vVehicleMetal;
+varying float vVehicleLight;
+varying vec3 vVehicleLocalPosition;`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+vVehiclePaint = vehiclePaint;
+vVehicleGlass = vehicleGlass;
+vVehicleRubber = vehicleRubber;
+vVehicleMetal = vehicleMetal;
+vVehicleLight = vehicleLight;
+vVehicleLocalPosition = position;`,
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying float vVehiclePaint;
+varying float vVehicleGlass;
+varying float vVehicleRubber;
+varying float vVehicleMetal;
+varying float vVehicleLight;
+varying vec3 vVehicleLocalPosition;`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+float bpVehicleNoise = fract(sin(dot(
+  vVehicleLocalPosition.xz, vec2(19.417, 47.853))) * 43758.5453);
+float bpRoadFilm = vVehiclePaint
+  * (1.0 - smoothstep(0.14, 0.72, vVehicleLocalPosition.y))
+  * smoothstep(0.18, 0.92, bpVehicleNoise);
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.12, 0.105, 0.085), bpRoadFilm * 0.34);
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.007, 0.014, 0.021), vVehicleGlass * 0.94);`,
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          `#include <roughnessmap_fragment>
+roughnessFactor = mix(roughnessFactor, 0.34, vVehiclePaint);
+roughnessFactor = mix(roughnessFactor, 0.1, vVehicleGlass);
+roughnessFactor = mix(roughnessFactor, 0.94, vVehicleRubber);
+roughnessFactor = mix(roughnessFactor, 0.25, vVehicleMetal);
+roughnessFactor = mix(roughnessFactor, 0.2, vVehicleLight);
+roughnessFactor = mix(roughnessFactor, 0.68, bpRoadFilm);`,
+        )
+        .replace(
+          '#include <metalnessmap_fragment>',
+          `#include <metalnessmap_fragment>
+metalnessFactor = mix(metalnessFactor, 0.14, vVehiclePaint);
+metalnessFactor = mix(metalnessFactor, 0.03, vVehicleGlass);
+metalnessFactor = mix(metalnessFactor, 0.0, vVehicleRubber);
+metalnessFactor = mix(metalnessFactor, 0.78, vVehicleMetal);
+metalnessFactor = mix(metalnessFactor, 0.04, vVehicleLight);`,
+        )
+        .replace(
+          '#include <lights_physical_fragment>',
+          `#include <lights_physical_fragment>
+material.clearcoat = mix(0.04, 0.68, vVehiclePaint);
+material.clearcoat = mix(material.clearcoat, 0.9, vVehicleGlass);
+material.clearcoatRoughness = mix(0.34, 0.14, max(vVehiclePaint, vVehicleGlass));`,
+        )
+        .replace(
+          '#include <opaque_fragment>',
+          `float bpGlassFresnel = pow(
+  1.0 - saturate(dot(geometryNormal, geometryViewDir)), 3.0);
+outgoingLight += vVehicleGlass
+  * (0.025 + bpGlassFresnel * 0.22) * vec3(0.24, 0.43, 0.58);
+outgoingLight += vVehicleLight * diffuseColor.rgb * 0.055;
+#include <opaque_fragment>`,
+        );
+    };
+    out.customProgramCacheKey = () => 'bp-authored-vehicle-layered-v1';
+    return out;
+  });
+}
+
+function photographicCoveredVehicleMaterial(sourceMaterial) {
+  return material('authored-vehicle-covered-photo', () => {
+    const out = new THREE.MeshStandardMaterial({
+      name: 'authored-vehicle-covered-photo',
+      color: 0xd5d0c5,
+      map: sourceMaterial?.map || null,
+      normalMap: sourceMaterial?.normalMap || null,
+      normalScale: sourceMaterial?.normalScale?.clone() || new THREE.Vector2(1, 1),
+      roughness: sourceMaterial?.roughness ?? 0.82,
+      roughnessMap: sourceMaterial?.roughnessMap || null,
+      metalness: sourceMaterial?.metalness ?? 1,
+      metalnessMap: sourceMaterial?.metalnessMap || null,
+      aoMap: sourceMaterial?.aoMap || null,
+      aoMapIntensity: 0.74,
+    });
+    for (const texture of [
+      out.map, out.normalMap, out.roughnessMap, out.metalnessMap, out.aoMap,
+    ]) {
+      if (texture) texture.anisotropy = Math.min(quality.maxAnisotropy || 4, 8);
+    }
+    return out;
+  });
+}
+
+function vehicleContactMaterial() {
+  return material('vehicle-soft-contact', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(64, 32, 2, 64, 32, 60);
+    gradient.addColorStop(0, 'rgba(0,0,0,.86)');
+    gradient.addColorStop(0.48, 'rgba(0,0,0,.54)');
+    gradient.addColorStop(0.76, 'rgba(0,0,0,.12)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 64);
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.generateMipmaps = true;
+    return new THREE.MeshBasicMaterial({
+      name: 'vehicle-soft-contact',
+      map,
+      transparent: true,
+      opacity: 0.82,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      fog: true,
+    });
+  });
+}
+
+function addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked) {
+  if (!authoredVehicleSources) return false;
+  const kind = wrecked ? 'wreck' : type.key;
+  const source = authoredVehicleSources[kind];
+  const geometry = authoredVehicleGeometry(kind, bodyColor);
+  if (!geometry) return false;
+  const fixedColour = wrecked ? 'fixed' : new THREE.Color(bodyColor).getHexString();
+  const vehicleMat = source.photographic
+    ? photographicCoveredVehicleMaterial(source.sourceMaterial)
+    : authoredVehicleMaterial(wrecked);
   batcher.add(`vehicle-authored-${kind}-${fixedColour}`, geometry, vehicleMat, parent);
+  for (const wheelX of type.wheels) {
+    for (const side of [-1, 1]) {
+      batcher.add('vehicle-soft-contact-shadows', VEHICLE_CONTACT_GEO,
+        vehicleContactMaterial(),
+        instanceMatrix(parent, wheelX, 0.018, side * type.bodyHalf * 0.78,
+          0.84, 0.42, 1, -Math.PI / 2, 0, 0));
+    }
+  }
 
   // A close car is now one coherent authored object, so generic boxes no longer stand in for
   // doors, wheel openings or glass. Police equipment remains a shared operational hardware kit.
@@ -946,11 +1168,68 @@ function addFacade(batcher, def) {
   const yaw = Math.atan2(nx, nz);
   const frameMat = standard('window-frame', 0x343b41, 0.56, 0.34);
   const recessMat = standard('window-recess', 0x05080b, 0.96, 0);
-  const glassDark = material('architectural-glass', () => new THREE.MeshPhysicalMaterial({
-    color: 0x283b45, roughness: 0.22, metalness: 0.1,
-    transparent: true, opacity: 0.38, clearcoat: 1,
-    clearcoatRoughness: 0.12, envMapIntensity: 1.28,
-  }));
+  const glassDark = material('architectural-glass', () => {
+    const out = new THREE.MeshPhysicalMaterial({
+      name: 'architectural-layered-glass',
+      color: 0x283b45, roughness: 0.22, metalness: 0.1,
+      transparent: true, opacity: 0.38, clearcoat: 1,
+      clearcoatRoughness: 0.12, envMapIntensity: 1.28,
+    });
+    out.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec2 vWindowLocal;
+varying float vWindowSeed;`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+vWindowLocal = position.xy;
+mat4 bpWindowMatrix = modelMatrix;
+#ifdef USE_INSTANCING
+bpWindowMatrix = modelMatrix * instanceMatrix;
+#endif
+vWindowSeed = dot(bpWindowMatrix[3].xyz, vec3(0.173, 0.317, 0.419));`,
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec2 vWindowLocal;
+varying float vWindowSeed;`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+float bpWindowEdge = max(
+  smoothstep(0.34, 0.5, abs(vWindowLocal.x)),
+  smoothstep(0.34, 0.5, abs(vWindowLocal.y)));
+float bpWindowVariation = fract(sin(vWindowSeed * 91.713) * 43758.5453);
+float bpWindowDust = smoothstep(0.12, -0.5, vWindowLocal.y)
+  * (0.08 + bpWindowVariation * 0.12);
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13, 0.155, 0.16),
+  bpWindowDust * 0.055 + bpWindowEdge * 0.04);
+diffuseColor.a *= 0.78 + bpWindowDust * 0.06;`,
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          `#include <roughnessmap_fragment>
+roughnessFactor = mix(0.13, 0.25, bpWindowDust * 0.72 + bpWindowEdge * 0.28);`,
+        )
+        .replace(
+          '#include <opaque_fragment>',
+          `float bpWindowFresnel = pow(
+  1.0 - saturate(dot(geometryNormal, geometryViewDir)), 3.0);
+outgoingLight += (0.008 + bpWindowFresnel * 0.055)
+  * vec3(0.28, 0.46, 0.58);
+#include <opaque_fragment>`,
+        );
+    };
+    out.customProgramCacheKey = () => 'bp-architectural-layered-glass-v1';
+    return out;
+  });
   const floorH = def.floorH ?? 3;
   const step = def.step ?? 3;
   // A contact-line district does not have a third of every room blazing. Besides looking

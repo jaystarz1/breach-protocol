@@ -87,13 +87,21 @@ def main():
             if (object.geometry.userData.authoredVehicle) {
               object.geometry.computeBoundingBox();
               const box = object.geometry.boundingBox;
-              authored.push({
+                authored.push({
                 name: object.name,
                 kind: object.geometry.userData.kind,
                 instances: object.userData.instanceCount,
                 sourceParts: object.geometry.userData.sourceParts,
                 vertices: object.geometry.attributes.position.count,
                 vertexColors: object.geometry.attributes.color?.count || 0,
+                surfaceMasks: [
+                  'vehiclePaint', 'vehicleGlass', 'vehicleRubber',
+                  'vehicleMetal', 'vehicleLight',
+                ].filter(name => !!object.geometry.attributes[name]).length,
+                mapped: !!object.material?.map,
+                normalMapped: !!object.material?.normalMap,
+                roughnessMapped: !!object.material?.roughnessMap,
+                material: object.material?.name,
                 bounds: [
                   box.max.x - box.min.x,
                   box.max.y - box.min.y,
@@ -153,14 +161,28 @@ def main():
         assert all(item["sourceParts"] >= 4 for item in coverage["authored"])
         assert all(item["vertices"] > 9_000 for item in coverage["authored"])
         assert all(
-            item["vertexColors"] == item["vertices"] for item in coverage["authored"]
+            (
+                item["vertexColors"] == item["vertices"]
+                and item["surfaceMasks"] == 5
+                and item["material"] == "authored-vehicle-layered-finish"
+            )
+            or (
+                item["kind"] == "wreck"
+                and item["mapped"]
+                and item["normalMapped"]
+                and item["roughnessMapped"]
+                and item["material"] == "authored-vehicle-covered-photo"
+            )
+            for item in coverage["authored"]
         )
         assert all(item["bounds"][0] > 4 and item["bounds"][2] > 1.8
                    for item in coverage["authored"])
         assert coverage["calls"] < 250
         assert coverage["triangles"] < 420_000
         assert coverage["police"].get("police-doors", 0) == 4
-        assert coverage["meshes"].get("vehicle-contact-shadows", 0) == 0
+        assert coverage["police"].get("police-side-stripes", 0) == 4
+        assert coverage["police"].get("police-roundels", 0) == 4
+        assert coverage["meshes"].get("vehicle-soft-contact-shadows", 0) == 24
         assert all(
             item["found"]
             and item["actual"]["w"] == item["w"]

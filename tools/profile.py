@@ -18,6 +18,11 @@ def main():
     parser.add_argument("--width", type=int, default=1512)
     parser.add_argument("--height", type=int, default=982)
     parser.add_argument("--dpr", type=float, default=2)
+    parser.add_argument(
+        "--gate",
+        action="store_true",
+        help="Fail if the desktop gameplay frame-time and shader-warmup budget regresses.",
+    )
     args = parser.parse_args()
 
     with sync_playwright() as p:
@@ -149,6 +154,14 @@ def main():
             "errors": errors[:8],
         }
         print(json.dumps(output, indent=2))
+        if args.gate:
+            assert not errors
+            assert output["prewarm"] and output["prewarm"]["ok"]
+            assert output["programs"]["compiledDuringPlay"] == 0
+            assert output["frameTimeMs"]["p99"] < 16.7
+            assert output["frameTimeMs"]["max"] < 35
+            assert output["drawCalls"]["max"] < 330
+            assert output["triangles"]["max"] < 700_000
         browser.close()
 
 
