@@ -53,8 +53,14 @@ export class Civilian {
     this.crossLane = !this.hostage && !this.rush && this.random() < 0.32;
     this.rushDone = false;
     this.escort = false;
+    this.rescuer = null;
+    this.escortCommand = 'follow';
+    this.escortAnchor = null;
     this.escortSide = this.random() < 0.5 ? -1 : 1;
     this.escortHeat = 0;
+    this.escortBlocked = 0;
+    this.escortFreeze = 0;
+    this.freezeInDoorway = this.random() < 0.58;
     this.baseY = this.mesh.position.y;
     // Window civilians. Same bay geometry the shooters use, and that is the point: at 160m
     // through a 7-degree scope, a head appearing in an opening is a head appearing in an
@@ -101,7 +107,25 @@ export class Civilian {
     this.hostage = false;      // no longer bound; still protected as an evacuee
     this.panic = by !== 'you';
     this.escort = by === 'you';
+    this.rescuer = by;
+    this.escortCommand = 'follow';
     this.rush = false;         // never convert a freed hostage into a muzzle-rushing civilian
+    return true;
+  }
+
+  setEscortCommand(command) {
+    if (!this.wasHostage || !this.rescued || this.dead || this.rescuer !== 'you') return false;
+    this.escort = true;
+    this.escortCommand = command;
+    this.escortHeat = 0;
+    this.escortBlocked = 0;
+    this.escortFreeze = 0;
+    if (command === 'stay') {
+      this.escortAnchor = { x: this.pos.x, z: this.pos.z };
+    } else if (command === 'follow') {
+      this.escortAnchor = null;
+      this.standUp();
+    }
     return true;
   }
 
@@ -198,17 +222,56 @@ export class Civilian {
   // far behind they move to rejoin before dropping, so rescuing someone creates an escort
   // responsibility instead of instantly deleting that person from the encounter.
   updateEscort(dt, world) {
+    if (this.escortCommand === 'down') {
+      this.goProne(dt);
+      animateRig(this.mesh, this.walkPhase, false);
+      return;
+    }
+
+    if (this.escortCommand === 'stay') {
+      if (world.combatHeat > 0) {
+        this.escortHeat += dt;
+        if (this.escortHeat >= this.reactionDelay) this.goProne(dt);
+      } else {
+        this.escortHeat = 0;
+        if (this.prone > 0) this.standUp();
+      }
+      // Resolve back toward the exact command point if an explosion or moving crowd nudged
+      // the actor. STAY is a position, not merely "stop choosing a new target".
+      const anchor = this.escortAnchor;
+      if (anchor) {
+        const d = Math.hypot(anchor.x - this.pos.x, anchor.z - this.pos.z);
+        if (d > 0.28 && this.prone < 0.25) {
+          this.panicDir = Math.atan2(anchor.x - this.pos.x, anchor.z - this.pos.z);
+          this.step(dt, world, 1.8);
+          return;
+        }
+      }
+      animateRig(this.mesh, this.walkPhase, false);
+      return;
+    }
+
+    if (this.escortFreeze > 0) {
+      this.escortFreeze -= dt;
+      if (world.combatHeat > 0 && this.escortFreeze < this.reactionDelay) this.goProne(dt);
+      animateRig(this.mesh, this.walkPhase, false);
+      return;
+    }
+
     const sin = Math.sin(world.playerYaw);
     const cos = Math.cos(world.playerYaw);
-    const tx = world.playerPos.x + sin * 2.0 + cos * this.escortSide * 0.72;
-    const tz = world.playerPos.z + cos * 2.0 - sin * this.escortSide * 0.72;
+    // Close enough to enter the sight picture when the player turns or backs through a door.
+    // That is deliberate escort pressure; the offset still keeps the hostage off the exact
+    // camera centre in a straight corridor.
+    const tx = world.playerPos.x + sin * 1.28 + cos * this.escortSide * 0.48;
+    const tz = world.playerPos.z + cos * 1.28 - sin * this.escortSide * 0.48;
     const distance = Math.hypot(tx - this.pos.x, tz - this.pos.z);
     if (world.combatHeat > 0) {
       this.escortHeat += dt;
       if (this.escortHeat < this.reactionDelay || distance > 5) {
-        if (distance > 1.8) {
+        if (distance > 1.25) {
           this.panicDir = Math.atan2(tx - this.pos.x, tz - this.pos.z);
-          this.step(dt, world, 2.8);
+          this.escortStep(dt, world, 2.8, distance);
         }
       } else {
         this.goProne(dt);
@@ -219,11 +282,24 @@ export class Civilian {
 
     this.escortHeat = 0;
     if (this.prone > 0) this.standUp();
-    if (distance > 2.45) {
+    if (distance > 1.15) {
       this.panicDir = Math.atan2(tx - this.pos.x, tz - this.pos.z);
-      this.step(dt, world, 2.55);
+      this.escortStep(dt, world, 2.55, distance);
     } else {
       animateRig(this.mesh, this.walkPhase, false);
+    }
+  }
+
+  escortStep(dt, world, speed, targetDistance) {
+    const moved = this.step(dt, world, speed);
+    if (moved < speed * dt * 0.35 && targetDistance < 5.5) {
+      this.escortBlocked += dt;
+      if (this.freezeInDoorway && this.escortBlocked > 0.28) {
+        this.escortFreeze = 0.65 + this.random() * 0.9;
+        this.escortBlocked = 0;
+      }
+    } else {
+      this.escortBlocked = Math.max(0, this.escortBlocked - dt * 2);
     }
   }
 
@@ -258,12 +334,14 @@ export class Civilian {
     p.z += Math.cos(this.panicDir) * s * dt;
     resolveXZ(world.solids, p, 0.3, p.y + 0.6, p.y + 1.6, prev);
     // ran into something: pick a fresh heading next tick rather than grinding the wall
-    if (Math.hypot(p.x - prev.x, p.z - prev.z) < s * dt * 0.35) this.panicTimer = 0;
+    const moved = Math.hypot(p.x - prev.x, p.z - prev.z);
+    if (moved < s * dt * 0.35) this.panicTimer = 0;
     this.mesh.rotation.y = this.panicDir;
     this.walkPhase += s * dt * 5.5;
     animateRig(this.mesh, this.walkPhase, true);
     const g = groundHeight(world.solids, p.x, p.z, 0.25, p.y + 0.75);
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.baseY = p.y;
+    return moved;
   }
 }

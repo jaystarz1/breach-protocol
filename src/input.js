@@ -11,6 +11,7 @@ export const input = {
   flashPressed: false,
   swapPressed: false,
   breachPressed: false,
+  hostageCommandPressed: false,
   nvgPressed: false,
   breath: false,
   pausePressed: false,
@@ -184,6 +185,7 @@ export function initInput() {
     if (e.code === 'KeyG') input.nadePressed = true;
     if (e.code === 'KeyX') input.swapPressed = true;
     if (e.code === 'KeyF') input.breachPressed = true;
+    if (e.code === 'KeyH') input.hostageCommandPressed = true;
     if (e.code === 'KeyB') input.flashPressed = true;
     if (e.code === 'KeyN') input.nvgPressed = true;
     if (e.code === 'Escape' || e.code === 'KeyP') input.pausePressed = true;
@@ -264,6 +266,7 @@ export function clearEdges() {
   input.flashPressed = false;
   input.swapPressed = false;
   input.breachPressed = false;
+  input.hostageCommandPressed = false;
   input.nvgPressed = false;
   input.pausePressed = false;
   input.lookDelta.x = 0;

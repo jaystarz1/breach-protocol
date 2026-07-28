@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v42-authored-storefronts';
+const CACHE = 'breach-protocol-v43-hostage-commands';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

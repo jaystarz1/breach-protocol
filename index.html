@@ -71,6 +71,8 @@
   @keyframes reinfpulse { 0%,100%{opacity:1} 50%{opacity:.45} }
   #squad-line { position:absolute; left:max(20px, env(safe-area-inset-left)); bottom:calc(168px + env(safe-area-inset-bottom));
     font-size:11px; letter-spacing:.5px; color:#8fd0ff; text-shadow:0 1px 2px #000; }
+  #hostage-line { position:absolute; left:max(20px, env(safe-area-inset-left)); bottom:calc(188px + env(safe-area-inset-bottom));
+    font-size:11px; letter-spacing:.7px; color:#a5d6a7; text-shadow:0 1px 2px #000; }
 
   /* ---------- Directional damage ---------- */
   #dmg-ring { position:absolute; inset:0; pointer-events:none; }
@@ -211,6 +213,7 @@
   <div id="ammo">12 <small>/ 48</small></div>
   <div id="weapon-name">M9 SIDEARM</div>
   <div id="squad-line"></div>
+  <div id="hostage-line"></div>
   <div id="reinf-warn"></div>
 </div>
 
@@ -287,6 +290,7 @@
     <div class="kh-row"><span>Aim / scope (alt, hold)</span><b>Right Mouse</b></div>
     <div class="kh-row"><span>Reload</span><b>R</b></div>
     <div class="kh-row"><span>Breach door</span><b>F</b></div>
+    <div class="kh-row"><span>Hostages: follow / stay / down</span><b>H</b></div>
     <div class="kh-row"><span>Grenade / Flashbang</span><b>G / B</b></div>
     <div class="kh-row"><span>Swap weapon</span><b>X</b></div>
     <div class="kh-row"><span>Night vision (toggle)</span><b>N</b></div>

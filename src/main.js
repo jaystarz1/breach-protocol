@@ -156,6 +156,7 @@ function toMenu() {
   hud.aimRef('none');
   hud.nvg(false);
   hud.squad('');
+  hud.hostage('');
   hud.reinf('');
   hud.screen('menu');
 }
@@ -409,6 +410,7 @@ function startLevel(id) {
     enemies: [], civilians: [], allies: [], grenades: [], effects: [],
     playerPos: player.pos, playerYaw: player.yaw, playerSpeed: 0, playerAds: false, playerCrouched: false,
     combatHeat: 0, slowmo: 0, blind: 0,
+    hostageCommand: 'follow',
     objectiveIdx: 0, won: false, over: false,
     stats: { kills: 0, shotsFired: 0, shotsHit: 0, civKills: 0, rescued: 0, startTime: performance.now(), score: 0 },
     sniperTeam: null,
@@ -879,6 +881,34 @@ function civilianKilled(civ) {
   }
 }
 
+const HOSTAGE_COMMANDS = ['follow', 'stay', 'down'];
+const HOSTAGE_COMMAND_LABEL = {
+  follow: 'FOLLOW',
+  stay: 'STAY',
+  down: 'GET DOWN',
+};
+
+function issueHostageCommand() {
+  const evacuees = world.civilians.filter(
+    civilian => civilian.rescuer === 'you' && civilian.rescued && !civilian.dead,
+  );
+  if (!evacuees.length) {
+    hud.feed('NO FREED HOSTAGES TO COMMAND', '#90a4ae');
+    return;
+  }
+  const current = HOSTAGE_COMMANDS.indexOf(world.hostageCommand);
+  const command = HOSTAGE_COMMANDS[(current + 1) % HOSTAGE_COMMANDS.length];
+  world.hostageCommand = command;
+  let acknowledged = 0;
+  for (const civilian of evacuees) {
+    if (civilian.setEscortCommand(command)) acknowledged++;
+  }
+  hud.feed(
+    `HOSTAGES — ${HOSTAGE_COMMAND_LABEL[command]} (${acknowledged})`,
+    command === 'down' ? '#ffd180' : '#a5d6a7',
+  );
+}
+
 // ---------- Objectives ----------
 // Flashbang: blinds the player if he is looking at it, and stuns any enemy with
 // line of sight to it — the reason to breach with one instead of walking in.
@@ -1010,6 +1040,7 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     hud.aimRef('none');
     hud.nvg(false);
     hud.squad('');
+    hud.hostage('');
     hud.reinf('');
     $('debrief-status').textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED' + (reason ? ' — ' + reason : '');
     $('debrief-grade').textContent = g;
@@ -1209,6 +1240,7 @@ function frame() {
   world.doors.update(dt);
 
   // actors
+  if (input.hostageCommandPressed) issueHostageCommand();
   for (const e of world.enemies) e.update(sdt, world);
   for (const a of world.allies) a.update(sdt, world);
   for (const c of world.civilians) c.update(sdt, world);
@@ -1248,6 +1280,7 @@ function frame() {
       if (man) by = man.name;
     }
     if (by && c.rescue(by)) {
+      if (by === 'you') c.setEscortCommand(world.hostageCommand);
       world.stats.rescued++;
       world.stats.score += 150;
       hud.feed(by === 'you' ? 'HOSTAGE FREED +150' : `${by}: HOSTAGE FREED +150`, '#a5d6a7');
@@ -1284,6 +1317,12 @@ function frame() {
       ? `${a.name} KIA`
       : `${a.name} ${Math.max(0, Math.round(a.health / a.maxHealth * 100))}%`).join('  ·  '));
   } else hud.squad('');
+  const escorted = world.civilians.filter(
+    civilian => civilian.rescuer === 'you' && civilian.rescued && !civilian.dead,
+  );
+  hud.hostage(escorted.length
+    ? `EVAC ${escorted.length} · ${HOSTAGE_COMMAND_LABEL[world.hostageCommand]} · H COMMAND`
+    : '');
 
   renderPipeline.render(scene, camera);
   clearEdges();
