@@ -484,7 +484,7 @@ export function spawnSquad(scene, count, start, solids) {
     const sl = slotWorld(start[0], start[2], yaw, SLOTS[i % SLOTS.length]);
     const x = sl.x, z = sl.z;
     const g = groundHeight(solids, x, z, 0.35, start[1] + 1.2);
-    out.push(new Ally(scene, [x, g === -Infinity ? start[1] : g, z], i));
+    out.push(new Ally(scene, [x, g === -Infinity ? start[1] : g, z], i, { black: true }));
   }
   return out;
 }

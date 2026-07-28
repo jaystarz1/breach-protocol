@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeCharacter, animateRig, deathPose } from './levelgen.js';
+import { makeCharacter, animateRig, deathPose, revealWeaponRig } from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { findPath, nearestNode } from './navgrid.js';
 import { sfx } from './audio.js';
@@ -26,7 +26,10 @@ const DUCK_DROP = 1.72;
 
 export class Enemy {
   constructor(scene, def, diff) {
-    this.mesh = makeCharacter({ hostile: true, silhouette: !!def.silhouette });
+    this.concealed = !!def.concealed;
+    this.mesh = makeCharacter({
+      hostile: true, silhouette: !!def.silhouette, concealed: this.concealed,
+    });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
     scene.add(this.mesh);
     this.scene = scene;
@@ -119,6 +122,12 @@ export class Enemy {
 
   get pos() { return this.mesh.position; }
 
+  revealWeapon() {
+    if (!this.concealed) return;
+    this.concealed = false;
+    revealWeaponRig(this.mesh);
+  }
+
   // Whoever shoots a man is who that man turns to face. Without this the squad could gun down
   // hostiles from the flank all mission and never once be shot back at.
   damage(amt, world, fromHead, byAlly) {
@@ -127,6 +136,7 @@ export class Enemy {
     if (byAlly && this.state === 'patrol') this.tgtTimer = 0;   // force a retarget onto the shooter
     this.flinch = fromHead ? 0.32 : 0.22;
     if (this.state === 'patrol') {
+      this.revealWeapon();
       this.state = 'alert';
       this.reactTimer = this.diff.enemyReaction * 0.5;
       this.alertNearby(world);
@@ -153,6 +163,7 @@ export class Enemy {
     for (const e of world.enemies) {
       if (e === this || e.dead || e.state !== 'patrol') continue;
       if (e.pos.distanceTo(this.pos) < 16) {
+        e.revealWeapon();
         e.state = 'alert';
         e.reactTimer = e.diff.enemyReaction * 1.3;
         e.lastKnown = this.lastKnown || { x: world.playerPos.x, z: world.playerPos.z, y: world.playerPos.y };
@@ -379,6 +390,7 @@ export class Enemy {
 
     if (this.state === 'patrol') {
       if (seesTarget && inCone) {
+        this.revealWeapon();
         this.state = 'alert';
         this.reactTimer = this.diff.enemyReaction * (0.7 + Math.random() * 0.6);
         this.lastKnown = { x: target.x, y: target.y, z: target.z };

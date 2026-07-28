@@ -18,6 +18,7 @@ import { environment, environmentFrom } from './textures.js';
 import { skyDome, groundPlate, skyline, takeLights } from './world.js';
 import { spawnSquad, spawnRouteTeam } from './squad.js';
 import { addStreetSweepArt } from './street-sweep-art.js';
+import { addVisualProps } from './visual-kit.js';
 import { createRenderPipeline } from './renderer/render-pipeline.js';
 import { CAMPAIGN, briefingText, campaignSnapshot } from './campaign.js';
 
@@ -53,6 +54,7 @@ let world = null;
 let player = null;
 let weapons = null;
 let currentLevel = 1;
+const missionRuns = new Uint16Array(11);
 let flashlight = null;
 let lastTime = performance.now();
 // Goggles are player-controlled equipment now, not a level property, so the lights they swap
@@ -216,15 +218,21 @@ function startLevel(id) {
   currentLevel = id;
   const L = LEVELS[id - 1];
   const diff = DIFFICULTIES[S.difficulty];
+  const missionVariant = missionRuns[id]++ % 3;
 
   scene = new THREE.Scene();
   // built before the lights because the sun's shadow frustum is fitted to these bounds
   takeLights();   // drop anything a stray L.geo() call left behind
   // Levels register flashing lights by pushing onto this while building their geometry.
   const levelBeacons = [];
+  const visualProps = [];
   window.__bpBeacons = levelBeacons;
+  window.__bpVisualProps = visualProps;
+  window.__bpMissionVariant = missionVariant;
   const geo = [...L.geo(), ...(L.extraGeo ? L.extraGeo() : [])];
   window.__bpBeacons = null;
+  window.__bpVisualProps = null;
+  window.__bpMissionVariant = null;
   const roomLights = takeLights();
   scene.background = new THREE.Color(L.sky);
   scene.fog = new THREE.Fog(L.fog[0], L.fog[1], L.fog[2]);
@@ -329,6 +337,7 @@ function startLevel(id) {
   }
 
   const { solids, litMesh } = buildStaticGeometry(scene, geo);
+  addVisualProps(scene, visualProps);
   if (L.id === 2) addStreetSweepArt(scene);
 
   // Emergency beacons. These cannot ride in the merged static mesh — that whole design is one
@@ -379,7 +388,7 @@ function startLevel(id) {
   }
 
   world = {
-    level: L, diff, solids, doors, nav, litMesh,
+    level: L, diff, solids, doors, nav, litMesh, missionVariant,
     enemies: [], civilians: [], allies: [], grenades: [], effects: [],
     playerPos: player.pos, playerYaw: player.yaw, playerSpeed: 0, playerAds: false, playerCrouched: false,
     combatHeat: 0, slowmo: 0, blind: 0,
@@ -456,7 +465,11 @@ function startLevel(id) {
   };
 
   // enemy count scaling
-  let defs = [...L.enemies];
+  // Retries rotate only between authored-safe positions. No unconstrained random offset may
+  // put an actor inside a wall, outside the nav graph, or on the wrong side of a breach.
+  let defs = L.enemies.map(d => d.positions
+    ? { ...d, pos: [...d.positions[missionVariant % d.positions.length]] }
+    : d);
   const mul = diff.enemyCountMul;
   if (mul < 1) {
     const keep = Math.max(1, Math.round(defs.length * mul));

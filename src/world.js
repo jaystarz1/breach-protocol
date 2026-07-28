@@ -260,6 +260,14 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
 // Stamps a window grid onto one wall run. `nx/nz` is the outward normal so the panes sit
 // just proud of the wall face instead of intersecting it and z-fighting.
 export function facade(x1, z1, x2, z2, yBase, height, seed, opts = {}) {
+  if (window.__bpVisualProps) {
+    window.__bpVisualProps.push({
+      kind: 'facade', x1, z1, x2, z2, yBase, height, seed,
+      away: opts.away, out: opts.out, step: opts.step, floorH: opts.floorH,
+      lit: opts.lit, skip: opts.skip,
+    });
+    return [];
+  }
   const geo = [];
   const R = rng(seed);
   const len = Math.hypot(x2 - x1, z2 - z1);

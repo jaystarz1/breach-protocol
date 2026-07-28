@@ -1,4 +1,4 @@
-import { C, floorSlab, wall, stairs, crate, car, policeCar } from '../levelgen.js';
+import { C, floorSlab, wall, stairs, crate, car, policeCar, marketStall } from '../levelgen.js';
 import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
@@ -261,6 +261,7 @@ export const LEVELS = [
     start: [0, 0, 40, 0],
     geo: () => {
       const g = [];
+      const v = window.__bpMissionVariant || 0;
       g.push(...GROUND(60, 130, C.street));
       // sidewalks
       g.push(...floorSlab(-12, 0, 8, 120, 0.15, 0.3, C.sidewalk));
@@ -304,7 +305,8 @@ export const LEVELS = [
       g.push(...hydrant(-13.8, 12), ...hydrant(13.8, -16));
       g.push(...bench(-13.2, 26, true), ...bench(13.2, 8, true));
       // street clutter
-      g.push(...car(-4, 25)); g.push(...car(3, 5, true)); g.push(...car(-2, -18)); g.push(...car(5, -35, true));
+      g.push(...car(-4 + v * 0.45, 25)); g.push(...car(3, 5 - v * 0.7, true));
+      g.push(...car(-2 - v * 0.5, -18)); g.push(...car(5, -35 + v * 0.6, true));
       // First responders got here before you did. The light bar is the only moving light in
       // the level and it does a lot of work on a static night street.
       g.push(...policeCar(-6, 33, false, window.__bpBeacons));
@@ -316,9 +318,9 @@ export const LEVELS = [
     },
     doors: [],
     enemies: [
-      { pos: [0, 0, 22], patrol: [[-6, 22], [6, 22]] },
+      { pos: [0, 0, 22], positions: [[0, 0, 22], [-5, 0, 20], [5, 0, 24]], patrol: [[-6, 22], [6, 22]] },
       { pos: [11, 0, 20], hold: true, yaw: 180 },
-      { pos: [-4, 0, 2], patrol: [[-8, 2], [4, 8]] },
+      { pos: [-4, 0, 2], positions: [[-4, 0, 2], [4, 0, 8], [-7, 0, 7]], patrol: [[-8, 2], [4, 8]], concealed: true },
       { pos: [11, 0, -5], hold: true, yaw: 180 },
       { pos: [2, 0, -20], patrol: [[2, -20], [-5, -30]], aggro: true },
       { pos: [-11, 0, -25], hold: true, yaw: 0 },
@@ -461,13 +463,16 @@ export const LEVELS = [
       g.push(...wall(-35, -38, 35, -38, 6, C.building, [{ off: 32, w: 6, h: 3 }]));
       g.push(...wall(-35, 38, -35, -38, 6, C.buildingB));
       g.push(...wall(35, 38, 35, -38, 6, C.buildingB));
+      // Point these inward: this is a walled market courtyard, so its occupied faces belong
+      // on the side the player can actually see.
+      g.push(...facade(35, 38, -35, 38, 0, 6, 501, { step: 4.2 }));
+      g.push(...facade(-35, -38, 35, -38, 0, 6, 502, { step: 4.2 }));
+      g.push(...facade(-35, 38, -35, -38, 0, 6, 503, { step: 4.2 }));
+      g.push(...facade(35, -38, 35, 38, 0, 6, 504, { step: 4.2 }));
       // market stalls: rows of counters with awning posts
       for (const sz of [18, 6, -6, -18]) {
         for (const sx of [-22, -8, 8, 22]) {
-          g.push([sx, 0.55, sz, 5, 1.1, 2, C.accent]);
-          g.push([sx - 2.2, 1.5, sz, 0.15, 3, 0.15, C.metal]);
-          g.push([sx + 2.2, 1.5, sz, 0.15, 3, 0.15, C.metal]);
-          g.push([sx, 3.0, sz, 5.4, 0.15, 2.6, 0x7a4a4a]);
+          g.push(...marketStall(sx, sz, (sx + sz) % 3 ? 0x7a4a4a : 0x3e596d));
         }
       }
       g.push(...crate(0, 0), ...crate(-15, 12), ...crate(15, -12));
@@ -475,13 +480,13 @@ export const LEVELS = [
     },
     doors: [],
     enemies: [
-      { pos: [-22, 0, 15], hold: true, yaw: 180 },
+      { pos: [-22, 0, 15], positions: [[-22, 0, 15], [-19, 0, 9], [-25, 0, 13]], hold: true, yaw: 180, concealed: true },
       { pos: [8, 0, 18], patrol: [[8, 18], [22, 18]] },
-      { pos: [-8, 0, 4], hold: true, yaw: 160 },
+      { pos: [-8, 0, 4], positions: [[-8, 0, 4], [-11, 0, 1], [-5, 0, 8]], hold: true, yaw: 160, concealed: true },
       { pos: [22, 0, 4], patrol: [[22, 4], [22, -8]], aggro: true },
-      { pos: [-15, 0, -8], hold: true, yaw: 20 },
+      { pos: [-15, 0, -8], positions: [[-15, 0, -8], [-19, 0, -12], [-11, 0, -10]], hold: true, yaw: 20, concealed: true },
       { pos: [8, 0, -20], patrol: [[8, -20], [-8, -20]], aggro: true },
-      { pos: [26, 0, -30], hold: true, yaw: 0 },
+      { pos: [26, 0, -30], hold: true, yaw: 0, concealed: true },
       { pos: [-26, 0, -30], hold: true, yaw: 0 },
     ],
     civilians: [
@@ -489,6 +494,10 @@ export const LEVELS = [
       { pos: [24, 0, 10] }, { pos: [-24, 0, 2] }, { pos: [2, 0, -2], rush: true }, { pos: [18, 0, -6] },
       { pos: [-10, 0, -14], rush: true }, { pos: [6, 0, -24] }, { pos: [-20, 0, -26] },
       { pos: [26, 0, 24] }, { pos: [0, 0, 24], rush: true },
+      { pos: [-29, 0, 27] }, { pos: [-13, 0, 25], rush: true },
+      { pos: [19, 0, 22] }, { pos: [30, 0, 3], rush: true },
+      { pos: [-28, 0, -11] }, { pos: [14, 0, -15] },
+      { pos: [-3, 0, -28], rush: true }, { pos: [25, 0, -23] },
     ],
     reinforce: { every: 26, first: 30, max: 6, group: 2, range: 60,
       at: [[0, 0, 34], [-30, 0, -34], [30, 0, -34]] },

@@ -20,8 +20,9 @@ export function buildStaticGeometry(scene, geo) {
   let vtx = 0;
   const c = new THREE.Color();
   for (const entry of geo) {
-    const [x, y, z, w, h, d, color, solid, emissive] = entry;
+    const [x, y, z, w, h, d, color, solid, emissive, visible] = entry;
     if (solid !== false) solids.push(makeBox(x, y, z, w, h, d));
+    if (visible === false) continue;
     if (emissive) { lit.push(entry); continue; }
     const g = new THREE.BoxGeometry(w, h, d);
     g.translate(x, y, z);
@@ -117,8 +118,17 @@ export function bodyMaterial(color) {
 }
 
 // ---------- Low-poly humanoid ----------
+const BODY_CAPSULE = new THREE.CapsuleGeometry(0.5, 1, 5, 10);
+const HEAD_SPHERE = new THREE.SphereGeometry(0.5, 16, 12);
+
 function limb(w, h, d, color, x, y, z) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMaterial(color));
+  // Clothing and anatomy use a rounded silhouette. Thin plates, optics and weapons retain
+  // hard manufactured edges. This single distinction removes the cuboid "Roblox person"
+  // read without changing any animation pivots or gameplay hit volumes.
+  const soft = h >= 0.14 && d <= h * 2.2;
+  const geometry = soft ? BODY_CAPSULE : new THREE.BoxGeometry(w, h, d);
+  const m = new THREE.Mesh(geometry, bodyMaterial(color));
+  if (soft) m.scale.set(w, h / 2, d);
   m.position.set(x, y, z);
   m.castShadow = m.receiveShadow = quality.shadows;
   return m;
@@ -130,7 +140,8 @@ const SKINS = [0xd9b08c, 0xc68863, 0xa9714b, 0x8d5a3b, 0xe8c39e];
 
 function jointed(w, h, d, color) {
   // box whose origin is at its TOP so rotating the group bends at the joint
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMaterial(color));
+  const m = new THREE.Mesh(BODY_CAPSULE, bodyMaterial(color));
+  m.scale.set(w, h / 2, d);
   m.position.y = -h / 2;
   m.castShadow = m.receiveShadow = quality.shadows;
   return m;
@@ -162,15 +173,15 @@ const OD_PANTS = [0x343a25, 0x3b4129, 0x2e3320];
 // him back into a grey figure and the whole "he is inside an unlit room" read collapses.
 const SILHOUETTE_MAT = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
-export function makeCharacter({ hostile, hostage, friendly, black, silhouette }) {
+export function makeCharacter({ hostile, hostage, friendly, black, silhouette, concealed }) {
   const g = new THREE.Group();
   const armed = !!hostile || !!friendly;
   const skin = SKINS[Math.floor(Math.random() * SKINS.length)];
   const shirt = friendly ? (black ? 0x16191c : 0x2d3a4a)
-    : hostile ? OD_SHIRT[Math.floor(Math.random() * OD_SHIRT.length)]
+    : hostile && !concealed ? OD_SHIRT[Math.floor(Math.random() * OD_SHIRT.length)]
       : [0xef9a9a, 0x90caf9, 0xfff59d, 0xa5d6a7, 0xce93d8, 0xffcc80][Math.floor(Math.random() * 6)];
   const pants = friendly ? (black ? 0x121417 : 0x232b36)
-    : hostile ? OD_PANTS[Math.floor(Math.random() * OD_PANTS.length)]
+    : hostile && !concealed ? OD_PANTS[Math.floor(Math.random() * OD_PANTS.length)]
       : [0x546e7a, 0x6d4c41, 0x37474f][Math.floor(Math.random() * 3)];
   const boots = armed ? 0x15181b : 0x3e2723;
 
@@ -178,13 +189,13 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette })
   g.add(limb(0.32, 0.14, 0.2, pants, 0, 0.92, 0));
   g.add(limb(0.34, 0.3, 0.2, shirt, 0, 1.13, 0));
   g.add(limb(0.4, 0.3, 0.22, shirt, 0, 1.4, 0));       // chest
-  if (armed) {
+  if (armed && !concealed) {
     const rig = friendly ? (black ? 0x0d0f11 : 0x1b3560) : 0x3f4529;   // olive webbing
     g.add(limb(0.42, 0.26, 0.26, rig, 0, 1.38, 0));                    // chest rig
     g.add(limb(0.14, 0.1, 0.28, armed && !friendly ? 0x2f3520 : 0x1c1f22, -0.1, 1.24, 0.02)); // mag pouches
     g.add(limb(0.14, 0.1, 0.28, armed && !friendly ? 0x2f3520 : 0x1c1f22, 0.1, 1.24, 0.02));
   }
-  if (hostile) {
+  if (hostile && !concealed) {
     // Olive drab is correct for what these men are, but it cost the silhouette its single
     // strongest hostile tell (the old red chest rig) at exactly the moment identification
     // matters most. A red armband and helmet rag put that cue back — and irregular forces
@@ -202,14 +213,24 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette })
   // head group with face
   const headG = new THREE.Group();
   headG.position.set(0, 1.62, 0);
-  const headColor = armed ? 0x1c2024 : skin;              // balaclava vs skin
-  headG.add(limb(0.22, 0.24, 0.24, headColor, 0, 0.06, 0));
+  const headColor = armed && !concealed ? 0x1c2024 : skin; // balaclava vs visible face
+  const head = new THREE.Mesh(HEAD_SPHERE, bodyMaterial(headColor));
+  head.scale.set(0.22, 0.26, 0.23);
+  head.position.y = 0.07;
+  head.castShadow = head.receiveShadow = quality.shadows;
+  headG.add(head);
   // eyes (a strip for the kitted-up; two dots for civilians)
-  if (armed) {
+  if (armed && !concealed) {
     const lid = friendly ? (black ? 0x141719 : 0x22303f) : 0x424a2c;   // olive helmet
     headG.add(limb(0.18, 0.05, 0.02, skin, 0, 0.09, 0.125));
-    headG.add(limb(0.26, 0.1, 0.27, lid, 0, 0.2, 0)); // helmet
-    headG.add(limb(0.26, 0.05, 0.1, lid, 0, 0.14, -0.1));
+    const helmet = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.62),
+      bodyMaterial(lid));
+    helmet.scale.set(0.29, 0.21, 0.29);
+    helmet.position.y = 0.24;
+    helmet.castShadow = quality.shadows;
+    headG.add(helmet);
+    headG.add(limb(0.28, 0.045, 0.12, lid, 0, 0.16, -0.09));
     if (hostile) headG.add(limb(0.27, 0.045, 0.28, 0x8f2622, 0, 0.155, 0)); // red helmet rag
     // Cat-eye strip on the back of the helmet: the real-world marking that exists for exactly
     // this problem, and it means a squadmate is identifiable from directly behind too.
@@ -217,7 +238,13 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette })
   } else {
     headG.add(limb(0.035, 0.035, 0.02, 0x2a2a2a, -0.05, 0.08, 0.125));
     headG.add(limb(0.035, 0.035, 0.02, 0x2a2a2a, 0.05, 0.08, 0.125));
-    headG.add(limb(0.24, 0.09, 0.25, [0x2e2620, 0x4e342e, 0x9e9e9e, 0x212121][Math.floor(Math.random() * 4)], 0, 0.16, -0.01)); // hair
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.48),
+      bodyMaterial([0x2e2620, 0x4e342e, 0x9e9e9e, 0x212121][Math.floor(Math.random() * 4)]));
+    hair.scale.set(0.24, 0.15, 0.25);
+    hair.position.y = 0.2;
+    hair.castShadow = quality.shadows;
+    headG.add(hair);
   }
   g.add(headG);
 
@@ -263,12 +290,26 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette })
     rifle.add(body, mag);
     rifle.add(limb(0.05, 0.05, 0.1, 0x1b1f22, 0, 0.02, 0.16));       // stock
     rifle.add(limb(0.04, 0.06, 0.1, 0x2a3038, 0, 0.09, -0.1));       // optic
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.018, 0.018, 0.42, 10),
+      bodyMaterial(0x090b0d));
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 0, -0.73);
+    rifle.add(barrel);
     rifle.position.set(0.1, 1.32, 0.22);
     rifle.rotation.y = 0.35;
+    rifle.visible = !concealed;
     g.add(rifle);
-    // arms hold the rifle
-    lArm.rotation.x = -0.9; lArm.userData.fore.rotation.x = -0.5;
-    rArm.rotation.x = -1.05; rArm.userData.fore.rotation.x = -0.35;
+    if (!concealed) {
+      // arms hold the rifle
+      lArm.rotation.x = -0.9; lArm.userData.fore.rotation.x = -0.5;
+      rArm.rotation.x = -1.05; rArm.userData.fore.rotation.x = -0.35;
+    } else {
+      // Hands naturally down until the weapon is produced. A "civilian" permanently holding
+      // an invisible rifle is not concealed; it is a broken animation tell.
+      lArm.rotation.z = 0.08;
+      rArm.rotation.z = -0.08;
+    }
   } else if (hostage) {
     // kneeling: thighs forward, shins folded back, hands behind head
     lLeg.rotation.x = -1.5; rLeg.rotation.x = -1.5;
@@ -284,9 +325,23 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette })
 
   // rig.hostile is read by animateRig only as "is this figure holding a weapon", so a friendly
   // must set it too or a squadmate swings its arms while carrying a rifle.
-  g.userData.rig = { headG, lLeg, rLeg, lArm, rArm, rifle, hostile: armed, hostage, friendly, torsoTilt: 0 };
+  g.userData.rig = {
+    headG, lLeg, rLeg, lArm, rArm, rifle,
+    hostile: armed, hostage, friendly, concealed: !!concealed, torsoTilt: 0,
+  };
   if (silhouette) g.traverse(o => { if (o.isMesh) o.material = SILHOUETTE_MAT; });
   return g;
+}
+
+export function revealWeaponRig(g) {
+  const r = g.userData.rig;
+  if (!r?.rifle || !r.concealed) return;
+  r.concealed = false;
+  r.rifle.visible = true;
+  r.lArm.rotation.set(-0.9, 0, 0);
+  r.lArm.userData.fore.rotation.x = -0.5;
+  r.rArm.rotation.set(-1.05, 0, 0);
+  r.rArm.userData.fore.rotation.x = -0.35;
 }
 
 // Walk cycle plus hit reaction. phase advances with distance moved; flinch is 0..~0.32s
@@ -426,6 +481,19 @@ export function crate(x, z, y = 0, s = 1.0) {
   return [[x, y + s / 2, z, s, s, s, C.crate]];
 }
 
+export function marketStall(x, z, color = 0x7a4a4a) {
+  if (window.__bpVisualProps) {
+    window.__bpVisualProps.push({ kind: 'market-stall', x, z, color });
+    return [[x, 0.55, z, 5, 1.1, 2, C.accent, true, false, false]];
+  }
+  return [
+    [x, 0.55, z, 5, 1.1, 2, C.accent],
+    [x - 2.2, 1.5, z, 0.15, 3, 0.15, C.metal],
+    [x + 2.2, 1.5, z, 0.15, 3, 0.15, C.metal],
+    [x, 3.0, z, 5.4, 0.15, 2.6, color],
+  ];
+}
+
 // A parked car. Two boxes read as a shoebox with a smaller shoebox on it; what actually makes
 // the shape say "car" is the stuff around the edges — wheels under the arches, a glasshouse
 // inset from the body sides, bumpers proud of the panels, and lights at both ends.
@@ -436,6 +504,11 @@ const CAR_COLORS = [0x6e2a2a, 0x27406b, 0x5a5f63, 0x37503a, 0x6b5a2a, 0x2f2f33];
 
 export function car(x, z, rotZAxis = false, color = null, opts = {}) {
   const col = color ?? CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
+  if (window.__bpVisualProps) {
+    window.__bpVisualProps.push({ kind: 'vehicle', x, z, rotZAxis, color: col, police: !!opts.police });
+    return [[x, 0.62, z, rotZAxis ? 1.82 : 4.3, 1.24, rotZAxis ? 4.3 : 1.82,
+      col, true, false, false]];
+  }
   const glass = opts.glass ?? 0x141b22;
   const trim = 0x1b1f23;
   const out = [];
@@ -472,7 +545,14 @@ export function car(x, z, rotZAxis = false, color = null, opts = {}) {
 // registered as animated beacons — the flashing itself cannot live in the merged static mesh,
 // so world.js collects the positions and main.js drives real lights over them.
 export function policeCar(x, z, rotZAxis = false, beacons = null) {
-  const out = car(x, z, rotZAxis, 0x1b1e22, { glass: 0x10161c });
+  const out = car(x, z, rotZAxis, 0x1b1e22, { glass: 0x10161c, police: true });
+  if (window.__bpVisualProps) {
+    if (beacons) {
+      beacons.push({ pos: rotZAxis ? [x - 0.52, 1.68, z + 0.1] : [x + 0.1, 1.68, z - 0.52], hue: 'red' });
+      beacons.push({ pos: rotZAxis ? [x + 0.52, 1.68, z + 0.1] : [x + 0.1, 1.68, z + 0.52], hue: 'blue' });
+    }
+    return out;
+  }
   const B = (a, c, y, la, h, lc, colour) => out.push(rotZAxis
     ? [x + c, y, z + a, lc, h, la, colour, false]
     : [x + a, y, z + c, la, h, lc, colour, false]);

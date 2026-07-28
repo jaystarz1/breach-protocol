@@ -25,6 +25,10 @@ export class Civilian {
     this.screamed = false;
     this.exhausted = 0;
     this.prone = 0;                       // 0..1 blend into flat-on-the-floor
+    // Some bound people flatten themselves; others freeze upright in a cower. Keeping a
+    // hostage-sized obstruction in the target picture is intentional pressure, while the
+    // split prevents every hostage encounter from behaving identically.
+    this.duckOnFire = Math.random() < 0.45;
     // A civilian who runs AT you is the actual shoot/no-shoot test. Fleeing bodies are easy:
     // they leave the frame. Someone sprinting at your muzzle with their hands up, in a level
     // where everything else running at you is trying to kill you, is the decision.
@@ -108,7 +112,8 @@ export class Civilian {
     // cluttered target picture, and a prone one is not.
     if (this.hostage) {
       if (world.combatHeat > 0) {
-        this.goProne(dt);
+        if (this.duckOnFire) this.goProne(dt);
+        else animateRig(this.mesh, this.walkPhase, false);
         if (!this.screamed && this.pos.distanceTo(world.playerPos) < 28) {
           this.screamed = true;
           sfx.civScream(this.pos);
