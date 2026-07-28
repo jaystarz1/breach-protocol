@@ -101,3 +101,15 @@ adapter may summarize between-mission evidence, never control combat.
 
 Vektor has information and precision. The 37th has mass and repeated pressure. Each ground
 mission earns the air picture needed to survive the next attack.
+
+## Claude of Duty reference policy
+
+`mshumer/Claude-of-Duty` is a useful MIT-licensed engineering reference, not the base game and
+not a dependency. Its full HDR/post stack and all-procedural art direction solve a different
+problem and carry a demonstrated Retina frame-rate cost. Breach Protocol keeps its lean
+renderer, photographed close surfaces, fixed material-family batching, and authored campaign.
+
+Borrow narrowly where the evidence is good: reproducible screenshot harnesses, shader prewarm,
+grip-anchored first-person hands, measured ADS alignment, and frame-time distributions. Do not
+copy the whole renderer, world, or procedural texture forge. Every adopted technique must pass
+our moving 5.94-megapixel profiler and ten-mission compatibility sweep.

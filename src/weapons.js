@@ -46,8 +46,25 @@ function gunMaterials() {
   gmats = {
     steel: std(0x474e55, 0.38, 0.9, true),      // slide, barrel, receiver
     black: std(0x1d2226, 0.55, 0.55, true),     // parkerised furniture
-    poly: std(0x24292e, 0.88, 0.03, false),     // polymer grip / handguard / stock
+    poly: std(0x30363a, 0.88, 0.03, false),     // polymer grip / handguard / stock
     tan: std(0x6d5f45, 0.82, 0.04, false),      // sniper furniture
+    glove: quality.pbr
+      ? new THREE.MeshStandardMaterial({
+        color: 0x363d41, roughness: 0.9, metalness: 0.01,
+        map: s?.fabric.map || null,
+        normalMap: s?.fabric.normalMap || null,
+        normalScale: new THREE.Vector2(0.16, 0.16),
+      })
+      : new THREE.MeshLambertMaterial({ color: 0x363d41 }),
+    sleeve: quality.pbr
+      ? new THREE.MeshStandardMaterial({
+        color: 0x22272a, roughness: 0.96, metalness: 0,
+        map: s?.fabric.map || null,
+        roughnessMap: s?.fabric.roughnessMap || null,
+        normalMap: s?.fabric.normalMap || null,
+        normalScale: new THREE.Vector2(0.24, 0.24),
+      })
+      : new THREE.MeshLambertMaterial({ color: 0x22272a }),
     // Optic glass has to be SEE-THROUGH. An opaque lens disc is geometrically honest and
     // completely unusable: aiming down the sight put a solid green coin exactly where the
     // target was. Transparent, additive, and depthWrite off so it tints the view instead of
@@ -90,6 +107,33 @@ const bx = (mat, w, h, d, x = 0, y = 0, z = 0) => {
   m.position.set(x, y, z);
   return m;
 };
+const rb = (mat, w, h, d, x = 0, y = 0, z = 0, radius = 0.006) => {
+  const r = Math.min(radius, w * 0.22, h * 0.22);
+  const shape = new THREE.Shape();
+  shape.moveTo(-w / 2 + r, -h / 2);
+  shape.lineTo(w / 2 - r, -h / 2);
+  shape.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+  shape.lineTo(w / 2, h / 2 - r);
+  shape.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+  shape.lineTo(-w / 2 + r, h / 2);
+  shape.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+  shape.lineTo(-w / 2, -h / 2 + r);
+  shape.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+  const bevel = Math.min(r * 0.45, d * 0.12);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(0.001, d - bevel * 2),
+    bevelEnabled: true,
+    bevelSegments: 1,
+    bevelSize: bevel,
+    bevelThickness: bevel,
+    curveSegments: 2,
+  });
+  geometry.translate(0, 0, -d / 2 + bevel);
+  geometry.computeVertexNormals();
+  const out = new THREE.Mesh(geometry, mat);
+  out.position.set(x, y, z);
+  return out;
+};
 // Cylinder along Z (barrels, tubes, scope bodies). Default geometry runs along Y.
 const tube = (mat, r, len, x, y, z, seg = 10) => {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, seg), mat);
@@ -104,6 +148,60 @@ const guard = (mat, y, z, w = 0.05) => [
   bx(mat, w, 0.05, 0.016, 0, y - 0.026, z + 0.042),
 ];
 
+const PALM_GEO = new THREE.SphereGeometry(0.045, 14, 10);
+const FINGER_GEO = new THREE.CapsuleGeometry(0.009, 0.045, 4, 8);
+const THUMB_GEO = new THREE.CapsuleGeometry(0.011, 0.042, 4, 8);
+const CUFF_GEO = new THREE.CylinderGeometry(0.047, 0.052, 0.045, 12);
+
+function limbBetween(mat, from, to, r0, r1) {
+  const a = new THREE.Vector3(...from);
+  const b = new THREE.Vector3(...to);
+  const delta = b.clone().sub(a);
+  const out = new THREE.Mesh(
+    new THREE.CylinderGeometry(r1, r0, delta.length(), 12, 1),
+    mat,
+  );
+  out.position.copy(a).add(b).multiplyScalar(0.5);
+  out.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize());
+  return out;
+}
+
+// A weapon floating by itself always reads like a debug prop. These compact rigs keep the
+// hands welded to authored grip points and let the forearms follow the weapon through ADS,
+// recoil and reload without adding a separate skinned-viewmodel asset.
+function addGlovedArm(parent, M, {
+  side, palm, palmRot, elbow, spread = 1, support = false,
+}) {
+  const hand = new THREE.Group();
+  hand.position.fromArray(palm);
+  hand.rotation.set(...palmRot);
+
+  const shell = new THREE.Mesh(PALM_GEO, M.glove);
+  shell.scale.set(1.03, 0.62, 1.28);
+  hand.add(shell);
+  for (let i = 0; i < 4; i++) {
+    const finger = new THREE.Mesh(FINGER_GEO, M.glove);
+    finger.position.set((i - 1.5) * 0.018, -0.014, -0.042 + Math.abs(i - 1.5) * 0.003);
+    finger.rotation.x = support ? 1.18 : 0.92;
+    finger.rotation.z = (i - 1.5) * 0.035;
+    finger.scale.y = spread * (1 - Math.abs(i - 1.5) * 0.045);
+    hand.add(finger);
+  }
+  const thumb = new THREE.Mesh(THUMB_GEO, M.glove);
+  thumb.position.set(side * 0.043, -0.002, -0.008);
+  thumb.rotation.set(0.72, 0, side * 0.78);
+  hand.add(thumb);
+
+  const cuff = new THREE.Mesh(CUFF_GEO, M.glove);
+  cuff.position.set(0, 0, 0.062);
+  cuff.rotation.x = Math.PI / 2;
+  hand.add(cuff);
+  parent.add(hand);
+
+  const wrist = [palm[0], palm[1], palm[2] + 0.068];
+  parent.add(limbBetween(M.sleeve, wrist, elbow, 0.05, 0.066));
+}
+
 function gunMesh(kind) {
   const g = new THREE.Group();
   const M = gunMaterials();
@@ -111,12 +209,12 @@ function gunMesh(kind) {
   if (kind === 'pistol') {
     g.scale.setScalar(0.78);
     // slide with an ejection port cut and a squared-off muzzle end
-    g.add(bx(M.steel, 0.048, 0.052, 0.25, 0, 0.026, -0.02));
+    g.add(rb(M.steel, 0.048, 0.052, 0.25, 0, 0.026, -0.02, 0.005));
     g.add(bx(M.black, 0.03, 0.03, 0.05, 0.012, 0.03, 0.02));      // port
-    g.add(bx(M.steel, 0.044, 0.03, 0.22, 0, -0.012, -0.01));      // frame / dust cover
+    g.add(rb(M.steel, 0.044, 0.03, 0.22, 0, -0.012, -0.01, 0.004)); // frame / dust cover
     g.add(tube(M.black, 0.011, 0.06, 0, 0.026, -0.155, 8));       // barrel crown
     // grip: raked back, with a checkered polymer panel and a visible mag baseplate
-    const grip = bx(M.poly, 0.042, 0.15, 0.062, 0, -0.095, 0.075);
+    const grip = rb(M.poly, 0.042, 0.15, 0.062, 0, -0.095, 0.075, 0.007);
     grip.rotation.x = 0.28; g.add(grip);
     const base = bx(M.black, 0.048, 0.014, 0.07, 0, -0.172, 0.1);
     base.rotation.x = 0.28; g.add(base);
@@ -130,18 +228,26 @@ function gunMesh(kind) {
     g.add(bx(M.black, 0.01, 0.014, 0.012, 0.015, 0.059, 0.075));
     g.add(bx(M.tritium, 0.004, 0.005, 0.006, -0.015, 0.061, 0.07));
     g.add(bx(M.tritium, 0.004, 0.005, 0.006, 0.015, 0.061, 0.07));
+    addGlovedArm(g, M, {
+      side: 1, palm: [0.052, -0.092, 0.066], palmRot: [0.32, 0.05, -0.08],
+      elbow: [0.18, -0.4, 0.3],
+    });
+    addGlovedArm(g, M, {
+      side: -1, palm: [-0.052, -0.07, 0.008], palmRot: [0.18, -0.08, 0.22],
+      elbow: [-0.17, -0.38, 0.26], support: true,
+    });
     g.userData.sight = [0, 0.06, 0];
     g.userData.muzzle = [0, 0.026, -0.2];
 
   } else if (kind === 'm4') {
     g.scale.setScalar(0.7);
     // upper + lower receiver, with the magazine well as its own block so the profile steps
-    g.add(bx(M.steel, 0.05, 0.062, 0.3, 0, 0.02, 0.13));
-    g.add(bx(M.black, 0.048, 0.056, 0.17, 0, -0.038, 0.185));
+    g.add(rb(M.steel, 0.05, 0.062, 0.3, 0, 0.02, 0.13, 0.006));
+    g.add(rb(M.black, 0.048, 0.056, 0.17, 0, -0.038, 0.185, 0.006));
     g.add(bx(M.black, 0.052, 0.014, 0.32, 0, 0.056, 0.12));        // top rail
     for (let i = 0; i < 7; i++) g.add(bx(M.steel, 0.054, 0.008, 0.014, 0, 0.064, 0.0 + i * 0.045));
     // handguard: quad rail, slotted, then gas block and barrel out the front
-    g.add(bx(M.poly, 0.052, 0.052, 0.26, 0, 0.018, -0.15));
+    g.add(rb(M.poly, 0.052, 0.052, 0.26, 0, 0.018, -0.15, 0.007));
     for (let i = 0; i < 6; i++) g.add(bx(M.black, 0.056, 0.01, 0.018, 0, 0.018, -0.05 - i * 0.04));
     g.add(bx(M.steel, 0.03, 0.04, 0.05, 0, 0.036, -0.29));         // gas block
     g.add(tube(M.steel, 0.012, 0.19, 0, 0.026, -0.38, 8));         // barrel
@@ -151,16 +257,16 @@ function gunMesh(kind) {
       p.rotation.z = a; g.add(p);
     }
     // pistol grip, trigger, magazine (two segments so it curves), collapsible stock
-    const grip = bx(M.poly, 0.044, 0.13, 0.058, 0, -0.09, 0.245);
+    const grip = rb(M.poly, 0.044, 0.13, 0.058, 0, -0.09, 0.245, 0.007);
     grip.rotation.x = 0.34; g.add(grip);
     g.add(...guard(M.black, -0.018, 0.2, 0.046));
     g.add(bx(M.black, 0.012, 0.034, 0.012, 0, -0.03, 0.196));
-    const mag1 = bx(M.poly, 0.042, 0.11, 0.062, 0, -0.105, 0.155);
+    const mag1 = rb(M.poly, 0.042, 0.11, 0.062, 0, -0.105, 0.155, 0.006);
     mag1.rotation.x = -0.1; g.add(mag1);
-    const mag2 = bx(M.poly, 0.04, 0.09, 0.058, 0, -0.195, 0.127);
+    const mag2 = rb(M.poly, 0.04, 0.09, 0.058, 0, -0.195, 0.127, 0.006);
     mag2.rotation.x = -0.36; g.add(mag2);
     g.add(tube(M.black, 0.018, 0.16, 0, 0.014, 0.35, 8));          // buffer tube
-    g.add(bx(M.poly, 0.05, 0.075, 0.13, 0, 0.0, 0.4));             // stock body
+    g.add(rb(M.poly, 0.05, 0.075, 0.13, 0, 0.0, 0.4, 0.008));      // stock body
     g.add(bx(M.poly, 0.048, 0.026, 0.03, 0, -0.05, 0.44));         // toe
     g.add(bx(M.black, 0.052, 0.02, 0.036, 0, 0.032, 0.465));       // buttpad
     g.add(bx(M.black, 0.06, 0.012, 0.03, 0, 0.062, 0.28));         // charging handle
@@ -181,6 +287,14 @@ function gunMesh(kind) {
     const rring = ring(M.dot, 0.019, 0.021, 0, 0.098, -0.03);
     g.add(rdot, rring);
     g.userData.reticle = [rdot, rring];
+    addGlovedArm(g, M, {
+      side: 1, palm: [0.058, -0.105, 0.245], palmRot: [0.32, 0.02, -0.08],
+      elbow: [0.2, -0.42, 0.49],
+    });
+    addGlovedArm(g, M, {
+      side: -1, palm: [-0.066, -0.004, -0.15], palmRot: [-0.2, 0.04, 0.2],
+      elbow: [-0.23, -0.37, 0.2], support: true,
+    });
     g.userData.sight = [0, 0.098, 0];
     g.userData.muzzle = [0, 0.026, -0.53];
 
@@ -188,21 +302,21 @@ function gunMesh(kind) {
     g.scale.setScalar(0.6);
     // Barrett: the read is LENGTH plus the muzzle brake plus the bipod. Everything else is
     // supporting cast, but the brake is the silhouette people recognise.
-    g.add(bx(M.steel, 0.062, 0.09, 0.62, 0, 0.01, 0.16));           // receiver
+    g.add(rb(M.steel, 0.062, 0.09, 0.62, 0, 0.01, 0.16, 0.008));    // receiver
     g.add(bx(M.black, 0.07, 0.026, 0.66, 0, 0.062, 0.14));          // top rail
-    g.add(bx(M.tan, 0.058, 0.07, 0.2, 0, -0.02, 0.5));              // cheek riser / buttstock
+    g.add(rb(M.tan, 0.058, 0.07, 0.2, 0, -0.02, 0.5, 0.008));       // cheek riser / buttstock
     g.add(bx(M.black, 0.062, 0.09, 0.04, 0, -0.01, 0.61));          // buttpad
-    g.add(bx(M.steel, 0.05, 0.05, 0.52, 0, 0.02, -0.36));           // barrel shroud
+    g.add(rb(M.steel, 0.05, 0.05, 0.52, 0, 0.02, -0.36, 0.006));    // barrel shroud
     g.add(tube(M.steel, 0.017, 0.28, 0, 0.02, -0.72, 10));          // exposed barrel
     // arrowhead muzzle brake: baffle plates with the gaps between them doing the work
     g.add(tube(M.black, 0.03, 0.14, 0, 0.02, -0.93, 10));
     for (let i = 0; i < 3; i++) g.add(bx(M.black, 0.1, 0.052, 0.022, 0, 0.02, -0.88 - i * 0.045));
     // grip, guard, and the big detachable magazine
-    const grip = bx(M.poly, 0.05, 0.15, 0.07, 0, -0.11, 0.36);
+    const grip = rb(M.poly, 0.05, 0.15, 0.07, 0, -0.11, 0.36, 0.008);
     grip.rotation.x = 0.3; g.add(grip);
     g.add(...guard(M.black, -0.036, 0.3, 0.052));
     g.add(bx(M.black, 0.014, 0.04, 0.014, 0, -0.05, 0.296));
-    g.add(bx(M.black, 0.05, 0.19, 0.09, 0, -0.13, 0.16));           // mag body
+    g.add(rb(M.black, 0.05, 0.19, 0.09, 0, -0.13, 0.16, 0.008));    // mag body
     g.add(bx(M.steel, 0.056, 0.016, 0.096, 0, -0.232, 0.16));       // mag floorplate
     g.add(bx(M.black, 0.05, 0.04, 0.14, 0, 0.086, 0.42));           // carry handle
     // bipod: two splayed legs, not one stick
@@ -220,6 +334,14 @@ function gunMesh(kind) {
     g.add(bx(M.black, 0.03, 0.038, 0.03, 0, 0.166, 0.03));
     g.add(bx(M.black, 0.038, 0.03, 0.03, 0.032, 0.13, 0.03));
     for (const rz of [-0.05, 0.16]) g.add(bx(M.black, 0.05, 0.05, 0.028, 0, 0.098, rz)); // rings
+    addGlovedArm(g, M, {
+      side: 1, palm: [0.065, -0.12, 0.36], palmRot: [0.32, 0.02, -0.1],
+      elbow: [0.21, -0.44, 0.56],
+    });
+    addGlovedArm(g, M, {
+      side: -1, palm: [-0.075, -0.035, -0.43], palmRot: [-0.12, 0.02, 0.18],
+      elbow: [-0.25, -0.39, 0.08], support: true,
+    });
     g.userData.sight = [0, 0.13, 0];
     g.userData.muzzle = [0, 0.02, -1.0];
   }
@@ -402,7 +524,7 @@ export class Weapons {
     // Further from the eye while aiming. The sight anchor keeps it centred at any z (a point
     // at camera-space x=y=0 projects to screen centre regardless of depth), so this is free
     // shrink: it cuts how much of the lower screen the receiver eats without moving the aim.
-    this.holder.position.z = (ads ? -0.62 : -0.45) + kick;
+    this.holder.position.z = (ads ? -0.7 : -0.45) + kick;
     this.holder.position.x = (ads ? (this.adsX ?? 0) : 0.22) + rl * 0.05;
     this.holder.position.y = (ads ? (this.adsY ?? -0.155) : -0.22) + Math.sin(t * 1.8) * 0.004 - rl * 0.12;
     this.holder.rotation.x = this.recoilKick * 0.06 + rl * 0.28;
