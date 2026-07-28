@@ -36,6 +36,24 @@ function raggedDisc(radius = 1, points = 18, seed = 1) {
   return new THREE.ShapeGeometry(shape);
 }
 
+const WATCH_ROOF_GEO = (() => {
+  // Triangular section extruded along the cabin width: a real pitched roof silhouette instead
+  // of another thin box stacked on top of the tower.
+  const shape = new THREE.Shape();
+  shape.moveTo(-1.52, 0);
+  shape.lineTo(1.52, 0);
+  shape.lineTo(0, 0.68);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 4.8, bevelEnabled: true, bevelSegments: 2,
+    bevelSize: 0.035, bevelThickness: 0.035, curveSegments: 1,
+  });
+  geometry.translate(0, 0, -2.4);
+  geometry.rotateY(Math.PI / 2);
+  geometry.computeVertexNormals();
+  return geometry;
+})();
+
 function droneModel() {
   const root = new THREE.Group();
   const carbon = new THREE.MeshStandardMaterial({ color: 0x171a1c, roughness: 0.5, metalness: 0.45 });
@@ -340,7 +358,10 @@ export function addFrontlineMissionArt(scene, levelId) {
 
     // The compound's old municipal wall has been converted into a fighting position. These
     // silhouettes sit above the collision shell and turn the blank slab into a defended gate.
-    const timber = new THREE.MeshStandardMaterial({ color: 0x61533e, roughness: 0.93 });
+    const timber = new THREE.MeshStandardMaterial({ color: 0x4b5048, roughness: 0.93 });
+    const roofSteel = new THREE.MeshStandardMaterial({
+      color: 0x2c3335, roughness: 0.54, metalness: 0.56,
+    });
     const char = new THREE.MeshStandardMaterial({
       color: 0x202324, roughness: 1, transparent: true, opacity: 0.76,
     });
@@ -351,6 +372,11 @@ export function addFrontlineMissionArt(scene, levelId) {
     const towerRoofs = [];
     const towerSupports = [];
     const towerWindows = [];
+    const towerFrames = [];
+    const towerBraces = [];
+    const towerLadders = [];
+    const towerRails = [];
+    const platformBags = [];
     for (const x of [-8.5, 8.5]) {
       towerParts.push(
         [x, 4.35, 30.25, 0, 0, 0, 4.2, 0.24, 2.35],
@@ -358,16 +384,68 @@ export function addFrontlineMissionArt(scene, levelId) {
         [x - 1.92, 5.15, 30.25, 0, 0, 0, 0.14, 1.9, 2.1],
         [x + 1.92, 5.15, 30.25, 0, 0, 0, 0.14, 1.9, 2.1],
       );
-      towerRoofs.push([x, 6.25, 30.25, 0, 0, 0, 4.65, 0.18, 2.75]);
+      towerRoofs.push([x, 6.15, 30.25, 0, 0, 0, 1, 1, 1]);
       towerWindows.push([x, 5.35, 30.84, 0, 0, 0, 3.2, 0.64, 0.04]);
-      for (const dx of [-1.55, 1.55]) {
-        towerSupports.push([x + dx, 2.15, 30.25, 0, 0, 0, 1, 4.3, 1]);
+      for (const dx of [-1.55, 1.55]) for (const dz of [-0.74, 0.74]) {
+        towerSupports.push([x + dx, 2.15, 30.25 + dz, 0, 0, 0, 1, 4.3, 1]);
+      }
+      // Window surround and central mullion hold their shape against a bright sky.
+      towerFrames.push(
+        [x, 5.72, 30.88, 0, 0, 0, 3.42, 0.07, 0.07],
+        [x, 4.98, 30.88, 0, 0, 0, 3.42, 0.07, 0.07],
+        [x - 1.68, 5.35, 30.88, 0, 0, 0, 0.07, 0.82, 0.07],
+        [x + 1.68, 5.35, 30.88, 0, 0, 0, 0.07, 0.82, 0.07],
+        [x, 5.35, 30.89, 0, 0, 0, 0.06, 0.72, 0.06],
+      );
+      // X-bracing turns four poles into an engineered firing platform.
+      towerBraces.push(
+        [x, 2.25, 29.48, 0, 0, 0.9, 4.2, 0.07, 0.08],
+        [x, 2.25, 29.46, 0, 0, -0.9, 4.2, 0.07, 0.08],
+      );
+      const inner = x < 0 ? x + 1.42 : x - 1.42;
+      towerLadders.push(
+        [inner - 0.22, 2.15, 29.38, 0, 0, 0, 0.055, 4.1, 0.055],
+        [inner + 0.22, 2.15, 29.38, 0, 0, 0, 0.055, 4.1, 0.055],
+      );
+      for (let rung = 0; rung < 10; rung++) {
+        towerLadders.push([
+          inner, 0.42 + rung * 0.39, 29.36, 0, 0, 0, 0.5, 0.045, 0.055,
+        ]);
+      }
+      for (const side of [-1, 1]) {
+        towerRails.push(
+          [x + side * 2.02, 4.8, 30.25, 0, 0, 0, 0.055, 0.055, 2.4],
+          [x + side * 2.02, 4.62, 29.35, 0, 0, 0, 0.055, 0.72, 0.055],
+          [x + side * 2.02, 4.62, 31.15, 0, 0, 0, 0.055, 0.72, 0.055],
+        );
+      }
+      for (let bag = -3; bag <= 3; bag++) {
+        platformBags.push([
+          x + bag * 0.48, 4.54, 29.18, 0, 0, Math.PI / 2, 1, 1, 1,
+        ]);
       }
     }
-    instanced(scene, new THREE.BoxGeometry(1, 1, 1), timber, towerParts);
-    instanced(scene, new THREE.BoxGeometry(1, 1, 1), timber, towerRoofs);
-    instanced(scene, new THREE.BoxGeometry(1, 1, 1), watchGlass, towerWindows, false);
-    instanced(scene, new THREE.CylinderGeometry(0.075, 0.1, 1, 8), steel, towerSupports);
+    const bodies = instanced(scene, new THREE.BoxGeometry(1, 1, 1), timber, towerParts);
+    bodies.name = 'watch-post-bodies';
+    const roofs = instanced(scene, WATCH_ROOF_GEO, roofSteel, towerRoofs);
+    roofs.name = 'watch-post-pitched-roofs';
+    const windows = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), watchGlass, towerWindows, false);
+    windows.name = 'watch-post-windows';
+    const supports = instanced(
+      scene, new THREE.CylinderGeometry(0.075, 0.1, 1, 8), steel, towerSupports);
+    supports.name = 'watch-post-supports';
+    const frames = instanced(scene, new THREE.BoxGeometry(1, 1, 1), steel, towerFrames);
+    frames.name = 'watch-post-window-frames';
+    const braces = instanced(scene, new THREE.BoxGeometry(1, 1, 1), steel, towerBraces);
+    braces.name = 'watch-post-cross-braces';
+    const ladders = instanced(scene, new THREE.BoxGeometry(1, 1, 1), steel, towerLadders);
+    ladders.name = 'watch-post-ladders';
+    const rails = instanced(scene, new THREE.BoxGeometry(1, 1, 1), steel, towerRails);
+    rails.name = 'watch-post-rails';
+    const fortification = instanced(
+      scene, new THREE.CapsuleGeometry(0.16, 0.34, 4, 8), sand, platformBags);
+    fortification.name = 'watch-post-sandbags';
 
     const gateScars = [
       [-12.5, 2.1, 30.21, 0, 0, -0.2, 0.86, 0.7, 1],
