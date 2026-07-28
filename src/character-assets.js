@@ -425,28 +425,106 @@ function hostageChair() {
 function aimBone(root, bone, child, target) {
   if (!bone || !child) return;
   root.updateMatrixWorld(true);
-  const from = child.getWorldPosition(new THREE.Vector3())
-    .sub(bone.getWorldPosition(new THREE.Vector3())).normalize();
   const targetWorld = root.localToWorld(target.clone());
-  const to = targetWorld.sub(bone.getWorldPosition(new THREE.Vector3())).normalize();
-  const world = bone.getWorldQuaternion(new THREE.Quaternion());
-  const desired = new THREE.Quaternion().setFromUnitVectors(from, to).multiply(world);
-  const parentWorld = bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
-  bone.quaternion.copy(parentWorld.multiply(desired));
+  const childWorld = child.getWorldPosition(new THREE.Vector3());
+  const from = bone.parent.worldToLocal(childWorld).sub(bone.position).normalize();
+  const to = bone.parent.worldToLocal(targetWorld).sub(bone.position).normalize();
+  bone.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(from, to));
   root.updateMatrixWorld(true);
+}
+
+function solveArmToGrip(root, upper, lower, wrist, elbowGuide, grip) {
+  if (!upper || !lower || !wrist) return;
+  root.updateMatrixWorld(true);
+  const rootPoint = object => root.worldToLocal(
+    object.getWorldPosition(new THREE.Vector3()));
+  const shoulder = rootPoint(upper);
+  const elbow = rootPoint(lower);
+  const hand = rootPoint(wrist);
+  const upperLength = shoulder.distanceTo(elbow);
+  const lowerLength = elbow.distanceTo(hand);
+  const reach = grip.clone().sub(shoulder);
+  const rawDistance = Math.max(0.0001, reach.length());
+  const distance = THREE.MathUtils.clamp(
+    rawDistance, Math.abs(upperLength - lowerLength) + 0.0001,
+    upperLength + lowerLength - 0.0001);
+  const direction = reach.normalize();
+  const along = (
+    upperLength * upperLength - lowerLength * lowerLength + distance * distance
+  ) / (2 * distance);
+  const height = Math.sqrt(Math.max(0, upperLength * upperLength - along * along));
+  const centre = shoulder.clone().addScaledVector(direction, along);
+  const bend = elbowGuide.clone().sub(centre)
+    .addScaledVector(direction, -elbowGuide.clone().sub(centre).dot(direction));
+  if (bend.lengthSq() < 0.000001) {
+    bend.set(0, 1, 0).cross(direction);
+    if (bend.lengthSq() < 0.000001) bend.set(1, 0, 0);
+  }
+  bend.normalize();
+  const solvedElbow = centre.addScaledVector(bend, height);
+  const solvedGrip = shoulder.clone().addScaledVector(direction, distance);
+  // Solve against the clamped point only when a target is fractionally beyond the arm's
+  // physical reach; normal authored grip points land exactly.
+  aimBone(root, upper, lower, solvedElbow);
+  aimBone(root, lower, wrist, solvedGrip);
 }
 
 function findRigObject(visual, name) {
   const direct = visual.getObjectByName(name);
   if (direct) return direct;
+  const canonical = value => value.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  const expected = canonical(name);
   let match = null;
   visual.traverse(object => {
-    if (!match && (object.name === name || object.name.endsWith(name))) match = object;
+    const actual = canonical(object.name || '');
+    if (!match && (actual === expected || actual.endsWith(expected))) match = object;
   });
   return match;
 }
 
+function cacheWeaponFingerPose(rig) {
+  if (rig.weaponFingerPose) return;
+  const sample = rig.actions.idle_gun || rig.actions.idle_gun_shoot
+    || rig.actions.combatIdle;
+  const names = [];
+  for (const side of ['L', 'R']) {
+    for (const finger of ['Index', 'Middle', 'Ring', 'Pinky']) {
+      for (const joint of [1, 2, 3, 4]) names.push(`${finger}${joint}.${side}`);
+    }
+    for (const joint of [1, 2, 3]) names.push(`Thumb${joint}.${side}`);
+  }
+  const previousTime = sample?.time || 0;
+  if (sample) {
+    sample.time = Math.min(0.55, sample.getClip().duration * 0.55);
+    rig.mixer.update(0);
+  }
+  rig.weaponFingerPose = names.map(name => {
+    const bone = findRigObject(rig.visual, name);
+    if (!bone) return null;
+    const quaternion = bone.quaternion.clone();
+    const match = name.match(/^(Index|Middle|Ring|Pinky)([1-4])/);
+    if (match) {
+      const curl = [0, -0.12, -1.42, -1.18, -0.45][Number(match[2])];
+      quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(1, 0, 0), curl));
+    }
+    return [bone, quaternion];
+  }).filter(Boolean);
+  if (sample) {
+    sample.time = previousTime;
+    rig.mixer.update(0);
+  }
+}
+
+function applyWeaponFingerPose(rig) {
+  cacheWeaponFingerPose(rig);
+  for (const [bone, quaternion] of rig.weaponFingerPose) {
+    bone.quaternion.copy(quaternion);
+  }
+}
+
 function poseAuthoredRifle(root, rig) {
+  applyWeaponFingerPose(rig);
   if (!rig.weaponBones) {
     const node = name => findRigObject(rig.visual, name);
     rig.weaponBones = {
@@ -455,28 +533,26 @@ function poseAuthoredRifle(root, rig) {
     };
   }
   const b = rig.weaponBones;
-  if (rig.weaponPose) {
-    b.upperL?.quaternion.copy(rig.weaponPose.upperL);
-    b.lowerL?.quaternion.copy(rig.weaponPose.lowerL);
-    b.upperR?.quaternion.copy(rig.weaponPose.upperR);
-    b.lowerR?.quaternion.copy(rig.weaponPose.lowerR);
-    return;
-  }
   // Low-ready rather than a rigid T-pose: trigger elbow tucked, support elbow lower and out,
-  // wrists converging on two separate points along the handguard.
-  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(-0.27, 1.18, 0.10));
-  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(-0.075, 1.25, 0.32));
-  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(0.34, 1.14, 0.27));
-  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(0.095, 1.24, 0.55));
-  // The solve above establishes local rotations once. Locomotion changes those four bones
-  // every mixer tick, so restore four cached quaternions afterward instead of repeating four
-  // world-matrix traversals for every combatant on every frame.
-  rig.weaponPose = {
-    upperL: b.upperL?.quaternion.clone(),
-    lowerL: b.lowerL?.quaternion.clone(),
-    upperR: b.upperR?.quaternion.clone(),
-    lowerR: b.lowerR?.quaternion.clone(),
-  };
+  // wrists landing on opposite sides of the receiver and handguard. These are root-local
+  // contact points derived from the rifle's authored transform, not free-floating arm poses.
+  const triggerGrip = rig.weaponGripTargets?.trigger
+    || new THREE.Vector3(-0.222, 1.239, 0.272);
+  const supportGrip = rig.weaponGripTargets?.support
+    || new THREE.Vector3(-0.052, 1.229, 0.415);
+  solveArmToGrip(
+    root, b.upperR, b.lowerR, b.wristR,
+    new THREE.Vector3(-0.27, 1.18, 0.10), triggerGrip);
+  solveArmToGrip(
+    root, b.upperL, b.lowerL, b.wristL,
+    new THREE.Vector3(0.34, 1.14, 0.27), supportGrip);
+  if (!rig.weaponGripTargets) {
+    rig.baseWeaponGripTargets = {
+      trigger: triggerGrip.clone(),
+      support: supportGrip.clone(),
+    };
+    rig.weaponGripTargets = { trigger: triggerGrip, support: supportGrip };
+  }
 }
 
 function poseAuthoredHostage(root, rig) {
@@ -490,15 +566,7 @@ function poseAuthoredHostage(root, rig) {
     action.paused = true;
   }
 
-  const find = name => {
-    const direct = rig.visual.getObjectByName(name);
-    if (direct) return direct;
-    let match = null;
-    rig.visual.traverse(object => {
-      if (!match && (object.name === name || object.name.endsWith(name))) match = object;
-    });
-    return match;
-  };
+  const find = name => findRigObject(rig.visual, name);
   aimBone(root, find('UpperArm.L'), find('LowerArm.L'),
     new THREE.Vector3(-0.32, 1.12, 0.14));
   aimBone(root, find('LowerArm.L'), find('Palm.L'),
@@ -601,7 +669,9 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
   // Low-ready on the actor's forward axis. The previous ninety-degree rotation made the gun
   // a broad rectangular bar floating across the chest whenever an enemy faced the player.
   // A real rifle aimed at you foreshortens; posture and faction kit carry identification.
-  rifle.position.set(0.03, 1.29, 0.28);
+  // The authored receiver sits between the two solved wrists. Its former placement was
+  // roughly 15 cm to the actor's right, leaving a visible rifle floating above both hands.
+  rifle.position.set(-0.117, 1.279, 0.232);
   rifle.rotation.set(0.11, Math.PI - 0.28, -0.04);
   rifle.castShadow = quality.shadows;
   rifle.name = 'combatant-carried-rifle';
@@ -641,6 +711,8 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
     friendly: !!friendly,
     combatant: true,
     baseVisualY: visual.position.y,
+    baseRiflePosition: rifle.position.clone(),
+    baseRifleQuaternion: rifle.quaternion.clone(),
   };
   root.userData.rig.applyWeaponPose = () => poseAuthoredRifle(root, root.userData.rig);
   root.userData.rig.applyWeaponPose();
@@ -773,6 +845,21 @@ export function kneelAuthoredCharacter(root, amount) {
   const rig = root.userData.rig;
   if (!rig?.authored) return;
   rig.visual.position.y = rig.baseVisualY - 0.32 * amount;
+  const lean = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0), -0.16 * amount);
+  if (rig.rifle && rig.baseRiflePosition && rig.baseRifleQuaternion) {
+    const baseOrigin = new THREE.Vector3(0, rig.baseVisualY, 0);
+    const movedOrigin = new THREE.Vector3(0, rig.baseVisualY - 0.32 * amount, 0);
+    rig.rifle.position.copy(rig.baseRiflePosition).sub(baseOrigin)
+      .applyQuaternion(lean).add(movedOrigin);
+    rig.rifle.quaternion.copy(lean).multiply(rig.baseRifleQuaternion);
+    if (rig.baseWeaponGripTargets && rig.weaponGripTargets) {
+      rig.weaponGripTargets.trigger.copy(rig.baseWeaponGripTargets.trigger)
+        .sub(baseOrigin).applyQuaternion(lean).add(movedOrigin);
+      rig.weaponGripTargets.support.copy(rig.baseWeaponGripTargets.support)
+        .sub(baseOrigin).applyQuaternion(lean).add(movedOrigin);
+    }
+  }
   rig.visual.rotation.x = -0.16 * amount;
 }
 

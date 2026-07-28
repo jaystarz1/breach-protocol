@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:4178/?renderer=desktop")
     parser.add_argument("--output", default="/private/tmp/bp-characters")
     parser.add_argument("--action-study", action="store_true")
+    parser.add_argument("--rig-audit", action="store_true")
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
@@ -72,6 +73,7 @@ def main():
                   let triangles = 0;
                   let carriedRifle = null;
                   let combatantSurface = null;
+                  let handRig = null;
                   row.actor.mesh.traverse(object => {
                     if (!object.isMesh || !object.visible) return;
                     meshes++;
@@ -136,6 +138,65 @@ def main():
                       metalness: material?.metalness ?? null,
                     });
                   });
+                  if (rig?.combatant && rig.rifle) {
+                    row.actor.mesh.updateMatrixWorld(true);
+                    rig.rifle.geometry.computeBoundingBox();
+                    const rootPoint = object => object
+                      ? row.actor.mesh.worldToLocal(
+                          object.getWorldPosition(rig.rifle.position.clone())).toArray()
+                            .map(value => +value.toFixed(4))
+                      : null;
+                    const boneRow = name => {
+                      let bone = rig.visual.getObjectByName(name);
+                      const canonical = value => value.replace(/[^a-z0-9]/gi, '')
+                        .toLowerCase();
+                      const expected = canonical(name);
+                      if (!bone) rig.visual.traverse(object => {
+                        const actual = canonical(object.name || '');
+                        if (!bone && (actual === expected || actual.endsWith(expected))) {
+                          bone = object;
+                        }
+                      });
+                      return bone ? {
+                        name,
+                        position: bone.position.toArray().map(value => +value.toFixed(4)),
+                        quaternion: bone.quaternion.toArray().map(value => +value.toFixed(4)),
+                        root: rootPoint(bone),
+                      } : null;
+                    };
+                    const contact = (name, target) => {
+                      const bone = boneRow(name);
+                      if (!bone || !target) return null;
+                      const dx = bone.root[0] - target.x;
+                      const dy = bone.root[1] - target.y;
+                      const dz = bone.root[2] - target.z;
+                      return {
+                        wrist: bone.root,
+                        target: target.toArray().map(value => +value.toFixed(4)),
+                        error: +Math.hypot(dx, dy, dz).toFixed(4),
+                      };
+                    };
+                    handRig = {
+                      rifleBounds: {
+                        min: rig.rifle.geometry.boundingBox.min.toArray()
+                          .map(value => +value.toFixed(4)),
+                        max: rig.rifle.geometry.boundingBox.max.toArray()
+                          .map(value => +value.toFixed(4)),
+                      },
+                      riflePosition: rig.rifle.position.toArray()
+                        .map(value => +value.toFixed(4)),
+                      rifleQuaternion: rig.rifle.quaternion.toArray()
+                        .map(value => +value.toFixed(4)),
+                      bones: [
+                        'Wrist.L', 'Thumb2.L', 'Middle2.L', 'Middle3.L',
+                        'Wrist.R', 'Thumb2.R', 'Middle2.R', 'Middle3.R',
+                      ].map(boneRow).filter(Boolean),
+                      contact: {
+                        support: contact('Wrist.L', rig.weaponGripTargets?.support),
+                        trigger: contact('Wrist.R', rig.weaponGripTargets?.trigger),
+                      },
+                    };
+                  }
                   return {
                     kind,
                     authored: !!rig?.authored,
@@ -147,6 +208,7 @@ def main():
                     triangles,
                     carriedRifle,
                     combatantSurface,
+                    handRig,
                     materials,
                   };
                 }""",
@@ -155,10 +217,15 @@ def main():
 
         start(2)
         captures = {}
+        action_contacts = {}
         for kind in ("enemy", "friendly"):
             captures[kind] = stage(kind)
             page.wait_for_timeout(80)
             page.screenshot(path=str(output / f"{kind}.png"))
+            if args.rig_audit:
+                print(json.dumps(captures[kind], indent=2))
+                browser.close()
+                return
             if kind == "enemy" and args.action_study:
                 page.evaluate("""() => {
                   const enemy = BP.world.enemies.find(actor => actor.mesh.visible);
@@ -173,21 +240,53 @@ def main():
                     "idle_gun", "idle_gun_pointing", "idle_gun_shoot",
                     "gun_shoot", "run_shoot",
                 ):
-                    available = page.evaluate(
+                    contact_row = page.evaluate(
                         """name => {
                           const enemy = BP.world.enemies.find(actor => actor.mesh.visible);
                           const rig = enemy?.mesh.userData.rig;
                           const action = rig?.actions?.[name];
-                          if (!action) return false;
+                          if (!action) return null;
                           rig.mixer.stopAllAction();
                           action.reset().play();
                           action.time = Math.min(0.55, action.getClip().duration * 0.55);
                           rig.mixer.update(0);
-                          return true;
+                          rig.applyWeaponPose?.();
+                          enemy.mesh.updateMatrixWorld(true);
+                          const canonical = value => value.replace(/[^a-z0-9]/gi, '')
+                            .toLowerCase();
+                          const bone = name => {
+                            const expected = canonical(name);
+                            let found = null;
+                            rig.visual.traverse(object => {
+                              const actual = canonical(object.name || '');
+                              if (!found && (actual === expected || actual.endsWith(expected))) {
+                                found = object;
+                              }
+                            });
+                            return found;
+                          };
+                          const local = object => enemy.mesh.worldToLocal(
+                            object.getWorldPosition(rig.rifle.position.clone()));
+                          const error = (object, target) => local(object).distanceTo(target);
+                          let fingerError = 0;
+                          for (const [finger, expected] of rig.weaponFingerPose || []) {
+                            const dot = Math.min(1, Math.abs(finger.quaternion.dot(expected)));
+                            fingerError = Math.max(fingerError, 2 * Math.acos(dot));
+                          }
+                          return {
+                            name,
+                            duration: +action.getClip().duration.toFixed(3),
+                            supportError: +error(
+                              bone('Wrist.L'), rig.weaponGripTargets.support).toFixed(4),
+                            triggerError: +error(
+                              bone('Wrist.R'), rig.weaponGripTargets.trigger).toFixed(4),
+                            fingerError: +fingerError.toFixed(5),
+                          };
                         }""",
                         action_name,
                     )
-                    if available:
+                    if contact_row:
+                        action_contacts[action_name] = contact_row
                         page.screenshot(path=str(output / f"action-{action_name}.png"))
 
         start(5)
@@ -218,8 +317,10 @@ def main():
         result = {
             "captures": captures,
             "concealedReveal": revealed,
+            "actionContacts": action_contacts,
             "screenshots": [f"{kind}.png" for kind in captures]
             + (["enemy-material-close.png"] if args.action_study else [])
+            + ([f"action-{name}.png" for name in action_contacts] if args.action_study else [])
             + ["concealed-revealed.png"],
             "errors": errors[:8],
         }
@@ -255,6 +356,15 @@ def main():
         assert revealed and not revealed["concealed"] and revealed["visible"], result
         assert revealed["authored"] and revealed["authoredRifle"], result
         assert revealed["sourceParts"] >= 7 and revealed["vertices"] > 10_000, result
+        if args.action_study:
+            assert len(action_contacts) == 5, result
+            for row in action_contacts.values():
+                # Firing recoil can put the forward wrist at the physical end of this
+                # skeleton's reach. Keep the residual below 12 mm: inside the gloved palm,
+                # with no visible daylight between hand and weapon.
+                assert row["supportError"] <= 0.012, result
+                assert row["triggerError"] <= 0.003, result
+                assert row["fingerError"] <= 0.001, result
         browser.close()
 
 

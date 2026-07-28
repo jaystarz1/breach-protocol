@@ -70,7 +70,9 @@ def main():
           BP.player.pos.set(0, 0, 48);
           return { ok, before };
         }""")
-        page.wait_for_timeout(2000)
+        # Escort speed is 0.7 m/s; allow enough deterministic simulation time for the
+        # detached chair-distance assertion below to clear its 1.5 m evidence threshold.
+        page.wait_for_timeout(2500)
         page.screenshot(path=str(output / "hostage-escorting.png"))
         escort = page.evaluate("""() => {
           const hostage = BP.world.civilians.find(c => c.rescued);
