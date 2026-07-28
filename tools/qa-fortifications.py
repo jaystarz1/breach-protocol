@@ -61,7 +61,9 @@ def main():
                     if (!object.name?.startsWith('frontline-')) return;
                     if (!object.name.includes('hesco')
                         && !object.name.includes('hedgehog')
-                        && !object.name.includes('sandbag')) return;
+                        && !object.name.includes('sandbag')
+                        && !object.name.includes('ambient-crater')
+                        && !object.name.includes('ambient-rubble-fines')) return;
                     parts[object.name] = {
                       count: object.count || 0,
                       instanced: !!object.isInstancedMesh,
@@ -95,12 +97,16 @@ def main():
             "5": {
                 "frontline-market-hesco-fill": 5,
                 "frontline-market-hesco-cages": 5,
+                "frontline-ambient-crater-rims": 4,
+                "frontline-ambient-rubble-fines": 144,
             },
             "10": {
                 "frontline-fallback-hesco-fill": 4,
                 "frontline-fallback-hesco-cages": 4,
                 "frontline-fallback-hedgehogs": 2,
                 "frontline-fallback-sandbags": 32,
+                "frontline-ambient-crater-rims": 4,
+                "frontline-ambient-rubble-fines": 144,
             },
         }
         for level, names in expected.items():

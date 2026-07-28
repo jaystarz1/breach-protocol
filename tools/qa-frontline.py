@@ -30,6 +30,18 @@ def main():
         }""")
         page.wait_for_timeout(350)
         page.screenshot(path=args.output)
+        output_path = Path(args.output)
+        utility_path = output_path.with_name(f"{output_path.stem}-utility{output_path.suffix}")
+        page.evaluate("""() => {
+          BP.player.pos.set(2.0, 0, -8.0);
+          const target = { x: 14.7, y: 0.8, z: -18.2 };
+          const dx = target.x - BP.player.pos.x;
+          const dz = target.z - BP.player.pos.z;
+          BP.player.yaw = Math.atan2(-dx, -dz);
+          BP.player.pitch = Math.atan2(target.y - 1.6, Math.hypot(dx, dz));
+        }""")
+        page.wait_for_timeout(180)
+        page.screenshot(path=str(utility_path))
         art = page.evaluate("""() => {
           const named = {};
           BP.world.staticMesh.parent.traverse(object => {
@@ -92,7 +104,6 @@ def main():
             cylinder: marker.children.some(child => child.geometry.type === 'CylinderGeometry'),
           };
         }""")
-        output_path = Path(args.output)
         op_path = output_path.with_name(f"{output_path.stem}-op{output_path.suffix}")
         page.evaluate("""() => {
           BP.player.pos.set(-7, 0, -38.5);
@@ -129,6 +140,7 @@ def main():
 
         output = {
             "screenshot": str(Path(args.output)),
+            "utilityScreenshot": str(utility_path),
             "opScreenshot": str(op_path),
             "droneScreenshot": str(drone_path),
             "droneStarted": drone_started,
@@ -144,6 +156,15 @@ def main():
         assert art["frontline-rubble-brick"]["instances"] > 30
         assert art["frontline-rubble-concrete-2"]["instances"] > 30
         assert art["frontline-rubble-rebar"]["instances"] > 10
+        assert art["frontline-rubble-fines"]["instances"] == 210
+        assert art["frontline-crater-rims"]["instances"] == 3
+        assert art["frontline-crater-rims"]["vertices"] > 90
+        assert art["frontline-crater-rims"]["photoMap"]
+        assert art["frontline-crater-rims"]["relief"]
+        assert art["frontline-utility-poles"]["instances"] == 2
+        assert art["frontline-utility-crossarms"]["instances"] == 2
+        assert art["frontline-utility-insulators"]["instances"] == 6
+        assert all(f"frontline-utility-cable-{i}" in art for i in range(3))
         assert art["frontline-op-sandbags"]["instances"] > 20
         assert art["frontline-barricade-panels"]["instances"] > 40
         assert art["frontline-barricade-posts"]["instances"] > 8

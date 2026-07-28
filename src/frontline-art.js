@@ -23,6 +23,14 @@ function frontlineMaterials() {
       roughness: 0.97,
       metalness: 0,
     }),
+    asphalt: new THREE.MeshStandardMaterial({
+      color: 0x4b4d4c,
+      map: photos?.asphalt?.map || procedural.concrete.map,
+      bumpMap: photos?.asphalt?.height || null,
+      bumpScale: photos?.asphalt?.height ? 0.028 : 0,
+      roughness: 0.99,
+      metalness: 0,
+    }),
     brick: new THREE.MeshStandardMaterial({
       color: 0x966653,
       map: photos?.brick?.map || procedural.concrete.map,
@@ -113,11 +121,31 @@ function distressedBoxGeometry(width, height, depth, seed) {
 }
 
 const RUBBLE_GEOMETRIES = [
-  distressedBoxGeometry(0.52, 0.3, 0.44, 7101),
-  distressedBoxGeometry(0.38, 0.24, 0.62, 7102),
-  distressedBoxGeometry(0.66, 0.2, 0.34, 7103),
+  distressedBoxGeometry(0.52, 0.14, 0.44, 7101),
+  distressedBoxGeometry(0.34, 0.15, 0.17, 7102),
+  distressedBoxGeometry(0.66, 0.11, 0.34, 7103),
 ];
+const FINE_RUBBLE_GEO = (() => {
+  const geometry = new THREE.DodecahedronGeometry(0.09, 0);
+  geometry.scale(1, 0.48, 0.74);
+  return geometry;
+})();
 const REBAR_GEO = new THREE.CylinderGeometry(0.014, 0.018, 0.7, 7);
+const UTILITY_POLE_GEO = new THREE.CylinderGeometry(0.105, 0.165, 7, 10, 4);
+const UTILITY_CROSSARM_GEO = distressedBoxGeometry(1.85, 0.13, 0.14, 7719);
+const UTILITY_INSULATOR_GEO = (() => {
+  const parts = [
+    transformedGeometry(new THREE.CylinderGeometry(0.045, 0.055, 0.21, 10)),
+    transformedGeometry(new THREE.TorusGeometry(0.063, 0.018, 6, 12), [0, -0.035, 0],
+      [Math.PI / 2, 0, 0]),
+    transformedGeometry(new THREE.TorusGeometry(0.056, 0.016, 6, 12), [0, 0.035, 0],
+      [Math.PI / 2, 0, 0]),
+  ];
+  const geometry = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  geometry.computeBoundingSphere();
+  return geometry;
+})();
 const CORRUGATED_PANEL_GEO = (() => {
   // Sixteen subdivisions sample the peaks and troughs of four waves. Eight sampled only
   // the zero crossings, silently collapsing the "corrugated" panel back into a flat card.
@@ -466,6 +494,50 @@ function raggedDisc(radius = 1, points = 18, seed = 1) {
   return new THREE.ShapeGeometry(shape);
 }
 
+function craterRimGeometry(seed = 1, segments = 32) {
+  // Three irregular concentric rings form a shallow torn-asphalt berm. The old crater was a
+  // black floor card surrounded by upright rubble chunks; this provides a continuous road
+  // surface with a raised broken lip, so the depression reads before any loose debris does.
+  const R = rng(seed);
+  const radii = [0.52, 0.79, 1.16];
+  const heights = [0.018, 0.19, 0.012];
+  const jitter = Array.from({ length: segments }, () => 0.88 + R() * 0.24);
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  for (let ring = 0; ring < radii.length; ring++) {
+    for (let i = 0; i < segments; i++) {
+      const angle = i / segments * Math.PI * 2;
+      const stagger = ring === 1 ? 0.93 + R() * 0.13 : 1;
+      const radius = radii[ring] * jitter[i] * stagger;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      positions.push(x, heights[ring] * (ring === 1 ? 0.72 + R() * 0.5 : 1), z);
+      uvs.push(x * 0.45 + 0.5, z * 0.45 + 0.5);
+    }
+  }
+  for (let ring = 0; ring < radii.length - 1; ring++) {
+    for (let i = 0; i < segments; i++) {
+      const next = (i + 1) % segments;
+      const a = ring * segments + i;
+      const b = ring * segments + next;
+      const c = (ring + 1) * segments + i;
+      const d = (ring + 1) * segments + next;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+const CRATER_RIM_GEO = craterRimGeometry(47017);
+
 const WATCH_ROOF_GEO = (() => {
   // Triangular section extruded along the cabin width: a real pitched roof silhouette instead
   // of another thin box stacked on top of the tower.
@@ -531,15 +603,21 @@ export function addFrontlineStreetArt(scene) {
   const steel = new THREE.MeshStandardMaterial({ color: 0x30373a, roughness: 0.62, metalness: 0.62 });
 
   // Shell craters: one dark floor scar plus a low irregular broken rim.
-  for (const [x, z, radius] of [[-3.6, 14, 1.6], [5.4, -8, 1.15], [-4.8, -39, 1.4]]) {
+  const craterSites = [[-3.6, 14, 1.6], [5.4, -8, 1.15], [-4.8, -39, 1.4]];
+  for (const [x, z, radius] of craterSites) {
     const scar = new THREE.Mesh(raggedDisc(radius, 22, Math.round((x + 10) * 97)), char);
     scar.rotation.x = -Math.PI / 2;
     scar.position.set(x, 0.031, z);
     scar.receiveShadow = true;
     scene.add(scar);
   }
+  const craterRims = instanced(scene, CRATER_RIM_GEO, frontline.asphalt,
+    craterSites.map(([x, z, radius], i) =>
+      [x, 0.032, z, 0, i * 1.73, 0, radius * 1.28, 1, radius * 1.28]), false);
+  craterRims.name = 'frontline-crater-rims';
 
   const rubble = [[], [], []];
+  const fineRubble = [];
   const exposedRebar = [];
   for (let i = 0; i < 115; i++) {
     const cluster = i % 3;
@@ -549,8 +627,8 @@ export function addFrontlineStreetArt(scene) {
     const d = 1 + R() * 2.6;
     rubble[i % rubble.length].push([
       bx + Math.cos(a) * d, 0.08 + R() * 0.14, bz + Math.sin(a) * d,
-      R() * 2, R() * 2, R() * 2,
-      0.45 + R() * 0.7, 0.25 + R() * 0.45, 0.45 + R() * 0.7,
+      (R() - 0.5) * 0.46, R() * Math.PI * 2, (R() - 0.5) * 0.46,
+      0.38 + R() * 0.56, 0.55 + R() * 0.42, 0.38 + R() * 0.56,
     ]);
     if (i % 8 === 0) {
       exposedRebar.push([
@@ -561,6 +639,17 @@ export function addFrontlineStreetArt(scene) {
       ]);
     }
   }
+  for (let i = 0; i < 210; i++) {
+    const [bx, bz] = [[-3.6, 14], [5.4, -8], [-4.8, -39]][i % 3];
+    const a = R() * Math.PI * 2;
+    const d = 0.72 + R() * 3.05;
+    const scale = 0.5 + R() * 1.15;
+    fineRubble.push([
+      bx + Math.cos(a) * d, 0.055 + R() * 0.045, bz + Math.sin(a) * d,
+      R() * Math.PI, R() * Math.PI, R() * Math.PI,
+      scale * (0.72 + R() * 0.56), scale * (0.55 + R() * 0.48), scale,
+    ]);
+  }
   for (let i = 0; i < rubble.length; i++) {
     const chunks = instanced(scene, RUBBLE_GEOMETRIES[i],
       i === 1 ? frontline.brick : i === 2 ? frontline.concreteDark : frontline.concrete,
@@ -569,6 +658,53 @@ export function addFrontlineStreetArt(scene) {
   }
   const rebar = instanced(scene, REBAR_GEO, frontline.rebar, exposedRebar, false);
   rebar.name = 'frontline-rubble-rebar';
+  const gravel = instanced(scene, FINE_RUBBLE_GEO, frontline.concreteDark, fineRubble, false);
+  gravel.name = 'frontline-rubble-fines';
+
+  // Municipal distribution line damaged along the storefronts. One pole is still carrying
+  // tension; the opposite pole has snapped down the sidewalk with its service wires trailing
+  // from the building. Keeping both assemblies tight to the wall preserves the combat lane.
+  const utilityTimber = frontline.timber.clone();
+  utilityTimber.color.setHex(0x493d30);
+  const utilityPoles = instanced(scene, UTILITY_POLE_GEO, utilityTimber, [
+    [-14.72, 3.5, 8.0, 0.025, 0, -0.055, 1, 1, 1],
+    [14.72, 0.55, -17.9, Math.PI / 2 - 0.08, 0.04, 0, 1, 0.86, 1],
+  ]);
+  utilityPoles.name = 'frontline-utility-poles';
+  const utilityArms = instanced(scene, UTILITY_CROSSARM_GEO, utilityTimber, [
+    [-14.72, 6.35, 8.0, 0.02, 0, -0.055, 1, 1, 1],
+    [14.72, 0.56, -20.7, 0.08, 0.04, 0.03, 1, 1, 1],
+  ]);
+  utilityArms.name = 'frontline-utility-crossarms';
+  const porcelain = new THREE.MeshStandardMaterial({
+    color: 0x9aa19b, roughness: 0.42, metalness: 0.03,
+  });
+  const insulators = [];
+  for (const xOff of [-0.68, 0, 0.68]) {
+    insulators.push([-14.72 + xOff, 6.53, 8.0, 0, 0, 0, 1, 1, 1]);
+    insulators.push([14.72 + xOff, 0.74, -20.7, 0.08, 0.04, 0.03, 1, 1, 1]);
+  }
+  const utilityInsulators = instanced(
+    scene, UTILITY_INSULATOR_GEO, porcelain, insulators, false);
+  utilityInsulators.name = 'frontline-utility-insulators';
+  const cableMaterial = new THREE.LineBasicMaterial({ color: 0x101213 });
+  for (let wire = 0; wire < 3; wire++) {
+    const points = [];
+    const start = new THREE.Vector3(15.48, 5.2 + wire * 0.18, -7.0 + wire * 0.1);
+    const end = new THREE.Vector3(14.04 + wire * 0.68, 0.86, -20.7);
+    for (let p = 0; p < 20; p++) {
+      const t = p / 19;
+      points.push(new THREE.Vector3(
+        start.x + (end.x - start.x) * t,
+        start.y + (end.y - start.y) * t - Math.sin(t * Math.PI) * (1.15 + wire * 0.12),
+        start.z + (end.z - start.z) * t,
+      ));
+    }
+    const cable = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points), cableMaterial);
+    cable.name = `frontline-utility-cable-${wire}`;
+    scene.add(cable);
+  }
 
   // Blast/scorch marks on both occupied façades. These are intentionally large and irregular:
   // damage at this scale must alter the read of the street, not look like decorative dirt.
@@ -694,6 +830,7 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
   const frontline = frontlineMaterials();
   const char = new THREE.MeshStandardMaterial({ color: 0x17191a, roughness: 1 });
   const chunks = [[], [], []];
+  const fineRubble = [];
   const craters = [];
   const radius = Math.max(10, Math.min(bounds.r * 0.78, 42));
 
@@ -708,8 +845,18 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
       const d = 0.7 + R() * 2.1;
       chunks[(cluster + i) % chunks.length].push([
         x + Math.cos(a) * d, 0.08 + R() * 0.13, z + Math.sin(a) * d,
-        R() * 2, R() * 2, R() * 2,
-        0.3 + R() * 0.55, 0.22 + R() * 0.35, 0.3 + R() * 0.55,
+        (R() - 0.5) * 0.46, R() * Math.PI * 2, (R() - 0.5) * 0.46,
+        0.3 + R() * 0.5, 0.52 + R() * 0.4, 0.3 + R() * 0.5,
+      ]);
+    }
+    for (let i = 0; i < 36; i++) {
+      const a = R() * Math.PI * 2;
+      const d = 0.6 + R() * 2.35;
+      const scale = 0.46 + R() * 0.94;
+      fineRubble.push([
+        x + Math.cos(a) * d, 0.05 + R() * 0.04, z + Math.sin(a) * d,
+        R() * Math.PI, R() * Math.PI, R() * Math.PI,
+        scale * (0.76 + R() * 0.48), scale * (0.58 + R() * 0.42), scale,
       ]);
     }
   }
@@ -720,12 +867,19 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
     scar.position.set(x, 0.028, z);
     scene.add(scar);
   }
+  const rimMaterial = [3, 5].includes(levelId) ? frontline.concreteDark : frontline.asphalt;
+  const craterRims = instanced(scene, CRATER_RIM_GEO, rimMaterial,
+    craters.map(([x, z, scale], i) =>
+      [x, 0.03, z, 0, i * 1.39 + levelId, 0, scale * 1.2, 1, scale * 1.2]), false);
+  craterRims.name = 'frontline-ambient-crater-rims';
   for (let i = 0; i < chunks.length; i++) {
     const rubble = instanced(scene, RUBBLE_GEOMETRIES[i],
       i === 1 ? frontline.brick : i === 2 ? frontline.concreteDark : frontline.concrete,
       chunks[i], false);
     rubble.name = `frontline-ambient-rubble-${i}`;
   }
+  const gravel = instanced(scene, FINE_RUBBLE_GEO, frontline.concreteDark, fineRubble, false);
+  gravel.name = 'frontline-ambient-rubble-fines';
 
   if ([4, 5, 7, 10].includes(levelId)) {
     const steel = new THREE.MeshStandardMaterial({
