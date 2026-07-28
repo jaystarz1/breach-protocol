@@ -405,6 +405,33 @@ function chamferedCaseGeometry() {
 }
 
 const EQUIPMENT_CASE_GEO = chamferedCaseGeometry();
+const AID_CARTON_GEO = (() => {
+  const shape = new THREE.Shape();
+  const w = 0.64, h = 0.54, bevel = 0.028;
+  shape.moveTo(-w / 2 + bevel, -h / 2);
+  shape.lineTo(w / 2 - bevel, -h / 2);
+  shape.lineTo(w / 2, -h / 2 + bevel);
+  shape.lineTo(w / 2, h / 2 - bevel);
+  shape.lineTo(w / 2 - bevel, h / 2);
+  shape.lineTo(-w / 2 + bevel, h / 2);
+  shape.lineTo(-w / 2, h / 2 - bevel);
+  shape.lineTo(-w / 2, -h / 2 + bevel);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.62,
+    steps: 1,
+    bevelEnabled: true,
+    bevelSegments: 1,
+    bevelSize: 0.012,
+    bevelThickness: 0.012,
+    curveSegments: 1,
+  });
+  geometry.translate(0, 0, -0.31);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+})();
+const AID_LABEL_GEO = new THREE.PlaneGeometry(0.34, 0.2);
 const FIELD_BOARD_GEO = distressedBoxGeometry(1, 1, 1, 9200);
 const FIELD_LEG_GEO = new THREE.CylinderGeometry(0.025, 0.025, 0.98, 8);
 const FIELD_BRACE_GEO = new THREE.CylinderGeometry(0.014, 0.014, 0.82, 7);
@@ -971,15 +998,64 @@ export function addFrontlineMissionArt(scene, levelId) {
   }
 
   if (levelId === 5) {
-    // Aid pallets and blast barriers make the market a contested humanitarian site.
-    const pallets = [];
-    for (const [x, z] of [[-26, 28], [25, 16], [-24, -20], [22, -26]]) {
+    // Aid pallets and blast barriers make the market a contested humanitarian site. Cartons,
+    // webbing, relief labels, pallet boards and loose supply sacks replace the old dark cubes.
+    const aidSites = [[-26, 28], [25, 16], [-24, -20], [22, -26]];
+    const cartons = [];
+    const straps = [];
+    const labels = [];
+    const palletSlats = [];
+    const palletRunners = [];
+    const aidSacks = [];
+    for (let site = 0; site < aidSites.length; site++) {
+      const [x, z] = aidSites[site];
       for (let i = 0; i < 6; i++) {
-        pallets.push([x + (i % 3) * 0.72, 0.3 + Math.floor(i / 3) * 0.58, z,
-          0, (i % 2) * 0.08, 0, 1, 1, 1]);
+        const cx = x + (i % 3) * 0.69;
+        const cy = 0.33 + Math.floor(i / 3) * 0.56;
+        const yaw = (i % 2 ? 1 : -1) * 0.018;
+        cartons.push([cx, cy, z, 0, yaw, 0, 1, 1, 1]);
+        straps.push([cx, cy, z, 0, yaw, 0, 0.055, 0.57, 0.66]);
+        labels.push(
+          [cx, cy + 0.015, z + 0.322, 0, yaw, 0, 1, 1, 1],
+          [cx, cy + 0.015, z - 0.322, 0, yaw + Math.PI, 0, 1, 1, 1],
+        );
       }
+      for (let slat = 0; slat < 5; slat++) {
+        palletSlats.push([
+          x + 0.69, 0.075, z - 0.36 + slat * 0.18,
+          0, 0, 0, 2.3, 0.075, 0.13,
+        ]);
+      }
+      for (const runnerZ of [-0.28, 0, 0.28]) {
+        palletRunners.push([x + 0.69, 0.035, z + runnerZ, 0, 0, 0, 2.18, 0.07, 0.09]);
+      }
+      aidSacks.push(
+        [x - 0.65, 0.28, z + 0.42, 0, 0.18 + site * 0.07, Math.PI / 2, 0.92, 0.92, 0.92],
+        [x + 2.02, 0.28, z - 0.36, 0, -0.22 - site * 0.04, Math.PI / 2, 0.92, 0.92, 0.92],
+      );
     }
-    instanced(scene, new THREE.BoxGeometry(0.64, 0.54, 0.62), dark, pallets);
+    const cardboard = frontline.timber.clone();
+    cardboard.color.setHex(0x8f7959);
+    cardboard.roughness = 0.98;
+    const webbing = frontline.equipment.clone();
+    webbing.color.setHex(0x45513f);
+    const label = new THREE.MeshStandardMaterial({
+      color: 0xd7d4c4, roughness: 0.92, metalness: 0,
+      side: THREE.DoubleSide,
+    });
+    const aidCartons = instanced(scene, AID_CARTON_GEO, cardboard, cartons);
+    aidCartons.name = 'frontline-aid-cartons';
+    const aidStraps = instanced(scene, new THREE.BoxGeometry(1, 1, 1), webbing, straps);
+    aidStraps.name = 'frontline-aid-carton-straps';
+    const aidLabels = instanced(scene, AID_LABEL_GEO, label, labels, false);
+    aidLabels.name = 'frontline-aid-carton-labels';
+    const aidPalletSlats = instanced(
+      scene, FIELD_BOARD_GEO, frontline.timber, palletSlats);
+    aidPalletSlats.name = 'frontline-aid-pallet-slats';
+    const aidPalletRunners = instanced(
+      scene, FIELD_BOARD_GEO, frontline.timber, palletRunners);
+    aidPalletRunners.name = 'frontline-aid-pallet-runners';
+    sandbagInstances(scene, 'frontline-aid-supply-sacks', aidSacks);
     addHescoPositions(scene, 'frontline-market-hesco', [
       [-27.8, 0.55, 27.8, 0, 0.04, 0, 1.45, 1.08, 0.92],
       [-25.55, 0.55, 27.8, 0, -0.03, 0, 1.45, 1.08, 0.92],

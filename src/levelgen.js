@@ -843,6 +843,10 @@ export function stairs(x, z, dir, run, height, width = 1.6, color = C.concrete, 
 }
 
 export function crate(x, z, y = 0, s = 1.0) {
+  if (window.__bpVisualProps) {
+    window.__bpVisualProps.push({ kind: 'supply-crate', x, z, y, s });
+    return [[x, y + s / 2, z, s, s, s, C.crate, true, false, false]];
+  }
   return [[x, y + s / 2, z, s, s, s, C.crate]];
 }
 

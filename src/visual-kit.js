@@ -4,7 +4,7 @@ import { GLTFLoader } from '../lib/GLTFLoader.js';
 import { mergeGeometries, toCreasedNormals } from '../lib/BufferGeometryUtils.js';
 import { quality } from './quality.js';
 import { rng } from './world.js';
-import { photoSurfaces } from './textures.js';
+import { photoSurfaces, surfaces } from './textures.js';
 
 let authoredVehicleSources = null;
 if (quality.desktop) {
@@ -158,7 +158,21 @@ const WINDOW_INTERIOR_GEOS = Array.from({ length: 4 }, (_, tile) => {
   return geometry;
 });
 const STALL_POST = new THREE.CylinderGeometry(0.045, 0.045, 3.05, 10);
-const STALL_PRODUCE = new THREE.SphereGeometry(0.13, 9, 6);
+const STALL_CABBAGE = (() => {
+  const geometry = new THREE.DodecahedronGeometry(0.13, 1);
+  geometry.scale(1.05, 0.82, 1);
+  return geometry;
+})();
+const STALL_SQUASH = (() => {
+  const geometry = new THREE.SphereGeometry(0.13, 10, 7);
+  geometry.scale(0.78, 1.16, 0.78);
+  return geometry;
+})();
+const STALL_LOAF = (() => {
+  const geometry = new THREE.CapsuleGeometry(0.085, 0.2, 4, 9);
+  geometry.rotateZ(Math.PI / 2);
+  return geometry;
+})();
 const STALL_BULB = new THREE.SphereGeometry(0.075, 10, 6);
 const STALL_CANOPY = (() => {
   const geometry = new THREE.PlaneGeometry(5.35, 2.65, 10, 5);
@@ -168,6 +182,85 @@ const STALL_CANOPY = (() => {
     positions.setZ(i, -0.12 * (1 - x * x));
   }
   geometry.computeVertexNormals();
+  return geometry;
+})();
+const mergedStallBoxes = (parts) => {
+  const geometries = parts.map(([x, y, z, sx, sy, sz]) => {
+    const geometry = UNIT_BOX.clone();
+    geometry.applyMatrix4(new THREE.Matrix4().compose(
+      new THREE.Vector3(x, y, z),
+      new THREE.Quaternion(),
+      new THREE.Vector3(sx, sy, sz),
+    ));
+    return geometry;
+  });
+  const geometry = mergeGeometries(geometries, false);
+  for (const part of geometries) part.dispose();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+const STALL_TRAY_GEO = mergedStallBoxes([
+  [0, 0, 0, 1, 0.045, 0.66],
+  [0, 0.09, -0.31, 1, 0.16, 0.055],
+  [0, 0.09, 0.31, 1, 0.16, 0.055],
+  [-0.47, 0.09, 0, 0.055, 0.16, 0.62],
+  [0.47, 0.09, 0, 0.055, 0.16, 0.62],
+]);
+const STALL_CRATE_GEO = mergedStallBoxes([
+  [0, -0.25, 0, 0.96, 0.055, 0.64],
+  [-0.45, 0, -0.29, 0.055, 0.55, 0.055],
+  [0.45, 0, -0.29, 0.055, 0.55, 0.055],
+  [-0.45, 0, 0.29, 0.055, 0.55, 0.055],
+  [0.45, 0, 0.29, 0.055, 0.55, 0.055],
+  [0, -0.13, -0.3, 0.9, 0.075, 0.045],
+  [0, 0.06, -0.3, 0.9, 0.075, 0.045],
+  [0, 0.25, -0.3, 0.9, 0.075, 0.045],
+  [0, -0.13, 0.3, 0.9, 0.075, 0.045],
+  [0, 0.06, 0.3, 0.9, 0.075, 0.045],
+  [0, 0.25, 0.3, 0.9, 0.075, 0.045],
+]);
+const SUPPLY_CRATE_GEO = mergedStallBoxes([
+  [0, -0.46, 0, 0.94, 0.08, 0.94],
+  [0, 0.46, 0, 0.94, 0.08, 0.94],
+  [-0.44, 0, -0.44, 0.1, 0.9, 0.1],
+  [0.44, 0, -0.44, 0.1, 0.9, 0.1],
+  [-0.44, 0, 0.44, 0.1, 0.9, 0.1],
+  [0.44, 0, 0.44, 0.1, 0.9, 0.1],
+  [0, -0.3, -0.455, 0.8, 0.17, 0.055],
+  [0, 0, -0.455, 0.8, 0.17, 0.055],
+  [0, 0.3, -0.455, 0.8, 0.17, 0.055],
+  [0, -0.3, 0.455, 0.8, 0.17, 0.055],
+  [0, 0, 0.455, 0.8, 0.17, 0.055],
+  [0, 0.3, 0.455, 0.8, 0.17, 0.055],
+  [-0.455, -0.3, 0, 0.055, 0.17, 0.8],
+  [-0.455, 0, 0, 0.055, 0.17, 0.8],
+  [-0.455, 0.3, 0, 0.055, 0.17, 0.8],
+  [0.455, -0.3, 0, 0.055, 0.17, 0.8],
+  [0.455, 0, 0, 0.055, 0.17, 0.8],
+  [0.455, 0.3, 0, 0.055, 0.17, 0.8],
+]);
+const STALL_VALANCE_GEO = (() => {
+  const segments = 12;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  for (let i = 0; i <= segments; i++) {
+    const x = -2.65 + i / segments * 5.3;
+    const bottom = -0.29 + (i % 3 === 1 ? 0.11 : i % 3 === 2 ? 0.04 : 0);
+    positions.push(x, 0, 0, x, bottom, 0);
+    uvs.push(i / segments, 1, i / segments, 0);
+    if (i < segments) {
+      const a = i * 2;
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
   return geometry;
 })();
 const localMatrix = new THREE.Matrix4();
@@ -1441,32 +1534,107 @@ function addCeilingFixture(batcher, def) {
 function addMarketStall(batcher, scene, def, index) {
   const parent = new THREE.Matrix4().makeTranslation(def.x, 0, def.z);
   const steel = standard('stall-steel', 0x343a3f, 0.42, 0.72);
-  const timber = standard('stall-timber', 0x70513a, 0.82, 0.02);
-  const cloth = material('stall-cloth-instanced', () =>
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.94, side: THREE.DoubleSide }));
-  cloth.side = THREE.DoubleSide;
+  const surfaceKit = surfaces();
+  const timber = material('stall-timber-authored', () => new THREE.MeshStandardMaterial({
+    color: 0x806249,
+    map: surfaceKit.timber.map,
+    normalMap: surfaceKit.timber.normalMap,
+    normalScale: new THREE.Vector2(0.34, 0.34),
+    roughness: 0.9,
+    metalness: 0,
+  }));
+  const cloth = material('stall-cloth-instanced', () => new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: surfaceKit.fabric.map,
+    normalMap: surfaceKit.fabric.normalMap,
+    roughnessMap: surfaceKit.fabric.roughnessMap,
+    normalScale: new THREE.Vector2(0.28, 0.28),
+    roughness: 0.97,
+    side: THREE.DoubleSide,
+  }));
   const produce = [
-    standard('produce-red', 0x9b2925, 0.86, 0),
-    standard('produce-green', 0x476c35, 0.9, 0),
-    standard('produce-orange', 0xc2742d, 0.88, 0),
+    {
+      key: 'cabbage',
+      geometry: STALL_CABBAGE,
+      material: standard('produce-cabbage', 0x526b37, 0.93, 0),
+    },
+    {
+      key: 'squash',
+      geometry: STALL_SQUASH,
+      material: standard('produce-squash', 0xb86b28, 0.9, 0),
+    },
+    {
+      key: 'loaf',
+      geometry: STALL_LOAF,
+      material: standard('produce-loaf', 0x9c7044, 0.94, 0),
+    },
+    {
+      key: 'apple',
+      geometry: STALL_CABBAGE,
+      material: standard('produce-apple', 0x84352e, 0.9, 0),
+    },
   ];
-  batcher.add('stall-counter', UNIT_BOX, timber,
-    instanceMatrix(parent, 0, 1.04, 0, 4.8, 0.16, 1.7), true);
-  batcher.add('stall-cabinet', UNIT_BOX, timber,
-    instanceMatrix(parent, 0, 0.52, 0, 4.55, 0.9, 1.48), true);
+
+  // The old stall was a five-metre cabinet. The collision box remains invisible and
+  // authoritative, while the visible replacement is an open frame with slatted storage.
+  batcher.add('stall-counter-tops', UNIT_BOX, timber,
+    instanceMatrix(parent, 0, 1.02, 0, 4.82, 0.13, 1.66), true);
+  for (const z of [-0.72, 0.72]) {
+    batcher.add('stall-counter-aprons', UNIT_BOX, timber,
+      instanceMatrix(parent, 0, 0.86, z, 4.54, 0.22, 0.085), true);
+  }
+  for (const x of [-2.16, 2.16]) for (const z of [-0.68, 0.68]) {
+    batcher.add('stall-counter-legs', UNIT_BOX, timber,
+      instanceMatrix(parent, x, 0.51, z, 0.13, 0.95, 0.13), true);
+  }
+  batcher.add('stall-lower-shelves', UNIT_BOX, timber,
+    instanceMatrix(parent, 0, 0.24, 0, 4.18, 0.075, 1.28), true);
+  for (let crate = 0; crate < 3; crate++) {
+    const x = -1.35 + crate * 1.34 + (index % 2 ? 0.08 : -0.06);
+    batcher.add('stall-storage-crates', STALL_CRATE_GEO, timber,
+      instanceMatrix(parent, x, 0.55, (crate % 2 ? 0.2 : -0.16),
+        1, 0.86 + (crate % 2) * 0.08, 1, 0, (crate - 1) * 0.035, 0), true);
+  }
   for (const x of [-2.28, 2.28]) for (const z of [-0.92, 0.92]) {
     batcher.add('stall-posts', STALL_POST, steel,
       instanceMatrix(parent, x, 1.52, z, 1, 1, 1), true);
   }
   batcher.add('stall-canopies', STALL_CANOPY, cloth,
     instanceMatrix(parent, 0, 3.02, 0, 1, 1, 1, -Math.PI / 2), false, def.color);
-  for (let i = 0; i < 14; i++) {
-    const size = (0.12 + (i % 3) * 0.015) / 0.13;
-    batcher.add(`stall-produce-${i % produce.length}`, STALL_PRODUCE,
-      produce[i % produce.length],
-      instanceMatrix(parent, -1.65 + (i % 7) * 0.52, 1.18,
-        -0.42 + Math.floor(i / 7) * 0.8, size, size, size));
+  for (const z of [-1.31, 1.31]) {
+    batcher.add('stall-canopy-valances', STALL_VALANCE_GEO, cloth,
+      instanceMatrix(parent, 0, 3.0, z, 1, 1, 1, 0, z < 0 ? Math.PI : 0, 0),
+      false, def.color);
   }
+  if (index % 3 !== 1) {
+    const patchColor = index % 2 ? 0x5e665d : 0x706653;
+    batcher.add('stall-canopy-patches', UNIT_PLANE, cloth,
+      instanceMatrix(parent, index % 2 ? -1.15 : 1.2, 3.036, index % 3 ? 0.28 : -0.34,
+        0.82, 0.52, 1, -Math.PI / 2, 0, (index % 2 ? -1 : 1) * 0.08),
+      false, patchColor);
+  }
+
+  for (let tray = 0; tray < 4; tray++) {
+    batcher.add('stall-produce-trays', STALL_TRAY_GEO, timber,
+      instanceMatrix(parent, -1.68 + tray * 1.12, 1.11, 0, 1, 1, 1,
+        0, (tray - 1.5) * 0.015, 0), true);
+  }
+  const R = rng(5101 + index * 173);
+  for (let i = 0; i < 20; i++) {
+    const tray = Math.floor(i / 5);
+    const item = produce[(tray + index) % produce.length];
+    const size = 0.82 + R() * 0.28;
+    batcher.add(`stall-produce-${item.key}`, item.geometry, item.material,
+      instanceMatrix(parent,
+        -2.02 + tray * 1.12 + (i % 5) * 0.17 + (R() - 0.5) * 0.08,
+        1.28 + R() * 0.045,
+        -0.22 + (i % 2) * 0.42 + (R() - 0.5) * 0.09,
+        size, size, size, (R() - 0.5) * 0.18, R() * Math.PI, (R() - 0.5) * 0.14));
+  }
+
+  batcher.add('stall-hanging-boards', UNIT_BOX, timber,
+    instanceMatrix(parent, index % 2 ? -1.5 : 1.5, 2.42, 1.0,
+      0.78, 0.36, 0.045, 0, 0, (index % 3 - 1) * 0.04));
   batcher.add('stall-bulbs', STALL_BULB,
     material('stall-bulb', () => new THREE.MeshBasicMaterial({ color: 0xffd39b })),
     instanceMatrix(parent, 0, 2.72, 0, 1, 1, 1));
@@ -1475,6 +1643,36 @@ function addMarketStall(batcher, scene, def, index) {
     pool.position.set(def.x, 2.65, def.z);
     scene.add(pool);
   }
+}
+
+function addSupplyCrate(batcher, def) {
+  const surfaceKit = surfaces();
+  const timber = material('supply-crate-timber', () => new THREE.MeshStandardMaterial({
+    color: 0x765a40,
+    map: surfaceKit.timber.map,
+    normalMap: surfaceKit.timber.normalMap,
+    normalScale: new THREE.Vector2(0.36, 0.36),
+    roughness: 0.92,
+    metalness: 0,
+  }));
+  const label = material('supply-crate-label', () => new THREE.MeshStandardMaterial({
+    color: 0xc7c0aa,
+    roughness: 0.96,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  }));
+  const size = def.s || 1;
+  const yaw = ((Math.round(def.x * 17 + def.z * 29) % 5) - 2) * 0.018;
+  const parent = new THREE.Matrix4().compose(
+    new THREE.Vector3(def.x, def.y || 0, def.z),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)),
+    new THREE.Vector3(1, 1, 1),
+  );
+  batcher.add('supply-crates-authored', SUPPLY_CRATE_GEO, timber,
+    instanceMatrix(parent, 0, size / 2, 0, size, size, size), true);
+  batcher.add('supply-crate-labels', UNIT_PLANE, label,
+    instanceMatrix(parent, 0.12 * size, size * 0.58, size * 0.506,
+      size * 0.4, size * 0.22, 1, 0, 0, -0.025), false);
 }
 
 const cssHex = value => `#${new THREE.Color(value).getHexString()}`;
@@ -1806,6 +2004,7 @@ export function addVisualProps(scene, props = []) {
     if (def.kind === 'vehicle') addVehicle(batcher, def);
     else if (def.kind === 'facade') addFacade(batcher, def);
     else if (def.kind === 'market-stall') addMarketStall(batcher, scene, def, marketIndex++);
+    else if (def.kind === 'supply-crate') addSupplyCrate(batcher, def);
     else if (def.kind === 'roof-cap') addRoofCap(batcher, def);
     else if (def.kind === 'skyline-roof-profile') addSkylineRoofProfile(batcher, def);
     else if (def.kind === 'skyline-facade') addSkylineFacade(batcher, def);

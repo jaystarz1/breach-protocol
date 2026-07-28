@@ -107,6 +107,55 @@ def main():
         )
         page.wait_for_timeout(180)
         page.screenshot(path=str(output / "market-contact.png"))
+        market_art = page.evaluate(
+            """() => {
+              const parts = {};
+              BP.world.staticMesh.parent.traverse(object => {
+                if (!object.name?.startsWith('stall-')
+                    && !object.name?.startsWith('frontline-aid-')
+                    && !object.name?.startsWith('supply-crate')) return;
+                parts[object.name] = {
+                  instances: object.count || object.userData.instanceCount || 1,
+                  vertices: object.geometry?.attributes?.position?.count || 0,
+                  mapped: !!object.material?.map,
+                  relief: !!(object.material?.normalMap || object.material?.bumpMap),
+                };
+              });
+              return parts;
+            }"""
+        )
+        market_collision = page.evaluate(
+            """() => {
+              const hasBox = (x, z, w, h, d) => BP.world.solids.some(box =>
+                Math.abs(box.min.x - (x - w / 2)) < 0.001
+                && Math.abs(box.max.x - (x + w / 2)) < 0.001
+                && Math.abs(box.min.y) < 0.001
+                && Math.abs(box.max.y - h) < 0.001
+                && Math.abs(box.min.z - (z - d / 2)) < 0.001
+                && Math.abs(box.max.z - (z + d / 2)) < 0.001);
+              const stalls = [];
+              for (const z of [18, 6, -6, -18]) {
+                for (const x of [-22, -8, 8, 22]) stalls.push([x, z]);
+              }
+              return {
+                stalls: stalls.filter(([x, z]) => hasBox(x, z, 5, 1.1, 2)).length,
+                crates: [[0, 0], [-15, 12], [15, -12]]
+                  .filter(([x, z]) => hasBox(x, z, 1, 1, 1)).length,
+              };
+            }"""
+        )
+        page.evaluate(
+            """() => {
+              BP.player.pos.set(-13, 0, 25);
+              const target = { x: -22, y: 1.25, z: 18 };
+              const dx = target.x - BP.player.pos.x;
+              const dz = target.z - BP.player.pos.z;
+              BP.player.yaw = Math.atan2(-dx, -dz);
+              BP.player.pitch = Math.atan2(target.y - 1.6, Math.hypot(dx, dz));
+            }"""
+        )
+        page.wait_for_timeout(180)
+        page.screenshot(path=str(output / "market-stall-close.png"))
         civilian_death = page.evaluate(
             """() => {
               const civilian = BP.world.civilians.find(c => !c.dead);
@@ -154,11 +203,15 @@ def main():
             "variantRepeatStable": signatures[0]["civilians"] == signatures[3]["civilians"],
             "concealedPerVariant": [signature["concealed"] for signature in signatures],
             "crowdReaction": reaction,
+            "marketArt": market_art,
+            "marketCollision": market_collision,
             "rigCoverage": rig_coverage,
             "concealedReveal": reveal,
             "civilianDeath": civilian_death,
             "escort": escort,
-            "screenshots": ["market-covert.png", "market-contact.png"],
+            "screenshots": [
+                "market-covert.png", "market-contact.png", "market-stall-close.png"
+            ],
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
@@ -169,6 +222,50 @@ def main():
         assert reaction["crossers"] > 0
         assert reaction["panicked"] >= reaction["total"] - 2
         assert reaction["moved"] >= reaction["total"] - 2
+        expected_market_art = {
+            "stall-counter-tops": 16,
+            "stall-counter-aprons": 32,
+            "stall-counter-legs": 64,
+            "stall-lower-shelves": 16,
+            "stall-storage-crates": 48,
+            "stall-posts": 64,
+            "stall-canopies": 16,
+            "stall-canopy-valances": 32,
+            "stall-canopy-patches": 11,
+            "stall-produce-trays": 64,
+            "stall-produce-cabbage": 80,
+            "stall-produce-squash": 80,
+            "stall-produce-loaf": 80,
+            "stall-produce-apple": 80,
+            "stall-hanging-boards": 16,
+            "stall-bulbs": 16,
+            "frontline-aid-cartons": 24,
+            "frontline-aid-carton-straps": 24,
+            "frontline-aid-carton-labels": 48,
+            "frontline-aid-pallet-slats": 20,
+            "frontline-aid-pallet-runners": 12,
+            "frontline-aid-supply-sacks": 8,
+            "supply-crates-authored": 3,
+            "supply-crate-labels": 3,
+        }
+        assert all(
+            market_art[name]["instances"] == count
+            for name, count in expected_market_art.items()
+        )
+        assert market_art["stall-storage-crates"]["vertices"] > 200
+        assert market_art["stall-produce-trays"]["vertices"] > 100
+        assert market_art["stall-counter-tops"]["mapped"]
+        assert market_art["stall-counter-tops"]["relief"]
+        assert market_art["stall-canopies"]["mapped"]
+        assert market_art["stall-canopies"]["relief"]
+        assert market_art["frontline-aid-cartons"]["vertices"] > 150
+        assert market_art["frontline-aid-cartons"]["mapped"]
+        assert market_art["frontline-aid-cartons"]["relief"]
+        assert market_art["frontline-aid-supply-sacks"]["vertices"] > 450
+        assert market_art["supply-crates-authored"]["vertices"] > 400
+        assert market_art["supply-crates-authored"]["mapped"]
+        assert market_art["supply-crates-authored"]["relief"]
+        assert market_collision == {"stalls": 16, "crates": 3}
         assert sorted(rig_coverage.keys()) == ["0", "1", "2"]
         assert all(
             rig["authored"] and rig["hasIdle"] and rig["hasWalk"] and rig["hasRun"]
