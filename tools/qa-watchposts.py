@@ -76,6 +76,7 @@ def main():
         )
         assert all(row["instanced"] for row in first["parts"].values())
         assert first["parts"]["watch-post-pitched-roofs"]["vertices"] > 24
+        assert first["parts"]["watch-post-sandbags"]["vertices"] > 450
         assert sum(
             row["count"] for name, row in first["parts"].items()
             if name.startswith("watch-post-gate-rubble-")

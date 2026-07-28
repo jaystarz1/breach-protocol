@@ -2,6 +2,7 @@
 // Gameplay collision remains in the authored level geometry; this layer adds the evidence of
 // a town held under repeated assault without turning every rubble fragment into a draw call.
 import * as THREE from 'three';
+import { mergeGeometries } from '../lib/BufferGeometryUtils.js';
 import { quality } from './quality.js';
 import { rng } from './world.js';
 import { photoSurfaces, surfaces } from './textures.js';
@@ -31,7 +32,7 @@ function frontlineMaterials() {
       metalness: 0,
     }),
     sandbag: new THREE.MeshStandardMaterial({
-      color: 0x9a825d,
+      color: 0x88704d,
       map: procedural.fabric.map,
       normalMap: procedural.fabric.normalMap,
       roughnessMap: procedural.fabric.roughnessMap,
@@ -67,6 +68,15 @@ function frontlineMaterials() {
       normalScale: new THREE.Vector2(0.18, 0.18),
       roughness: 0.78,
       metalness: 0.08,
+    }),
+    earthFill: new THREE.MeshStandardMaterial({
+      color: 0x756548,
+      map: procedural.fabric.map,
+      normalMap: procedural.concrete.normalMap,
+      roughnessMap: procedural.concrete.roughnessMap,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+      roughness: 0.99,
+      metalness: 0,
     }),
   };
   materialKit.concreteDark = materialKit.concrete.clone();
@@ -123,28 +133,149 @@ const CORRUGATED_PANEL_GEO = (() => {
   geometry.computeBoundingSphere();
   return geometry;
 })();
+
+function transformedGeometry(geometry, position = [0, 0, 0], rotation = [0, 0, 0],
+  scale = [1, 1, 1]) {
+  const out = geometry.clone();
+  const matrix = new THREE.Matrix4().compose(
+    new THREE.Vector3(...position),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+    new THREE.Vector3(...scale),
+  );
+  out.applyMatrix4(matrix);
+  return out;
+}
+
+function superellipsoidSackGeometry() {
+  // A filled sack has broad compressed faces and rounded shoulders, not the continuously
+  // curved section of a sphere/capsule. Exponents below one square up a superellipsoid while
+  // retaining smooth normals. The long axis remains local Y for the existing authored rows.
+  const around = 18, along = 12;
+  const positions = [], uvs = [], indices = [];
+  const signedPow = (value, exponent) =>
+    Math.sign(value) * Math.pow(Math.abs(value), exponent);
+  for (let row = 0; row <= along; row++) {
+    const v = -Math.PI / 2 + row / along * Math.PI;
+    const cv = signedPow(Math.cos(v), 0.58);
+    const sv = signedPow(Math.sin(v), 0.54);
+    const endPinch = 0.84 + 0.16 * Math.cos(v) ** 2;
+    for (let col = 0; col <= around; col++) {
+      const u = col / around * Math.PI * 2;
+      positions.push(
+        0.3 * cv * signedPow(Math.cos(u), 0.58) * endPinch,
+        0.26 * sv,
+        0.225 * cv * signedPow(Math.sin(u), 0.58) * endPinch,
+      );
+      uvs.push(col / around, row / along);
+    }
+  }
+  for (let row = 0; row < along; row++) {
+    for (let col = 0; col < around; col++) {
+      const a = row * (around + 1) + col;
+      const b = a + around + 1;
+      indices.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 const SANDBAG_GEO = (() => {
-  // Authored along local Y because existing rows rotate the bag onto X/Z. A flattened,
-  // pinched ellipsoid reads as a filled woven sack; a capsule keeps a constant circular
-  // section and inevitably reads as a pill or sausage regardless of its texture.
-  const geometry = new THREE.SphereGeometry(0.5, 16, 10);
+  // The raised centre seam, gathered neck and tied ears are merged into the sack, preserving
+  // the original one-draw-call-per-position-set budget while breaking the anonymous blob read.
+  const parts = [
+    superellipsoidSackGeometry(),
+    transformedGeometry(new THREE.CylinderGeometry(0.013, 0.016, 0.39, 7),
+      [0, -0.015, 0.218]),
+    transformedGeometry(new THREE.TorusGeometry(0.115, 0.011, 5, 12),
+      [0, 0.205, 0], [Math.PI / 2, 0, 0]),
+    transformedGeometry(new THREE.SphereGeometry(0.045, 8, 6), [0, 0.275, 0]),
+    transformedGeometry(new THREE.CylinderGeometry(0.01, 0.015, 0.09, 6),
+      [-0.025, 0.315, 0], [0, 0, 0.55]),
+    transformedGeometry(new THREE.CylinderGeometry(0.01, 0.015, 0.09, 6),
+      [0.025, 0.315, 0], [0, 0, -0.55]),
+  ];
+  const geometry = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  geometry.userData.authoredSack = true;
+  geometry.userData.components = 6;
+  return geometry;
+})();
+
+const HESCO_CAGE_GEO = (() => {
+  const parts = [];
+  const unit = new THREE.BoxGeometry(1, 1, 1);
+  const bar = (position, scale) => parts.push(transformedGeometry(
+    unit, position, [0, 0, 0], scale));
+  for (const x of [-0.5, 0.5]) for (const z of [-0.5, 0.5]) {
+    bar([x, 0, z], [0.025, 1.04, 0.025]);
+  }
+  for (const y of [-0.5, 0.5]) {
+    for (const z of [-0.5, 0.5]) bar([0, y, z], [1.04, 0.025, 0.025]);
+    for (const x of [-0.5, 0.5]) bar([x, y, 0], [0.025, 0.025, 1.04]);
+  }
+  // The face grid is deliberately sparse enough to survive fog and MSAA at gameplay range.
+  for (const z of [-0.505, 0.505]) {
+    for (const x of [-0.25, 0, 0.25]) bar([x, 0, z], [0.014, 1, 0.014]);
+    for (const y of [-0.25, 0, 0.25]) bar([0, y, z], [1, 0.014, 0.014]);
+  }
+  const geometry = mergeGeometries(parts, false);
+  unit.dispose();
+  for (const part of parts) part.dispose();
+  geometry.computeBoundingSphere();
+  return geometry;
+})();
+
+const HESCO_FILL_GEO = (() => {
+  // HESCO fabric bulges between welded wires but remains a contained rectangular cell.
+  // Reusing rubble's corner displacement made the fill look like a broken boulder in a cage.
+  const geometry = new THREE.BoxGeometry(0.94, 0.94, 0.94, 4, 4, 4);
   const positions = geometry.attributes.position;
   for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i);
-    const y = positions.getY(i);
-    const z = positions.getZ(i);
-    const end = Math.min(1, Math.abs(y) / 0.5);
-    const pinch = 1 - end * 0.18;
-    positions.setXYZ(
-      i,
-      x * 0.42 * pinch,
-      y * 0.84,
-      z * 0.62 * pinch,
-    );
+    let x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
+    const nx = x / 0.47, ny = y / 0.47, nz = z / 0.47;
+    const verticalBulge = Math.max(0, 1 - ny * ny);
+    if (Math.abs(nx) > 0.98) {
+      x += Math.sign(x) * 0.035 * verticalBulge * Math.max(0.2, 1 - nz * nz * 0.45);
+    }
+    if (Math.abs(nz) > 0.98) {
+      z += Math.sign(z) * 0.035 * verticalBulge * Math.max(0.2, 1 - nx * nx * 0.45);
+    }
+    if (ny > 0.98) {
+      // A shallow compacted-earth crown, kept safely below the cage's top rails.
+      y -= 0.018 + 0.018 * Math.cos(nx * Math.PI) * Math.cos(nz * Math.PI);
+    }
+    positions.setXYZ(i, x, y, z);
   }
   positions.needsUpdate = true;
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+})();
+
+const HEDGEHOG_GEO = (() => {
+  const beamParts = [];
+  const beam = new THREE.BoxGeometry(1, 1, 1);
+  const addIBeam = (rotation) => {
+    beamParts.push(
+      transformedGeometry(beam, [0, 0, 0], rotation, [0.09, 2.25, 0.16]),
+      transformedGeometry(beam, [0.13, 0, 0], rotation, [0.17, 2.25, 0.045]),
+      transformedGeometry(beam, [-0.13, 0, 0], rotation, [0.17, 2.25, 0.045]),
+    );
+  };
+  addIBeam([0, 0, Math.PI / 4]);
+  addIBeam([Math.PI / 4, 0, -Math.PI / 4]);
+  addIBeam([Math.PI / 2, Math.PI / 4, 0]);
+  beam.dispose();
+  const geometry = mergeGeometries(beamParts, false);
+  for (const part of beamParts) part.dispose();
   geometry.computeBoundingSphere();
   return geometry;
 })();
@@ -164,6 +295,57 @@ function instanced(scene, geometry, material, transforms, shadows = true) {
   out.castShadow = shadows && quality.shadows;
   out.receiveShadow = quality.shadows;
   scene.add(out);
+  return out;
+}
+
+function sandbagInstances(scene, name, transforms) {
+  const out = instanced(scene, SANDBAG_GEO, frontlineMaterials().sandbag, transforms);
+  const shade = new THREE.Color();
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < transforms.length; i++) {
+    // Instance colour multiplies the shared fabric material. The small deterministic value
+    // shifts are enough to expose each sack boundary without turning a military emplacement
+    // into a checkerboard or allocating another material.
+    const hash = ((i + 1) * 1103515245
+      + Math.round((transforms[i][0] + 64) * 97)
+      + Math.round((transforms[i][2] + 64) * 193)) >>> 0;
+    const value = 0.82 + (hash % 1000) / 1000 * 0.26;
+    shade.setRGB(value, value * 0.985, value * 0.94);
+    out.setColorAt(i, shade);
+    const t = transforms[i];
+    const roll = ((hash >>> 10) % 1000 / 1000 - 0.5) * 0.42;
+    const widthShift = 0.94 + ((hash >>> 20) % 100) / 100 * 0.11;
+    const lengthShift = 0.92 + ((hash >>> 15) % 100) / 100 * 0.15;
+    dummy.position.set(t[0], t[1] + ((hash >>> 7) % 5) * 0.004, t[2]);
+    dummy.rotation.set(t[3] || 0, t[4] || 0, t[5] || 0);
+    dummy.rotateY(roll);
+    dummy.scale.set(
+      (t[6] || 1) * widthShift,
+      (t[7] || 1) * lengthShift,
+      (t[8] || 1) * (2 - widthShift),
+    );
+    dummy.updateMatrix();
+    out.setMatrixAt(i, dummy.matrix);
+  }
+  out.instanceMatrix.needsUpdate = true;
+  if (out.instanceColor) out.instanceColor.needsUpdate = true;
+  out.name = name;
+  out.userData.authoredSacks = true;
+  return out;
+}
+
+function addHescoPositions(scene, name, transforms) {
+  const frontline = frontlineMaterials();
+  const fill = instanced(scene, HESCO_FILL_GEO, frontline.earthFill, transforms);
+  fill.name = `${name}-fill`;
+  const cages = instanced(scene, HESCO_CAGE_GEO, frontline.barrierSteel, transforms);
+  cages.name = `${name}-cages`;
+  return { fill, cages };
+}
+
+function addHedgehogs(scene, name, transforms) {
+  const out = instanced(scene, HEDGEHOG_GEO, frontlineMaterials().barrierSteel, transforms);
+  out.name = name;
   return out;
 }
 
@@ -409,8 +591,7 @@ export function addFrontlineStreetArt(scene) {
   for (let i = 0; i < 8; i++) {
     bags.push([-13.5 + i * 0.62, 0.64, -43.6, 0, 0, Math.PI / 2, 1, 1, 1]);
   }
-  const sandbags = instanced(scene, SANDBAG_GEO, frontline.sandbag, bags);
-  sandbags.name = 'frontline-op-sandbags';
+  sandbagInstances(scene, 'frontline-op-sandbags', bags);
 
   addFieldTable(scene, -11.15, 1.05, -41.6, 0);
 
@@ -469,9 +650,25 @@ export function addFrontlineStreetArt(scene) {
   const barrierPosts = instanced(
     scene, new THREE.BoxGeometry(0.09, 2.92, 0.13), steel, posts);
   barrierPosts.name = 'frontline-barricade-posts';
-  const barrierSandbags = instanced(
-    scene, SANDBAG_GEO, frontline.sandbag, barrierBags);
-  barrierSandbags.name = 'frontline-barricade-sandbags';
+  sandbagInstances(scene, 'frontline-barricade-sandbags', barrierBags);
+
+  // Earth-filled wire cells carry the visual weight of a prepared position without asking
+  // dozens of tiny rubble pieces to pretend they form cover. They sit directly against the
+  // existing solid barricade, so the cheap authored wall remains the gameplay authority.
+  addHescoPositions(scene, 'frontline-barricade-hesco', [
+    [-13.2, 0.55, -49.18, 0, 0, 0, 1.5, 1.08, 0.94],
+    [-10.9, 0.55, -49.18, 0, 0.04, 0, 1.5, 1.08, 0.94],
+    [3.2, 0.55, -49.18, 0, -0.03, 0, 1.5, 1.08, 0.94],
+    [5.5, 0.55, -49.18, 0, 0.02, 0, 1.5, 1.08, 0.94],
+    [12.7, 0.55, -49.18, 0, -0.04, 0, 1.5, 1.08, 0.94],
+  ]);
+  // Three obstacles beyond the access gap stop the road from terminating in a clean sheet of
+  // corrugated metal. Their I-beam silhouette reads instantly even through the street fog.
+  addHedgehogs(scene, 'frontline-anti-vehicle-hedgehogs', [
+    [-4.9, 1.0, -51.3, 0, 0.18, 0, 1, 1, 1],
+    [-2.5, 1.0, -52.0, 0, -0.24, 0, 1, 1, 1],
+    [-0.2, 1.0, -51.25, 0, 0.32, 0, 1, 1, 1],
+  ]);
 
   // Sagging field cable from the relay into the launch table.
   const cablePoints = [];
@@ -578,8 +775,7 @@ function addObservationPost(scene, x, y, z, yaw = 0) {
       bags.push([x + c * i * 0.5, y + 0.48, z - s * i * 0.5, 0, yaw, Math.PI / 2, 1, 1, 1]);
     }
   }
-  const sandbags = instanced(scene, SANDBAG_GEO, frontline.sandbag, bags);
-  sandbags.name = 'frontline-mission-op-sandbags';
+  sandbagInstances(scene, 'frontline-mission-op-sandbags', bags);
 
   addFieldTable(scene, x, y + 0.86, z + 1.25, yaw, 1.9, 0.78);
   const drone = droneModel();
@@ -630,6 +826,13 @@ export function addFrontlineMissionArt(scene, levelId) {
       }
     }
     instanced(scene, new THREE.BoxGeometry(0.64, 0.54, 0.62), dark, pallets);
+    addHescoPositions(scene, 'frontline-market-hesco', [
+      [-27.8, 0.55, 27.8, 0, 0.04, 0, 1.45, 1.08, 0.92],
+      [-25.55, 0.55, 27.8, 0, -0.03, 0, 1.45, 1.08, 0.92],
+      [26.8, 0.55, 15.7, 0, Math.PI / 2, 0, 1.45, 1.08, 0.92],
+      [-25.8, 0.55, -21.4, 0, -0.05, 0, 1.45, 1.08, 0.92],
+      [23.8, 0.55, -27.6, 0, 0.05, 0, 1.45, 1.08, 0.92],
+    ]);
   }
 
   if (levelId === 10) {
@@ -639,8 +842,17 @@ export function addFrontlineMissionArt(scene, levelId) {
       bags.push([side * (3.2 + i * 0.5), 0.2, 34, 0, 0, Math.PI / 2, 1, 1, 1]);
       if (i < 7) bags.push([side * (3.5 + i * 0.5), 0.48, 34, 0, 0, Math.PI / 2, 1, 1, 1]);
     }
-    const fallbackBags = instanced(scene, SANDBAG_GEO, frontline.sandbag, bags);
-    fallbackBags.name = 'frontline-fallback-sandbags';
+    sandbagInstances(scene, 'frontline-fallback-sandbags', bags);
+    addHescoPositions(scene, 'frontline-fallback-hesco', [
+      [-14.2, 0.58, 33.5, 0, 0.06, 0, 1.55, 1.14, 0.96],
+      [-11.8, 0.58, 33.5, 0, -0.03, 0, 1.55, 1.14, 0.96],
+      [11.8, 0.58, 33.5, 0, 0.03, 0, 1.55, 1.14, 0.96],
+      [14.2, 0.58, 33.5, 0, -0.06, 0, 1.55, 1.14, 0.96],
+    ]);
+    addHedgehogs(scene, 'frontline-fallback-hedgehogs', [
+      [-16.4, 1.0, 35.1, 0, 0.22, 0, 1, 1, 1],
+      [16.4, 1.0, 35.1, 0, -0.22, 0, 1, 1, 1],
+    ]);
 
     // The compound's old municipal wall has been converted into a fighting position. These
     // silhouettes sit above the collision shell and turn the blank slab into a defended gate.
@@ -729,8 +941,7 @@ export function addFrontlineMissionArt(scene, levelId) {
     ladders.name = 'watch-post-ladders';
     const rails = instanced(scene, new THREE.BoxGeometry(1, 1, 1), steel, towerRails);
     rails.name = 'watch-post-rails';
-    const fortification = instanced(scene, SANDBAG_GEO, frontline.sandbag, platformBags);
-    fortification.name = 'watch-post-sandbags';
+    sandbagInstances(scene, 'watch-post-sandbags', platformBags);
 
     const gateScars = [
       [-12.5, 2.1, 30.21, 0, 0, -0.2, 0.86, 0.7, 1],

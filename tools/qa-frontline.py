@@ -39,6 +39,9 @@ def main():
               vertices: object.geometry?.attributes?.position?.count || 0,
               photoMap: !!object.material?.map,
               relief: !!(object.material?.normalMap || object.material?.bumpMap),
+              authoredSacks: !!object.userData.authoredSacks,
+              sackComponents: object.geometry?.userData?.components || 0,
+              instanceColors: object.instanceColor?.count || 0,
             };
           });
           return named;
@@ -145,6 +148,16 @@ def main():
         assert art["frontline-barricade-panels"]["instances"] > 40
         assert art["frontline-barricade-posts"]["instances"] > 8
         assert art["frontline-barricade-sandbags"]["instances"] > 10
+        for name in ["frontline-op-sandbags", "frontline-barricade-sandbags"]:
+            assert art[name]["authoredSacks"]
+            assert art[name]["sackComponents"] == 6
+            assert art[name]["vertices"] > 450
+            assert art[name]["instanceColors"] == art[name]["instances"]
+        assert art["frontline-barricade-hesco-fill"]["instances"] == 5
+        assert art["frontline-barricade-hesco-cages"]["instances"] == 5
+        assert art["frontline-barricade-hesco-cages"]["vertices"] > 500
+        assert art["frontline-anti-vehicle-hedgehogs"]["instances"] == 3
+        assert art["frontline-anti-vehicle-hedgehogs"]["vertices"] > 150
         assert art["frontline-rubble-concrete-0"]["photoMap"]
         assert art["frontline-rubble-concrete-0"]["relief"]
         assert objective_marker["name"] == "objective-ground-marker"
