@@ -916,6 +916,28 @@ const SKYLINE_COLLAPSED_GEO = extrudedSkylineProfile([
   [0.27, 0.4], [0.1, 0.16], [-0.05, 0.34], [-0.18, 0.11],
   [-0.34, 0.28], [-0.5, 0.17],
 ]);
+const SKYLINE_WINDOW_FRAME_GEO = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.5, -0.5);
+  shape.lineTo(0.5, -0.5);
+  shape.lineTo(0.5, 0.5);
+  shape.lineTo(-0.5, 0.5);
+  shape.closePath();
+  const opening = new THREE.Path();
+  opening.moveTo(-0.38, -0.36);
+  opening.lineTo(-0.38, 0.36);
+  opening.lineTo(0.38, 0.36);
+  opening.lineTo(0.38, -0.36);
+  opening.closePath();
+  shape.holes.push(opening);
+  const geometry = new THREE.ShapeGeometry(shape);
+  geometry.computeVertexNormals();
+  return geometry;
+})();
+const SKYLINE_ROOF_TANK_GEO = new THREE.CylinderGeometry(0.62, 0.7, 1.45, 14, 1);
+const SKYLINE_ROOF_TANK_CAP_GEO = new THREE.SphereGeometry(
+  0.63, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+const SKYLINE_ROOF_MAST_GEO = new THREE.CylinderGeometry(0.045, 0.065, 1, 7);
 const DRAIN_GEO = new THREE.CylinderGeometry(0.055, 0.065, 1, 8);
 const AC_FAN_GEO = new THREE.CylinderGeometry(0.22, 0.22, 0.035, 12);
 const ROOF_CAP_GEO = (() => {
@@ -1913,8 +1935,10 @@ function addSkylineFacade(batcher, def) {
   // These faces sit behind the playable architecture and dissolve into fog. Strong white
   // frames would turn them into a procedural grid, so the palette stays close to the wall
   // value and relies on recess, rhythm and silhouette instead of brightness.
-  const recessMat = standard('skyline-window-recess', 0x111820, 0.93, 0.015);
+  const recessMat = standard('skyline-window-recess', 0x070d12, 0.9, 0.02);
   const bandMat = standard('skyline-floor-band', 0xffffff, 0.96, 0);
+  const railMat = standard('skyline-balcony-rail', 0x222a2f, 0.66, 0.48);
+  const boardMat = standard('skyline-window-board', 0x4c4032, 0.96, 0.01);
   const scarMat = material('skyline-shell-scar', () => new THREE.MeshBasicMaterial({
     color: 0x090b0c,
     transparent: true,
@@ -1927,6 +1951,7 @@ function addSkylineFacade(batcher, def) {
 
   const facadeColor = new THREE.Color(def.color);
   const bandColor = facadeColor.clone().multiplyScalar(def.ring ? 0.72 : 0.82).getHex();
+  const frameColor = facadeColor.clone().multiplyScalar(def.ring ? 0.9 : 1.06).getHex();
   const span = Math.max(3, def.span);
   const floorStep = Math.max(3.05, def.h / 11);
   const rows = Math.max(1, Math.min(11, Math.floor((def.h - 2.2) / floorStep)));
@@ -1934,6 +1959,8 @@ function addSkylineFacade(batcher, def) {
   const colStep = span / columns;
   const paneW = Math.min(1.35, Math.max(0.7, colStep * 0.48));
   const paneH = Math.min(1.45, Math.max(0.9, floorStep * 0.38));
+  const balconyFamily = ['monolith', 'stepped', 'penthouse'].includes(def.profile);
+  const exposedFamily = def.profile === 'collapsed';
 
   for (let row = 0; row < rows; row++) {
     const y = 1.65 + row * floorStep;
@@ -1947,6 +1974,18 @@ function addSkylineFacade(batcher, def) {
       const x = -span / 2 + colStep * (col + 0.5);
       batcher.add('skyline-window-recesses', UNIT_BOX, recessMat,
         instanceMatrix(parent, x, y, 0, paneW, paneH, 0.13));
+      batcher.add('skyline-window-frames', SKYLINE_WINDOW_FRAME_GEO, bandMat,
+        instanceMatrix(parent, x, y, 0.072, paneW * 1.16, paneH * 1.14, 1),
+        false,
+        frameColor);
+      if (def.ring === 0 && R() < 0.065) {
+        for (const slat of [-1, 1]) {
+          batcher.add('skyline-window-boards', UNIT_BOX, boardMat,
+            instanceMatrix(parent, x, y + slat * paneH * 0.13, 0.13,
+              paneW * 0.92, 0.13, 0.075,
+              0, 0, slat * (0.06 + R() * 0.05)));
+        }
+      }
     }
     // Shallow slab/cornice lines divide the enormous wall plane into believable storeys.
     // Every segment shares one InstancedMesh, even across the full skyline.
@@ -1957,6 +1996,42 @@ function addSkylineFacade(batcher, def) {
         false,
         bandColor);
     }
+    if (balconyFamily && row > 0 && row % 3 === (def.seed % 3)) {
+      const balconyColumns = Math.min(2, Math.max(1, Math.floor(columns / 3)));
+      for (let balcony = 0; balcony < balconyColumns; balcony++) {
+        const col = Math.min(
+          columns - 1,
+          Math.floor((balcony + 1) * columns / (balconyColumns + 1)));
+        const x = -span / 2 + colStep * (col + 0.5);
+        const balconyW = Math.min(3.2, Math.max(1.8, colStep * 1.22));
+        batcher.add('skyline-balcony-slabs', UNIT_BOX, bandMat,
+          instanceMatrix(parent, x, y - paneH * 0.58, 0.34,
+            balconyW, 0.13, 0.78),
+          false,
+          bandColor);
+        batcher.add('skyline-balcony-rails', UNIT_BOX, railMat,
+          instanceMatrix(parent, x, y - paneH * 0.3, 0.72,
+            balconyW * 0.94, 0.52, 0.055));
+        for (const side of [-1, 1]) {
+          batcher.add('skyline-balcony-rails', UNIT_BOX, railMat,
+            instanceMatrix(parent, x + side * balconyW * 0.46,
+              y - paneH * 0.3, 0.4, 0.055, 0.52, 0.62));
+        }
+      }
+    }
+  }
+
+  // Continuous piers make the wall read as a constructed elevation at oblique angles. They
+  // also stop a tower with dark unlit windows from collapsing into one featureless slab.
+  const pierStride = def.profile === 'industrial' ? 1 : 2;
+  for (let col = 0; col <= columns; col += pierStride) {
+    const x = -span / 2 + colStep * col;
+    batcher.add('skyline-pilasters', UNIT_BOX, bandMat,
+      instanceMatrix(parent, x, def.h * 0.5, 0.11,
+        def.profile === 'industrial' ? 0.22 : 0.13,
+        Math.max(1, def.h - 0.55), 0.26),
+      false,
+      bandColor);
   }
 
   // A projecting cap catches a narrow highlight and makes the roof edge legible from below.
@@ -1973,6 +2048,69 @@ function addSkylineFacade(batcher, def) {
         Math.min(span * 0.24, 3.8 + R() * 2.8),
         3.4 + R() * Math.min(5.5, def.h * 0.16), 1,
         0, 0, R() * 0.42 - 0.21));
+    if (exposedFamily) {
+      for (let floor = 0; floor < Math.min(3, rows); floor++) {
+        const y = def.h - 0.8 - floor * floorStep;
+        batcher.add('skyline-exposed-floor-slabs', UNIT_BOX, bandMat,
+          instanceMatrix(parent, (R() - 0.5) * span * 0.18, y, 0.38,
+            span * (0.48 + R() * 0.22), 0.16, 0.86),
+          false,
+          bandColor);
+      }
+    }
+  }
+}
+
+function addSkylineRooftopEquipment(batcher, def) {
+  const parent = new THREE.Matrix4().compose(
+    new THREE.Vector3(def.x, def.y, def.z),
+    new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), def.yaw || 0),
+    new THREE.Vector3(def.scale || 1, def.scale || 1, def.scale || 1),
+  );
+  const steel = standard('skyline-roof-steel', 0x313a40, 0.62, 0.58);
+  const dark = standard('skyline-roof-dark', 0x171e22, 0.82, 0.18);
+  const body = standard('skyline-roof-body', 0xffffff, 0.87, 0.08);
+  if (def.style === 'plant') {
+    batcher.add('skyline-roof-plant-housings', UNIT_BOX, body,
+      instanceMatrix(parent, 0, 0.8, 0, 2.5, 1.6, 1.65),
+      false,
+      def.color);
+    for (const side of [-1, 1]) {
+      for (let louver = -1; louver <= 1; louver++) {
+        batcher.add('skyline-roof-plant-louvers', UNIT_BOX, dark,
+          instanceMatrix(parent, louver * 0.56, 0.85, side * 0.836,
+            0.42, 0.64, 0.035));
+      }
+    }
+    batcher.add('skyline-roof-vents', SKYLINE_ROOF_MAST_GEO, steel,
+      instanceMatrix(parent, 0.72, 2.08, 0.22, 2.4, 1.7, 2.4));
+  } else if (def.style === 'tank') {
+    for (const x of [-0.5, 0.5]) for (const z of [-0.42, 0.42]) {
+      batcher.add('skyline-roof-tank-supports', UNIT_BOX, steel,
+        instanceMatrix(parent, x, 0.7, z, 0.12, 1.4, 0.12));
+    }
+    batcher.add('skyline-roof-tanks', SKYLINE_ROOF_TANK_GEO, body,
+      instanceMatrix(parent, 0, 1.95, 0, 1, 1, 1),
+      false,
+      def.color);
+    batcher.add('skyline-roof-tank-caps', SKYLINE_ROOF_TANK_CAP_GEO, body,
+      instanceMatrix(parent, 0, 2.67, 0, 1, 0.42, 1),
+      false,
+      def.color);
+  } else if (def.style === 'aerial') {
+    batcher.add('skyline-roof-masts', SKYLINE_ROOF_MAST_GEO, steel,
+      instanceMatrix(parent, 0, 3.3, 0, 1, 6.6, 1));
+    for (const y of [2.25, 3.45, 4.65]) {
+      batcher.add('skyline-roof-crossarms', UNIT_BOX, steel,
+        instanceMatrix(parent, 0, y, 0, 2.25 - y * 0.14, 0.075, 0.075,
+          0, 0, (y % 2 ? 1 : -1) * 0.035));
+    }
+    for (const x of [-0.62, 0.62]) {
+      batcher.add('skyline-roof-aerial-cables', UNIT_BOX, dark,
+        instanceMatrix(parent, x * 0.5, 2.3, 0, 0.025, 4.5, 0.025,
+          0, 0, x * 0.11));
+    }
   }
 }
 
@@ -2482,6 +2620,9 @@ export function addVisualProps(scene, props = []) {
     else if (def.kind === 'roof-cap') addRoofCap(batcher, def);
     else if (def.kind === 'skyline-roof-profile') addSkylineRoofProfile(batcher, def);
     else if (def.kind === 'skyline-facade') addSkylineFacade(batcher, def);
+    else if (def.kind === 'skyline-rooftop-equipment') {
+      addSkylineRooftopEquipment(batcher, def);
+    }
     else if (def.kind === 'ceiling-fixture') addCeilingFixture(batcher, def);
     else if (def.kind === 'wall-decal') wallDecals.push(def);
     else if (def.kind === 'skyline-stats') scene.userData.skylineStats = def.stats;

@@ -212,6 +212,7 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
       gabled: 0, industrial: 0, collapsed: 0,
     },
     roofProfiles: { gabled: 0, industrial: 0, collapsed: 0 },
+    roofEquipment: { plant: 0, tank: 0, aerial: 0 },
   };
   const inner = Math.max(bounds.r + 10, fogFar * 0.42);
   const outer = Math.max(inner + 70, fogFar * 0.8);
@@ -236,7 +237,12 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
       const bx = bounds.cx + Math.cos(a) * rr;
       const bz = bounds.cz + Math.sin(a) * rr;
       const w = arc * (0.55 + R() * 0.4), d = arc * (0.5 + R() * 0.35);
-      const h = 12 + R() * (24 + t * 46);
+      // This is a contested regional city, not a generic downtown. Keep most of the ring in
+      // the four-to-twelve-storey range and reserve a taller service/communications block for
+      // a sparse cadence. The previous outer ring reached 82m so its blank slabs dominated
+      // every street view like placeholder skyscrapers.
+      let h = 10 + R() * (20 + t * 20);
+      if ((i + ring * 7 + (seed >>> 4)) % 13 === 0) h *= 1.28;
       // Walk a coprime sequence rather than rolling independently. Every desktop ring gets
       // the complete authored silhouette library, while the seed still changes its phase.
       const profile = quality.desktop ? (i * 5 + ring * 3 + (seed >>> 0)) % 7 : 0;
@@ -336,24 +342,42 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
         for (let massIndex = 0; massIndex < masses.length; massIndex++) {
           const mass = masses[massIndex];
           if (mass.h < 7) continue;
-          const nx = alongX ? 0 : sgn;
-          const nz = alongX ? sgn : 0;
-          window.__bpVisualProps.push({
-            kind: 'skyline-facade',
-            x: alongX ? mass.x : mass.x + sgn * (mass.w / 2 + 0.075),
-            z: alongX ? mass.z + sgn * (mass.d / 2 + 0.075) : mass.z,
-            yBase: mass.yBase,
-            h: mass.h,
-            span: alongX ? mass.w : mass.d,
-            nx,
-            nz,
-            profile: effectiveProfile,
-            ring,
-            seed: (seed ^ (ring * 0x9e3779b9) ^ (i * 0x85ebca6b)
-              ^ (massIndex * 0xc2b2ae35)) >>> 0,
-            color: buildingTint,
-          });
-          stats.facades++;
+          // Decorate both axis-aligned faces aimed toward the playable centre. One decorated
+          // face only worked from a mathematically central camera; normal street movement
+          // exposed a blank adjacent side and turned each mass back into a primitive box.
+          const inwardX = -Math.sign(Math.cos(a)) || (i % 2 ? -1 : 1);
+          const inwardZ = -Math.sign(Math.sin(a)) || (i % 2 ? 1 : -1);
+          const faces = [
+            {
+              x: mass.x + inwardX * (mass.w / 2 + 0.075),
+              z: mass.z,
+              nx: inwardX,
+              nz: 0,
+              span: mass.d,
+            },
+            {
+              x: mass.x,
+              z: mass.z + inwardZ * (mass.d / 2 + 0.075),
+              nx: 0,
+              nz: inwardZ,
+              span: mass.w,
+            },
+          ];
+          for (let faceIndex = 0; faceIndex < faces.length; faceIndex++) {
+            const faceDef = faces[faceIndex];
+            window.__bpVisualProps.push({
+              kind: 'skyline-facade',
+              ...faceDef,
+              yBase: mass.yBase,
+              h: mass.h,
+              profile: effectiveProfile,
+              ring,
+              seed: (seed ^ (ring * 0x9e3779b9) ^ (i * 0x85ebca6b)
+                ^ (massIndex * 0xc2b2ae35) ^ (faceIndex * 0x27d4eb2f)) >>> 0,
+              color: buildingTint,
+            });
+            stats.facades++;
+          }
         }
       }
       const roof = masses.reduce((highest, mass) =>
@@ -389,16 +413,35 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
           color: new THREE.Color(buildingTint).multiplyScalar(0.72).getHex(),
         });
       }
-      // roof clutter reads as a city rather than a bar chart
-      if (R() < 0.62) geo.push(box(
-        roof.x + (R() - 0.5) * roof.w * 0.5, roofY + 1.1,
-        roof.z + (R() - 0.5) * roof.d * 0.5,
-        Math.max(0.8, roof.w * 0.16), 2.2, Math.max(0.8, roof.d * 0.16),
-        buildingTint, false));
-      if (R() < 0.32) geo.push(box(
-        roof.x + (R() - 0.5) * roof.w * 0.55, roofY + 3.4,
-        roof.z + (R() - 0.5) * roof.d * 0.55,
-        0.45, 6.8, 0.45, buildingTint, false));
+      // Typed rooftop silhouettes replace the old random box/pole pair. They remain
+      // decorative, deterministic and shared across a handful of instanced draw families.
+      const equipmentRoll = R();
+      if (quality.desktop && window.__bpVisualProps && equipmentRoll < 0.82) {
+        const style = equipmentRoll < 0.36
+          ? 'plant'
+          : equipmentRoll < 0.62 ? 'tank' : 'aerial';
+        window.__bpVisualProps.push({
+          kind: 'skyline-rooftop-equipment',
+          style,
+          x: roof.x + (R() - 0.5) * roof.w * 0.38,
+          z: roof.z + (R() - 0.5) * roof.d * 0.38,
+          y: roofY,
+          yaw: R() * Math.PI,
+          scale: Math.max(0.72, Math.min(1.45, Math.min(roof.w, roof.d) / 11)),
+          color: new THREE.Color(buildingTint).multiplyScalar(0.68).getHex(),
+        });
+        stats.roofEquipment[style]++;
+      } else if (!quality.desktop) {
+        if (equipmentRoll < 0.62) geo.push(box(
+          roof.x + (R() - 0.5) * roof.w * 0.5, roofY + 1.1,
+          roof.z + (R() - 0.5) * roof.d * 0.5,
+          Math.max(0.8, roof.w * 0.16), 2.2, Math.max(0.8, roof.d * 0.16),
+          buildingTint, false));
+        if (R() < 0.32) geo.push(box(
+          roof.x + (R() - 0.5) * roof.w * 0.55, roofY + 3.4,
+          roof.z + (R() - 0.5) * roof.d * 0.55,
+          0.45, 6.8, 0.45, buildingTint, false));
+      }
 
       // Lit windows, inner ring only and only on some buildings. Emissive, so they draw
       // unlit and read as light coming OUT rather than as a pale grey square. Anything on

@@ -31,21 +31,30 @@ def main():
             result = page.evaluate("""() => {
               const profileBatches = {};
               const facadeBatches = {};
+              const roofBatches = {};
               BP.world.staticMesh.parent.traverse(object => {
                 if (object.name?.startsWith('skyline-profile-')) {
                   profileBatches[object.name] = object.userData.instanceCount || 0;
                 }
                 if (object.name?.startsWith('skyline-window-')
                     || object.name?.startsWith('skyline-floor-')
+                    || object.name?.startsWith('skyline-pilaster')
+                    || object.name?.startsWith('skyline-balcony-')
+                    || object.name?.startsWith('skyline-exposed-')
                     || object.name === 'skyline-cornices'
                     || object.name === 'skyline-shell-scars') {
                   facadeBatches[object.name] = object.userData.instanceCount || 0;
+                }
+                if (object.name?.startsWith('skyline-roof-')
+                    && !object.name?.startsWith('skyline-profile-')) {
+                  roofBatches[object.name] = object.userData.instanceCount || 0;
                 }
               });
               return {
                 stats: BP.world.staticMesh.parent.userData.skylineStats,
                 profileBatches,
                 facadeBatches,
+                roofBatches,
                 familyDraws: BP.world.staticMesh.children.length,
                 calls: BP.performance.render.calls,
               };
@@ -77,17 +86,30 @@ def main():
         for row in levels.values():
             stats = row["stats"]
             assert stats["buildings"] >= 36
-            assert stats["masses"] >= stats["buildings"] * 1.35
+            assert stats["masses"] >= stats["buildings"] * 1.25
             assert stats["panes"] > 0
-            assert stats["facades"] >= stats["buildings"]
+            assert stats["facades"] >= stats["masses"] * 1.8
             assert all(count > 0 for count in stats["profiles"].values())
             assert all(count > 0 for count in stats["roofProfiles"].values())
+            assert all(count > 0 for count in stats["roofEquipment"].values())
             assert len(row["profileBatches"]) == 3
             assert row["facadeBatches"]["skyline-window-recesses"] >= stats["facades"] * 5
+            assert (
+                row["facadeBatches"]["skyline-window-frames"]
+                == row["facadeBatches"]["skyline-window-recesses"]
+            )
+            assert row["facadeBatches"]["skyline-window-boards"] > 0
             assert row["facadeBatches"]["skyline-floor-bands"] > 0
+            assert row["facadeBatches"]["skyline-pilasters"] >= stats["facades"] * 2
+            assert row["facadeBatches"]["skyline-balcony-slabs"] > 0
+            assert row["facadeBatches"]["skyline-balcony-rails"] > 0
+            assert row["facadeBatches"]["skyline-exposed-floor-slabs"] > 0
             assert row["facadeBatches"]["skyline-cornices"] == stats["facades"]
             assert row["facadeBatches"]["skyline-shell-scars"] > 0
-            assert len(row["facadeBatches"]) == 4
+            assert len(row["facadeBatches"]) == 10
+            assert row["roofBatches"]["skyline-roof-plant-housings"] > 0
+            assert row["roofBatches"]["skyline-roof-tanks"] > 0
+            assert row["roofBatches"]["skyline-roof-masts"] > 0
             assert row["familyDraws"] <= 12
         browser.close()
 

@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v77-detailed-intact-fleet';
+const CACHE = 'breach-protocol-v78-frontline-skyline-depth';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
