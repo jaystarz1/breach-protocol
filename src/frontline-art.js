@@ -1897,6 +1897,17 @@ export function addFrontlineMissionArt(scene, levelId) {
         ]);
       }
     }
+    // The original centre path now forks toward the two real breach portals instead of
+    // terminating against the closed party seam between them.
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        paving.push([
+          side * (1.5 + i * 1.45), 0.034, 3.15,
+          0, side * 0.008, 0,
+          1.32, 0.055, 1.05,
+        ]);
+      }
+    }
     const pavingBatch = instanced(
       scene, new THREE.BoxGeometry(1, 1, 1), frontline.concrete, paving, false);
     pavingBatch.name = 'op-alpha-courtyard-pavers';
@@ -1905,12 +1916,12 @@ export function addFrontlineMissionArt(scene, levelId) {
     // Everything is above or beside the combat lane, so this visual layer cannot snag actors.
     const canopyParts = instanced(
       scene, new THREE.BoxGeometry(1, 1, 1), frontline.barrierSteel,
-      [
-        [0, 2.78, 2.55, 0, 0, -0.035, 4.65, 0.12, 1.72],
-        [-2.08, 1.45, 2.62, 0, 0, 0.035, 0.1, 2.72, 0.1],
-        [2.08, 1.45, 2.62, 0, 0, -0.028, 0.1, 2.72, 0.1],
-        [0, 2.67, 3.38, 0, 0, 0, 4.5, 0.16, 0.12],
-      ]);
+      [-7, 7].flatMap((entryX, index) => [
+        [entryX, 2.78, 2.55, 0, 0, index ? 0.028 : -0.035, 4.65, 0.12, 1.72],
+        [entryX - 2.08, 1.45, 2.62, 0, 0, 0.035, 0.1, 2.72, 0.1],
+        [entryX + 2.08, 1.45, 2.62, 0, 0, -0.028, 0.1, 2.72, 0.1],
+        [entryX, 2.67, 3.38, 0, 0, 0, 4.5, 0.16, 0.12],
+      ]));
     canopyParts.name = 'op-alpha-entry-canopy';
     const canopySoffitMaterial = new THREE.MeshStandardMaterial({
       color: 0xd0c49d, emissive: 0xffd18a, emissiveIntensity: 0.32,
@@ -1918,7 +1929,10 @@ export function addFrontlineMissionArt(scene, levelId) {
     });
     const canopyLight = instanced(
       scene, new THREE.BoxGeometry(1, 1, 1), canopySoffitMaterial,
-      [[0, 2.69, 2.72, 0, 0, 0, 1.1, 0.035, 0.24]], false);
+      [
+        [-7, 2.69, 2.72, 0, 0, 0, 1.1, 0.035, 0.24],
+        [7, 2.69, 2.72, 0, 0, 0, 1.1, 0.035, 0.24],
+      ], false);
     canopyLight.name = 'op-alpha-entry-light';
 
     // A Soviet-era exterior fire escape breaks the east wall's cuboid silhouette and gives
@@ -1930,17 +1944,17 @@ export function addFrontlineMissionArt(scene, levelId) {
     for (const y of [3.35, 6.35]) {
       for (let i = 0; i < 12; i++) {
         firePlatforms.push([
-          7.32, y, -5.37 + i * 0.25,
+          14.32, y, -5.37 + i * 0.25,
           0, 0, 0, 1.55, 0.055, 0.14,
         ]);
       }
-      fireRails.push([8.02, y + 1.12, -4, 0, 0, 0, 0.07, 0.055, 3.0]);
+      fireRails.push([15.02, y + 1.12, -4, 0, 0, 0, 0.07, 0.055, 3.0]);
       fireSideRails.push(
-        [7.32, y + 1.12, -5.43, 0, 0, 0, 1.45, 0.055, 0.055],
-        [7.32, y + 1.12, -2.57, 0, 0, 0, 1.45, 0.055, 0.055],
+        [14.32, y + 1.12, -5.43, 0, 0, 0, 1.45, 0.055, 0.055],
+        [14.32, y + 1.12, -2.57, 0, 0, 0, 1.45, 0.055, 0.055],
       );
       for (const z of [-5.25, -4.4, -3.55, -2.75]) {
-        fireBalusters.push([8.02, y + 0.61, z, 0, 0, 0, 0.045, 1.08, 0.045]);
+        fireBalusters.push([15.02, y + 0.61, z, 0, 0, 0, 0.045, 1.08, 0.045]);
       }
     }
     const platformBatch = instanced(
@@ -1958,19 +1972,19 @@ export function addFrontlineMissionArt(scene, levelId) {
     const ladder = instanced(
       scene, new THREE.BoxGeometry(1, 1, 1), steel,
       [
-        [8.04, 4.84, -5.08, 0, 0, 0, 0.055, 3.05, 0.055],
-        [8.04, 4.84, -4.35, 0, 0, 0, 0.055, 3.05, 0.055],
+        [15.04, 4.84, -5.08, 0, 0, 0, 0.055, 3.05, 0.055],
+        [15.04, 4.84, -4.35, 0, 0, 0, 0.055, 3.05, 0.055],
         ...Array.from({ length: 8 }, (_, i) =>
-          [8.04, 3.55 + i * 0.37, -4.715, Math.PI / 2, 0, 0, 0.045, 0.73, 0.045]),
+          [15.04, 3.55 + i * 0.37, -4.715, Math.PI / 2, 0, 0, 0.045, 0.73, 0.045]),
       ]);
     ladder.name = 'op-alpha-fire-escape-ladder';
     const fireBraces = instanced(
       scene, new THREE.BoxGeometry(1, 1, 1), steel,
       [
-        [7.58, 2.94, -5.1, 0, 0, -0.72, 0.055, 1.18, 0.055],
-        [7.58, 2.94, -2.9, 0, 0, -0.72, 0.055, 1.18, 0.055],
-        [7.58, 5.94, -5.1, 0, 0, -0.72, 0.055, 1.18, 0.055],
-        [7.58, 5.94, -2.9, 0, 0, -0.72, 0.055, 1.18, 0.055],
+        [14.58, 2.94, -5.1, 0, 0, -0.72, 0.055, 1.18, 0.055],
+        [14.58, 2.94, -2.9, 0, 0, -0.72, 0.055, 1.18, 0.055],
+        [14.58, 5.94, -5.1, 0, 0, -0.72, 0.055, 1.18, 0.055],
+        [14.58, 5.94, -2.9, 0, 0, -0.72, 0.055, 1.18, 0.055],
       ]);
     fireBraces.name = 'op-alpha-fire-escape-braces';
 
@@ -2019,18 +2033,18 @@ export function addFrontlineMissionArt(scene, levelId) {
     const playFrame = instanced(
       scene, new THREE.CylinderGeometry(0.055, 0.065, 2.8, 8), steel,
       [
-        [12.7, 1.28, -3.2, 0, 0, 0.42, 1, 1, 1],
-        [15.0, 1.28, -3.2, 0, 0, -0.42, 1, 1, 1],
-        [12.7, 1.28, -6.3, 0, 0, 0.42, 1, 1, 1],
-        [15.0, 1.28, -6.3, 0, 0, -0.42, 1, 1, 1],
-        [13.85, 2.55, -4.75, Math.PI / 2, 0, 0, 1, 1.22, 1],
+        [18.7, 1.28, -3.2, 0, 0, 0.42, 1, 1, 1],
+        [21.0, 1.28, -3.2, 0, 0, -0.42, 1, 1, 1],
+        [18.7, 1.28, -6.3, 0, 0, 0.42, 1, 1, 1],
+        [21.0, 1.28, -6.3, 0, 0, -0.42, 1, 1, 1],
+        [19.85, 2.55, -4.75, Math.PI / 2, 0, 0, 1, 1.22, 1],
       ]);
     playFrame.name = 'op-alpha-play-frame';
     const playSeats = instanced(
       scene, new THREE.BoxGeometry(0.72, 0.08, 0.32), frontline.timber,
       [
-        [13.2, 0.48, -4.7, 0.05, 0, -0.08, 1, 1, 1],
-        [14.55, 0.2, -5.1, 0.18, 0.12, 0.5, 1, 1, 1],
+        [19.2, 0.48, -4.7, 0.05, 0, -0.08, 1, 1, 1],
+        [20.55, 0.2, -5.1, 0.18, 0.12, 0.5, 1, 1, 1],
       ], false);
     playSeats.name = 'op-alpha-play-seats';
 
@@ -2063,7 +2077,7 @@ export function addFrontlineMissionArt(scene, levelId) {
     for (let i = 0; i < 36; i++) {
       const row = Math.floor(i / 9);
       collapse[i % 3].push([
-        7.8 + (i % 9) * 0.38, 0.08 + (i % 4) * 0.045, -8.8 - row * 0.42,
+        15.0 + (i % 9) * 0.38, 0.08 + (i % 4) * 0.045, -8.8 - row * 0.42,
         i * 0.17, i * 0.31, i * 0.23,
         0.48 + (i % 4) * 0.1, 0.48 + (i % 3) * 0.12, 0.45 + (i % 5) * 0.08,
       ]);

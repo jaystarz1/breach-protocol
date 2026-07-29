@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeDoor } from './levelgen.js';
+import { mergeGeometries } from '../lib/BufferGeometryUtils.js';
 import { makeBox } from './physics.js';
 import { sfx } from './audio.js';
 import { hud } from './hud.js';
@@ -17,23 +18,53 @@ for (const resource of [PORTAL_GEO, PORTAL_MAT, PORTAL_STRIPE_MAT]) {
   resource.userData.bpPersistent = true;
 }
 
+const portalGeometryCache = new Map();
+
+function portalGeometry(width, height) {
+  const key = `${width}:${height}`;
+  if (portalGeometryCache.has(key)) return portalGeometryCache.get(key);
+  const box = (x, y, z, sx, sy, sz) => {
+    const geometry = PORTAL_GEO.clone();
+    geometry.scale(sx, sy, sz);
+    geometry.translate(x, y, z);
+    return geometry;
+  };
+  const structureParts = [
+    box(-width / 2 - 0.11, height / 2, 0, 0.22, height + 0.34, 0.42),
+    box(width / 2 + 0.11, height / 2, 0, 0.22, height + 0.34, 0.42),
+    box(0, height + 0.11, 0, width + 0.44, 0.22, 0.42),
+  ];
+  const stripeParts = [
+    box(0, height + 0.18, 0.225, width * 0.62, 0.09, 0.035),
+    box(0, height + 0.18, -0.225, width * 0.62, 0.09, 0.035),
+  ];
+  const result = {
+    structure: mergeGeometries(structureParts, false),
+    stripes: mergeGeometries(stripeParts, false),
+  };
+  for (const geometry of [...structureParts, ...stripeParts]) geometry.dispose();
+  result.structure.userData.bpPersistent = true;
+  result.stripes.userData.bpPersistent = true;
+  portalGeometryCache.set(key, result);
+  return result;
+}
+
 function makePortalFrame(width, height) {
   const root = new THREE.Group();
   root.name = 'breach-portal-reveal';
-  const add = (name, material, x, y, z, sx, sy, sz) => {
-    const mesh = new THREE.Mesh(PORTAL_GEO, material);
+  const geometry = portalGeometry(width, height);
+  const add = (name, source, material) => {
+    const mesh = new THREE.Mesh(source, material);
     mesh.name = name;
-    mesh.position.set(x, y, z);
-    mesh.scale.set(sx, sy, sz);
-    mesh.castShadow = mesh.receiveShadow = true;
+    // The surrounding wall owns the shadow silhouette. These trim pieces receive the wall's
+    // shadow but do not each trigger another directional-shadow draw.
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
     root.add(mesh);
   };
   // A deep reveal is visible from either side and remains after the leaf has been breached.
-  add('portal-left-jamb', PORTAL_MAT, -width / 2 - 0.11, height / 2, 0, 0.22, height + 0.34, 0.42);
-  add('portal-right-jamb', PORTAL_MAT, width / 2 + 0.11, height / 2, 0, 0.22, height + 0.34, 0.42);
-  add('portal-lintel', PORTAL_MAT, 0, height + 0.11, 0, width + 0.44, 0.22, 0.42);
-  add('portal-warning-header', PORTAL_STRIPE_MAT, 0, height + 0.18, 0.225, width * 0.62, 0.09, 0.035);
-  add('portal-warning-header-rear', PORTAL_STRIPE_MAT, 0, height + 0.18, -0.225, width * 0.62, 0.09, 0.035);
+  add('portal-structure', geometry.structure, PORTAL_MAT);
+  add('portal-warning-headers', geometry.stripes, PORTAL_STRIPE_MAT);
   return root;
 }
 

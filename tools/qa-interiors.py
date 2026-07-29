@@ -45,7 +45,6 @@ def main():
             fixtureCounts[object.name] = object.userData.instanceCount || 1;
           });
           const doors = BP.world.doors.doors;
-          const firstHardware = doors[0].mesh.getObjectByName('door-hardware');
           return {
             doors: doors.length,
             authored: doors.every(door => door.mesh.userData.authoredDoor),
@@ -53,10 +52,10 @@ def main():
             allLeavesTextured: doors.every(door =>
               !!door.mesh.getObjectByName('door-leaf')?.material?.map),
             consolidatedHardware: doors.every(door =>
-              door.mesh.getObjectByName('door-hardware')?.isMesh),
+              door.mesh.getObjectByName('door-leaf')?.userData.mergedDoorDetails),
             sharedHardwareGeometry: doors.every(door =>
-              door.mesh.getObjectByName('door-hardware')?.geometry
-                === firstHardware.geometry),
+              door.mesh.getObjectByName('door-leaf')?.geometry
+                === doors[0].mesh.getObjectByName('door-leaf')?.geometry),
             fixtureCounts,
             interiorArt: scene.userData.interiorMissionStats,
             calls: BP.performance.render.calls,

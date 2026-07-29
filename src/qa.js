@@ -12,9 +12,10 @@ import { streetShopLayout } from './mission-variants.js';
 const PATHS = {
   1: [[0, 14], [7, 11], [0, 9], [0, 3], [7, -1], [7, -3], [0, -5], [0, -9], [7, -13], [9, -15], [0, -17], [0, -18]],
   2: [[0, 30], [0, 22], [8, 20], [11, 20], [8, 20], [0, 12], [-4, 2], [8, -4.5], [11, -5], [8, -4.5], [0, -14], [-6, -25], [-11, -25], [-6, -25], [0, -34], [0, -44], [0, -51]],
-  3: [[0, 10], [0, 3], [0, -1], [3, -6], [-4, -8], [-5.9, -5, 0], [-5.9, -9.3, 3], [-4, -8, 3], [1, -4, 3], [4.5, -6, 3], [5, -8, 3],
-      [-5.9, -2.4, 3], [-5.9, 1.2, 6], [-4, -4, 6], [1, -4, 6], [4.5, -6, 6], [-4, -8, 6],
-      [-5.9, -5, 6], [-5.9, -9.3, 9], [-2, -6, 9]],
+  3: [[0, 10], [-7, 4], [-7, 1], [-10, -7], [0, -7], [10, -7],
+      [-12.9, -5, 0], [-12.9, -9.3, 3], [-10, -8, 3], [-7, -4, 3], [0, -7, 3], [7, -4, 3], [10, -8, 3],
+      [-12.9, -2.4, 3], [-12.9, 1.2, 6], [-10, -3, 6], [-7, -4, 6], [0, -7, 6], [7, -4, 6], [10, -8, 6],
+      [-12.9, -5, 6], [-12.9, -9.3, 9], [-2, -6, 9]],
   4: [[0, 45], [0, 30], [2, 26], [5, 22], [5, 18.5], [13.5, 17.5], [5, 18.5], [8, 10], [2.5, -2], [2.5, -7], [-6, -7.5],
       [-6, -18], [-16, -28], [4, -28], [-14, -34], [-6.5, -37], [-6.5, -41]],
   5: [[0, 26], [-22, 15], [-8, 12], [8, 18], [22, 10], [22, 4], [-8, 4], [-24, 0], [-15, -8], [8, -20], [26, -30], [-26, -30], [0, -34], [0, -39.5]],
@@ -67,7 +68,7 @@ export function run(from = 1, to = 10, opts = {}) {
   let dynPath = null, dynIdx = 0, dynTimer = 0, dynStuck = 0, dynLast = null;
   let lastObjIdx = -1, objSince = 0;
   let notes = [];
-  let fireTick = 0, civJam = 0;
+  let fireTick = 0, civJam = 0, civBypassUntil = 0;
   let hpMin = 1, hpSum = 0, hpSamples = 0;
 
   function beginLevel() {
@@ -123,7 +124,10 @@ export function run(from = 1, to = 10, opts = {}) {
     }
 
     // level time cap
-    const cap = w.level.sniper ? 300 : 240;
+    // OP Alpha now searches two joined three-storey wings and returns for six hostages.
+    // Unlike a timed challenge, the mission itself has no clock; the QA ceiling must reflect
+    // the authored route length instead of declaring a healthy larger level broken at 240s.
+    const cap = w.level.sniper ? 300 : level === 3 ? 520 : 240;
     if ((performance.now() - levelStart) / 1000 > cap) {
       notes.push(`TIMEOUT obj=${w.objectiveIdx} pos=${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)} live=${w.enemies.filter(e => !e.dead).map(e => `(${e.pos.x.toFixed(0)},${e.pos.y.toFixed(0)},${e.pos.z.toFixed(0)})`).join('')}`);
       report('FAIL(timeout)');
@@ -186,13 +190,20 @@ export function run(from = 1, to = 10, opts = {}) {
       else { fireTick++; if (fireTick % 12 === 0) { input.fire = true; input.firePressed = true; } }
       return; // stand and fight
     }
-    if (target && civRisk) {
+    if (target && civRisk && performance.now() >= civBypassUntil) {
       // sidestep to open a clean line, and keep facing the threat while doing it
       const dx2 = target.pos.x - eye.x, dz2 = target.pos.z - eye.z;
       p.yaw = Math.atan2(-dx2, -dz2);
       input.move.x = jiggleDir;
       civJam += 0.1;
-      if (civJam > 3) { jiggleDir *= -1; civJam = 0; }
+      if (civJam > 3) {
+        // If a hostage still masks the shot after a deliberate three-second sidestep, move
+        // through the authored route with fire held. Repeating the same lateral motion is not
+        // caution; it is an infinite loop in exactly the crowded rooms this bot must verify.
+        jiggleDir *= -1;
+        civJam = 0;
+        civBypassUntil = performance.now() + 3500;
+      }
       return;
     }
     civJam = 0;

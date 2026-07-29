@@ -51,18 +51,26 @@ def main():
             calls: BP.performance.render.calls,
             triangles: BP.performance.render.triangles,
             programs: BP.performance.resources.programs,
+            doors: BP.world.doors.doors.map(door => door.def.pos),
+            enemiesByFloor: [0, 3, 6].map(y => BP.world.enemies.filter(
+              enemy => Math.abs(enemy.pos.y - y) < 0.5).length),
+            hostages: BP.world.civilians.filter(civilian => civilian.hostage).length,
+            sharedPartyWallBlocked: BP.world.solids.some(solid =>
+              solid.min.x <= 0 && solid.max.x >= 0
+              && solid.min.z < -6.5 && solid.max.z > -7.5
+              && solid.max.y - solid.min.y > 2.5),
           };
         }""")
 
         shots = [
-            ("courtyard-approach.png", 0, 18, 0, 0.02),
-            ("entry-canopy.png", 0, 7, 0, 0.05),
-            ("east-fire-escape.png", 13, 1, 1.2, -0.08),
-            ("courtyard-human-scale.png", -12, 15, -0.56, 0.02),
-            ("rooftop-op.png", 0, -3, 0, -0.04),
+            ("courtyard-approach.png", 0, 0, 18, 0, 0.02),
+            ("west-entry-canopy.png", -7, 0, 7, 0, 0.05),
+            ("joined-floor.png", -10, 3.1, -7, -1.57, 0),
+            ("east-fire-escape.png", 20, 0, 1, 1.2, -0.08),
+            ("courtyard-human-scale.png", -12, 0, 15, -0.56, 0.02),
+            ("rooftop-op.png", 0, 9.1, -3, 0, -0.04),
         ]
-        for name, x, z, yaw, pitch in shots:
-            y = 9.1 if name == "rooftop-op.png" else 0
+        for name, x, y, z, yaw, pitch in shots:
             page.evaluate(
                 """([x, y, z, yaw, pitch]) => {
                   BP.player.pos.set(x, y, z);
@@ -86,9 +94,17 @@ def main():
             if name.startswith("vehicle-authored-")
         )
         assert not errors, result
-        assert counts.get("op-alpha-courtyard-pavers", 0) == 14, result
-        assert counts.get("op-alpha-entry-canopy", 0) == 4, result
-        assert counts.get("op-alpha-entry-light", 0) == 1, result
+        assert result["doors"] == [
+            [-7, 0, 2.1], [7, 0, 2.1],
+            [-7, 3, -4], [7, 3, -4],
+            [-7, 6, -4], [7, 6, -4],
+        ], result
+        assert result["enemiesByFloor"] == [2, 3, 4], result
+        assert result["hostages"] == 6, result
+        assert not result["sharedPartyWallBlocked"], result
+        assert counts.get("op-alpha-courtyard-pavers", 0) == 22, result
+        assert counts.get("op-alpha-entry-canopy", 0) == 8, result
+        assert counts.get("op-alpha-entry-light", 0) == 2, result
         assert counts.get("op-alpha-fire-escape-platforms", 0) == 24, result
         assert counts.get("op-alpha-fire-escape-rails", 0) == 2, result
         assert counts.get("op-alpha-fire-escape-side-rails", 0) == 4, result
@@ -111,7 +127,7 @@ def main():
         assert counts.get("op-alpha-courtyard-hedgehog", 0) == 1, result
         assert authored_vehicle_parts >= 1, result
         assert counts.get("frontline-mission-op-sandbags", 0) == 16, result
-        assert result["calls"] < 330, result
+        assert result["calls"] <= 350, result
         assert result["triangles"] < 550_000, result
         browser.close()
 

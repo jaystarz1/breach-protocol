@@ -120,13 +120,13 @@ def main():
           count: BP.world.doors.doors.length,
           framed: BP.world.doors.doors.every(door =>
             door.frame?.name === 'breach-portal-reveal'
-            && door.frame.getObjectByName('portal-warning-header')
-            && door.frame.getObjectByName('portal-warning-header-rear')),
+            && door.frame.getObjectByName('portal-structure')
+            && door.frame.getObjectByName('portal-warning-headers')),
           persistentAfterLeaf: BP.world.doors.doors.every(door =>
             door.frame.parent === door.mesh.parent && door.frame !== door.mesh),
         })""")
         page.evaluate("""() => {
-          BP.player.pos.set(0, 0, 7.2);
+          BP.player.pos.set(-7, 0, 7.2);
           BP.player.yaw = 0;
           BP.player.pitch = 0;
         }""")
@@ -288,7 +288,7 @@ def main():
         assert recon["resultVisible"] == 1, result
         assert recon["transientBefore"] > 0 and recon["transientAfter"] == 0, result
         assert recon["visibleGroundActors"] == 0, result
-        assert doors == {"count": 3, "framed": True, "persistentAfterLeaf": True}, result
+        assert doors == {"count": 6, "framed": True, "persistentAfterLeaf": True}, result
         assert head["finite"] and head["panicMax"] < 0.16 and head["coverMax"] < 0.24, result
         assert corpse["complete"] == 1 and 0 <= corpse["torsoClearance"] < 0.24, result
         assert sniper["facades"] == 3 and sniper["allStatic"], result

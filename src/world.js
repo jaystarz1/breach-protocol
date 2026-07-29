@@ -709,6 +709,12 @@ export function awning(x, z, w, d, y = 3.0, color = 0x7a3b3b) {
 // worse. Drain with takeLights() immediately after building a level's geo.
 let pendingLights = [];
 export function takeLights() { const l = pendingLights; pendingLights = []; return l; }
+export function lightCursor() { return pendingLights.length; }
+export function mirrorLightsXSince(cursor, centreX) {
+  for (let i = Math.max(0, cursor | 0); i < pendingLights.length; i++) {
+    pendingLights[i].pos[0] = centreX * 2 - pendingLights[i].pos[0];
+  }
+}
 
 // Flush-mounted ceiling panel. y is the CEILING height, not the fixture height.
 export function ceilingLight(x, y, z, opts = {}) {

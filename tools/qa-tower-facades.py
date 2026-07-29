@@ -89,7 +89,7 @@ def main():
         assert all(row["downpipes"] >= 8 for row in levels.values())
         assert levels["3"]["counts"].get("facade-balcony-slabs", 0) == 0
         assert levels["7"]["counts"].get("facade-balcony-slabs", 0) > 0
-        assert levels["3"]["authoredDoors"] == 3
+        assert levels["3"]["authoredDoors"] == 6
         assert levels["7"]["authoredDoors"] == 2
         assert levels["10"]["authoredDoors"] == 2
         browser.close()

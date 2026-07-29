@@ -749,6 +749,7 @@ export function settleDeathRig(g, solids, dt) {
 
 const doorGeometryCache = new Map();
 const doorDetailCache = new Map();
+const doorMergedCache = new Map();
 const DOOR_DETAIL_BOX = new THREE.BoxGeometry(1, 1, 1);
 const DOOR_ESCUTCHEON = new THREE.CylinderGeometry(0.075, 0.075, 0.026, 16);
 const DOOR_LEVER = new THREE.CapsuleGeometry(0.026, 0.15, 3, 8);
@@ -759,21 +760,13 @@ function breachDoorMaterials() {
   if (doorMaterials) return doorMaterials;
   const metal = surfaces().metal;
   doorMaterials = {
-    leaf: new THREE.MeshStandardMaterial({
-      color: 0x586264, roughness: 0.72, metalness: 0.28,
+    merged: new THREE.MeshStandardMaterial({
+      color: 0xffffff, vertexColors: true,
+      roughness: 0.68, metalness: 0.3,
       map: quality.textures ? metal.map : null,
       roughnessMap: quality.textures ? metal.roughnessMap : null,
       normalMap: quality.textures ? metal.normalMap : null,
       normalScale: new THREE.Vector2(0.13, 0.13),
-    }),
-    inset: new THREE.MeshStandardMaterial({
-      color: 0x303739, roughness: 0.83, metalness: 0.18,
-    }),
-    hardware: new THREE.MeshStandardMaterial({
-      color: 0x8b9293, roughness: 0.38, metalness: 0.78,
-    }),
-    grime: new THREE.MeshStandardMaterial({
-      color: 0x242829, roughness: 0.98, metalness: 0,
     }),
   };
   return doorMaterials;
@@ -873,6 +866,41 @@ function breachDoorDetails(w, h) {
   return result;
 }
 
+function breachDoorMergedGeometry(w, h) {
+  const key = `${w}:${h}`;
+  if (doorMergedCache.has(key)) return doorMergedCache.get(key);
+  const details = breachDoorDetails(w, h);
+  const tint = (source, hex) => {
+    let geometry = source.clone();
+    if (geometry.index) {
+      const indexed = geometry;
+      geometry = geometry.toNonIndexed();
+      indexed.dispose();
+    }
+    const count = geometry.attributes.position.count;
+    const color = new THREE.Color(hex);
+    const values = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      values[i * 3] = color.r;
+      values[i * 3 + 1] = color.g;
+      values[i * 3 + 2] = color.b;
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+    return geometry;
+  };
+  const sources = [
+    tint(breachDoorGeometry(w, h), 0x586264),
+    tint(details.inset, 0x303739),
+    tint(details.hardware, 0x9aa0a0),
+    tint(details.grime, 0x242829),
+  ];
+  const merged = mergeGeometries(sources, false);
+  for (const geometry of sources) geometry.dispose();
+  merged.userData.sourceParts = 4;
+  doorMergedCache.set(key, merged);
+  return merged;
+}
+
 // Breachable door mesh. The whole group remains one physics object and still flies inward on
 // breach, but the desktop presentation now reads as battered institutional steel rather than
 // a brown cuboid with a yellow cube attached.
@@ -881,22 +909,12 @@ export function makeDoor(w = 1.4, h = 2.4) {
   g.name = 'breach-door';
   g.userData.authoredDoor = true;
   const m = breachDoorMaterials();
-  const panel = new THREE.Mesh(breachDoorGeometry(w, h), m.leaf);
+  const panel = new THREE.Mesh(breachDoorMergedGeometry(w, h), m.merged);
   panel.name = 'door-leaf';
+  panel.userData.mergedDoorDetails = true;
+  panel.userData.sourceParts = 4;
   panel.castShadow = panel.receiveShadow = quality.shadows;
   g.add(panel);
-
-  const details = breachDoorDetails(w, h);
-  for (const [name, geometry, mat] of [
-    ['door-inset-panels', details.inset, m.inset],
-    ['door-hardware', details.hardware, m.hardware],
-    ['door-scrapes', details.grime, m.grime],
-  ]) {
-    const part = new THREE.Mesh(geometry, mat);
-    part.name = name;
-    part.castShadow = part.receiveShadow = quality.shadows;
-    g.add(part);
-  }
   return g;
 }
 

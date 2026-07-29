@@ -7,6 +7,7 @@ import {
   ceilingLight, hangingBulb, exitSign, baseboard, wainscot, doorFrame, desk, chair, table,
   shelf, cabinet, mattress, rug, radiator, pipes, poster, debris,
   posterWall, noticeBoard, whiteboard, wallClock, graffiti, picture, windowBay,
+  lightCursor, mirrorLightsXSince,
 } from '../world.js';
 
 // ---- OVERWATCH window bays -------------------------------------------------------------
@@ -30,6 +31,7 @@ const inBay = (b, wallZ) => [b[0], b[1], wallZ + 0.62];
 function tower(x, z, w, d, floors, opts = {}) {
   const geo = [];
   const visualStart = window.__bpVisualProps?.length ?? 0;
+  const lightsStart = lightCursor();
   const fh = 3;
   const x1 = x - w / 2, x2 = x + w / 2, z1 = z - d / 2, z2 = z + d / 2;
   const sx = x1 + 1.1; // stair lane center
@@ -61,8 +63,8 @@ function tower(x, z, w, d, floors, opts = {}) {
     const doorGap = (f === 0 && opts.door !== false) ? [{ off: w / 2 - 0.8, w: 1.6, h: 2.4 }] : [];
     geo.push(...wall(x1, z2, x2, z2, fh, C.building, doorGap, y)); // south (entry)
     geo.push(...wall(x1, z1, x2, z1, fh, C.building, [], y));
-    geo.push(...wall(x2, z1, x2, z2, fh, C.building, [], y));
-    geo.push(...wall(x1, z1, x1, z2, fh, C.building, [], y));
+    if (!opts.openEast) geo.push(...wall(x2, z1, x2, z2, fh, C.building, [], y));
+    if (!opts.openWest) geo.push(...wall(x1, z1, x1, z2, fh, C.building, [], y));
     // flight f climbs from floor f to floor f+1 (the top one reaches the roof)
     if (f % 2 === 0) geo.push(...stairs(sx, z1 + 4.5, 'n', 3.4, fh, 2.0, C.concrete, y));
     else geo.push(...stairs(sx, z2 - 4.5, 's', 3.4, fh, 2.0, C.concrete, y));
@@ -138,28 +140,35 @@ function tower(x, z, w, d, floors, opts = {}) {
     slabWithWindow(ry, C.roof, (floors - 1) % 2);
     geo.push(...wall(x1, z1, x2, z1, 0.9, C.concrete, [], ry));
     geo.push(...wall(x1, z2, x2, z2, 0.9, C.concrete, [], ry));
-    geo.push(...wall(x2, z1, x2, z2, 0.9, C.concrete, [], ry));
-    geo.push(...wall(x1, z1, x1, z2, 0.9, C.concrete, [], ry));
+    if (!opts.openEast) geo.push(...wall(x2, z1, x2, z2, 0.9, C.concrete, [], ry));
+    if (!opts.openWest) geo.push(...wall(x1, z1, x1, z2, 0.9, C.concrete, [], ry));
   }
   // The tower is a real traversable shell, but from the street its four uninterrupted wall
   // runs still read as one giant brick cuboid. Reuse the desktop facade system outside the
   // collision envelope: dark room recesses, damaged glazing, sills, utilities and cornices
   // give every floor scale without changing navigation or allowing fake window shots.
-  const facadeOpts = {
-    away: [x, z],
-    step: opts.windowStep ?? 3.2,
-    floorH: fh,
-    lit: opts.windowLit ?? 0.16,
-    damage: opts.facadeDamage ?? 0.5,
-    balconies: opts.balconies,
-  };
-  geo.push(...facade(x1, z2, x2, z2, 0, floors * fh, 30101 + floors * 17, {
-    ...facadeOpts,
-    skip: opts.door === false ? [] : [{ from: w / 2 - 1.1, to: w / 2 + 1.1 }],
-  }));
-  geo.push(...facade(x2, z1, x1, z1, 0, floors * fh, 30103 + floors * 19, facadeOpts));
-  geo.push(...facade(x2, z2, x2, z1, 0, floors * fh, 30107 + floors * 23, facadeOpts));
-  geo.push(...facade(x1, z1, x1, z2, 0, floors * fh, 30109 + floors * 29, facadeOpts));
+  if (opts.facades !== false) {
+    const facadeOpts = {
+      away: [x, z],
+      step: opts.windowStep ?? 3.2,
+      floorH: fh,
+      lit: opts.windowLit ?? 0.16,
+      damage: opts.facadeDamage ?? 0.5,
+      balconies: opts.balconies,
+    };
+    const facadeSeed = opts.seedOffset ?? 0;
+    geo.push(...facade(x1, z2, x2, z2, 0, floors * fh, 30101 + floors * 17 + facadeSeed, {
+      ...facadeOpts,
+      skip: opts.door === false ? [] : [{ from: w / 2 - 1.1, to: w / 2 + 1.1 }],
+    }));
+    geo.push(...facade(x2, z1, x1, z1, 0, floors * fh, 30103 + floors * 19 + facadeSeed, facadeOpts));
+    if (!opts.openEast) {
+      geo.push(...facade(x2, z2, x2, z1, 0, floors * fh, 30107 + floors * 23 + facadeSeed, facadeOpts));
+    }
+    if (!opts.openWest) {
+      geo.push(...facade(x1, z1, x1, z2, 0, floors * fh, 30109 + floors * 29 + facadeSeed, facadeOpts));
+    }
+  }
   if (opts.mirror) {
     // Reflect the complete authored module around its centre. Geometry, collision, facade
     // definitions and wall dressing all move together, so this creates different circulation
@@ -173,6 +182,7 @@ function tower(x, z, w, d, floors, opts = {}) {
       if (prop.away) prop.away[0] = 2 * x - prop.away[0];
       if (prop.kind === 'wall-decal' && prop.rot) prop.dir = -(prop.dir ?? 1);
     }
+    mirrorLightsXSince(lightsStart, x);
   }
   return geo;
 }
@@ -508,11 +518,41 @@ export const LEVELS = [
     geo: () => {
       const g = [];
       g.push(...GROUND(60, 60, C.concrete));
-      g.push(...tower(0, -4, 14, 12, 3, {
+      // Two residential shells share one open party line. Their stairs remain on the outside
+      // edges, so each floor is a wide, connected search space rather than two copies divided
+      // by an invisible collision wall. The mirrored east wing also changes circulation.
+      g.push(...tower(-7, -4, 14, 12, 3, {
         facadeDamage: 0.74,
         windowLit: 0.12,
         balconies: false,
+        openEast: true,
+        facades: false,
       }));
+      g.push(...tower(7, -4, 14, 12, 3, {
+        facadeDamage: 0.67,
+        windowLit: 0.09,
+        balconies: false,
+        // Options describe the unreflected source shell. Its east wall becomes the shared
+        // west wall after mirroring, so east is the side that must be omitted here.
+        openEast: true,
+        mirror: true,
+        seedOffset: 733,
+        facades: false,
+      }));
+      // Treat the joined pair as one facade asset: four continuous elevations, batched once,
+      // with two real entrance gaps. Building each module's facade independently duplicated
+      // the same material families and exceeded the desktop draw-call ceiling.
+      const joinedFacade = {
+        away: [0, -4], step: 3.2, floorH: 3,
+        lit: 0.11, damage: 0.72, balconies: false,
+      };
+      g.push(...facade(-14, 2, 14, 2, 0, 9, 33201, {
+        ...joinedFacade,
+        skip: [{ from: 5.9, to: 8.1 }, { from: 19.9, to: 22.1 }],
+      }));
+      g.push(...facade(14, -10, -14, -10, 0, 9, 33203, joinedFacade));
+      g.push(...facade(-14, -10, -14, 2, 0, 9, 33207, joinedFacade));
+      g.push(...facade(14, 2, 14, -10, 0, 9, 33209, joinedFacade));
       // A residential block does not stand alone in a poured-concrete void. This abandoned
       // car is authoritative cover at the edge of the approach; the desktop renderer replaces
       // its inexpensive collision body with the authored damaged vehicle.
@@ -520,49 +560,63 @@ export const LEVELS = [
       return g;
     },
     doors: [
-      { pos: [0, 0, 2.1], rot: 0, w: 1.6 },      // ground entry
-      { pos: [2, 3, -4], rot: 90, w: 1.5 },      // floor 2 interior door (mid-room divider)
-      { pos: [2, 6, -4], rot: 90, w: 1.5 },      // floor 3
+      { pos: [-7, 0, 2.1], rot: 0, w: 1.6 }, { pos: [7, 0, 2.1], rot: 0, w: 1.6 },
+      { pos: [-7, 3, -4], rot: 0, w: 1.5 }, { pos: [7, 3, -4], rot: 0, w: 1.5 },
+      { pos: [-7, 6, -4], rot: 0, w: 1.5 }, { pos: [7, 6, -4], rot: 0, w: 1.5 },
     ],
-    // interior dividers on floors 2/3 so the door means something
+    // Each upper floor has two transverse room dividers, while the original party line at
+    // x=0 remains completely open. Players can cross wings at either side of the dividers.
     extraGeo: () => {
       const g = [];
       for (const y of [3, 6]) {
-        g.push(...wall(2, -10, 2, -4.75, 3, C.interiorWall, [], y));
-        g.push(...wall(2, -3.25, 2, 2, 3, C.interiorWall, [], y));
+        g.push(...wall(-14, -4, 0, -4, 3, C.interiorWall, [{ off: 6.25, w: 1.5, h: 2.4 }], y));
+        g.push(...wall(0, -4, 14, -4, 3, C.interiorWall, [{ off: 6.25, w: 1.5, h: 2.4 }], y));
       }
       return g;
     },
     enemies: [
-      { pos: [3, 0, -6], positions: [[3, 0, -6], [-3.8, 0, -8.5], [4.6, 0, -9.2]],
+      { pos: [8, 0, -7], positions: [[8, 0, -7], [10, 0, -8.5], [5, 0, -3]],
         hold: true, yaw: 180 },
-      { pos: [-4, 0, -8], positions: [[-4, 0, -8], [3.8, 0, -6.5], [-2.5, 0, -3.2]],
-        patrols: [[[-4, -8], [4, -8]], [[4, -6.5], [-4, -6.5]], [[-2.5, -3.2], [4, -3.2]]] },
-      { pos: [4.5, 3, -7], positions: [[4.5, 3, -7], [5.6, 3, -1.8], [3.4, 3, -8.8]],
+      { pos: [-8, 0, -7], positions: [[-8, 0, -7], [-10, 0, -8.5], [-5, 0, -3]],
+        patrols: [[[-8, -7], [-3, -7]], [[-10, -8.5], [-4, -8.5]], [[-5, -3], [-11, -3]]] },
+      { pos: [10, 3, -7], positions: [[10, 3, -7], [11, 3, -1.8], [7, 3, -8.8]],
         hold: true, yaw: 90 },
-      { pos: [5.5, 3, -5], positions: [[5.5, 3, -5], [3.5, 3, -7.8], [5.6, 3, -2.2]],
+      { pos: [-9, 3, -5], positions: [[-9, 3, -5], [-11, 3, -7.8], [-7, 3, -2.2]],
+        hold: true, yaw: 270 },
+      { pos: [2, 3, -8], positions: [[2, 3, -8], [-2, 3, -7], [3, 3, -2.5]],
+        patrols: [[[2, -8], [-9, -8], [9, -8]], [[-2, -7], [9, -7], [-9, -7]], [[3, -2.5], [-8, -2.5], [8, -2.5]]] },
+      { pos: [10, 6, -7], positions: [[10, 6, -7], [11, 6, -2], [7, 6, -8.7]],
         hold: true, yaw: 90 },
-      { pos: [4.5, 6, -7], positions: [[4.5, 6, -7], [5.6, 6, -2.0], [3.4, 6, -8.7]],
+      { pos: [8, 6, -3], positions: [[8, 6, -3], [6, 6, -7.2], [11, 6, -1.4]],
         hold: true, yaw: 90 },
-      { pos: [5.8, 6, -4], positions: [[5.8, 6, -4], [3.4, 6, -7.2], [5.5, 6, -1.4]],
-        hold: true, yaw: 90 },
-      { pos: [-4, 6, -8], positions: [[-4, 6, -8], [-4.8, 6, -2.2], [-2.8, 6, -6.0]],
+      { pos: [-10, 6, -8], positions: [[-10, 6, -8], [-11, 6, -2.2], [-7, 6, -6]],
         hold: true, yaw: 0 },
+      { pos: [-8, 6, -3], positions: [[-8, 6, -3], [-6, 6, -7], [-11, 6, -1.5]],
+        patrols: [[[-8, -3], [-3, -3]], [[-6, -7], [-11, -7]], [[-11, -1.5], [-5, -1.5]]] },
     ],
     civilians: [
-      { pos: [5.5, 0, -8.5], positions: [[5.5, 0, -8.5], [-4.8, 0, -6.2], [5.6, 0, -2.2]],
+      { pos: [10, 0, -8.5], positions: [[10, 0, -8.5], [6, 0, -6.2], [11, 0, -2.2]],
         hostage: true },
-      { pos: [5.8, 3, -8.5], positions: [[5.8, 3, -8.5], [4.2, 3, -2.4], [5.6, 3, -6.2]],
+      { pos: [-10, 0, -5.5], positions: [[-10, 0, -5.5], [-6, 0, -8.5], [-11, 0, -2.2]],
         hostage: true },
-      { pos: [4.8, 6, -8.8], positions: [[4.8, 6, -8.8], [5.7, 6, -5.0], [3.6, 6, -2.0]],
+      { pos: [10, 3, -8.5], positions: [[10, 3, -8.5], [7, 3, -2.4], [11, 3, -6.2]],
         hostage: true },
-      { pos: [6, 6, -8.2], positions: [[6, 6, -8.2], [3.6, 6, -2.4], [5.7, 6, -5.8]],
+      { pos: [-9, 3, -2], positions: [[-9, 3, -2], [-11, 3, -7], [-6, 3, -2.4]],
+        hostage: true },
+      { pos: [10, 6, -8.8], positions: [[10, 6, -8.8], [7, 6, -5], [11, 6, -2]],
+        hostage: true },
+      { pos: [-9, 6, -2.4], positions: [[-9, 6, -2.4], [-11, 6, -5.8], [-6, 6, -2]],
         hostage: true },
     ],
-    reinforce: { every: 30, first: 35, max: 4, group: 2, range: 45, at: [[0, 0, 6]],
-      atVariants: [[[0, 0, 6]], [[-6, 0, 8]], [[6, 0, 8]]] },
+    reinforce: { every: 30, first: 35, max: 4, group: 2, range: 45,
+      at: [[-7, 0, 6], [7, 0, 6]],
+      atVariants: [
+        [[-7, 0, 6], [7, 0, 6]],
+        [[-11, 0, 8], [5, 0, 7]],
+        [[11, 0, 8], [-5, 0, 7]],
+      ] },
     objectives: [
-      { type: 'clear', zone: null, text: 'CLEAR ALL THREE FLOORS — PROTECT THE HOSTAGES' },
+      { type: 'clear', zone: null, text: 'CLEAR BOTH WINGS — ALL THREE FLOORS' },
       { type: 'rescue', text: 'CUT THE HOSTAGES LOOSE — WALK UP TO EACH ONE' },
       { type: 'reach', zone: [-2, -6, 3, 9], text: 'GET TO THE ROOF' },
       {
