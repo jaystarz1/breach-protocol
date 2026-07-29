@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v85-authored-viewmodel';
+const CACHE = 'breach-protocol-v86-pursuit-route';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

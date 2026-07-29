@@ -985,16 +985,155 @@ export function addFrontlineMissionArt(scene, levelId) {
   if (levelId === 7) addObservationPost(scene, -3, 12.25, -2, Math.PI / 2);
 
   if (levelId === 4) {
-    // The abandoned direction-finding set at the escape gate.
-    instanced(scene, new THREE.BoxGeometry(0.7, 0.48, 0.5), dark, [
-      [-10, 0.26, -36.5, 0, 0.2, 0, 1.2, 0.9, 1],
-      [-8.7, 0.22, -37.1, 0, -0.15, 0, 0.9, 0.75, 0.9],
-      [-7.7, 0.18, -36.2, 0, 0.1, 0, 0.75, 0.65, 0.8],
+    // Parking structure at the end of the pursuit. The gameplay slab and pillars remain
+    // cheap collision, but the visible arena needs construction logic: beams supporting the
+    // deck, painted pillar jackets, conduit, practical lights, parking bays and oil staining.
+    const garagePaint = frontline.concrete.clone();
+    garagePaint.color.setHex(0x59646b);
+    garagePaint.roughness = 0.95;
+    const garageBeam = frontline.concreteDark.clone();
+    garageBeam.color.setHex(0x4d5355);
+    const lampHousing = frontline.barrierSteel.clone();
+    lampHousing.color.setHex(0x22282b);
+    const lampLens = new THREE.MeshStandardMaterial({
+      color: 0xd8d0b8, emissive: 0xffd89c, emissiveIntensity: 0.52,
+      roughness: 0.72, metalness: 0.04,
+    });
+    const fadedPaint = new THREE.MeshBasicMaterial({
+      color: 0xb79b58, transparent: true, opacity: 0.48, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2,
+    });
+    const oil = new THREE.MeshBasicMaterial({
+      color: 0x111616, transparent: true, opacity: 0.48, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -3,
+    });
+
+    const beams = [];
+    for (const z of [-13, -19, -25, -31, -37]) {
+      beams.push([-5, 2.82, z, 0, 0, 0, 43.4, 0.25, 0.38]);
+    }
+    beams.push(
+      [-26.72, 2.82, -25, 0, 0, 0, 0.36, 0.25, 27.4],
+      [16.72, 2.82, -25, 0, 0, 0, 0.36, 0.25, 27.4],
+    );
+    const beamBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), garageBeam, beams);
+    beamBatch.name = 'pursuit-garage-deck-beams';
+
+    const pillarJackets = [];
+    for (const x of [-24, -14, -4, 6, 14]) {
+      for (const z of [-16, -25, -34]) {
+        pillarJackets.push([x, 0.64, z, 0, 0, 0, 0.82, 1.08, 0.82]);
+      }
+    }
+    const jacketBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), garagePaint, pillarJackets);
+    jacketBatch.name = 'pursuit-garage-pillar-jackets';
+
+    const housings = [];
+    const lenses = [];
+    for (const x of [-20, -10, 0, 10]) {
+      for (const z of [-17.5, -26, -34.5]) {
+        housings.push([x, 2.9, z, 0, 0, 0, 1.72, 0.09, 0.24]);
+        lenses.push([x, 2.845, z, 0, 0, 0, 1.48, 0.035, 0.15]);
+      }
+    }
+    const housingBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), lampHousing, housings, false);
+    housingBatch.name = 'pursuit-garage-light-housings';
+    const lensBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), lampLens, lenses, false);
+    lensBatch.name = 'pursuit-garage-light-lenses';
+
+    const conduit = instanced(
+      scene, new THREE.CylinderGeometry(0.025, 0.025, 1, 8),
+      frontline.barrierSteel,
+      [
+        [-5, 2.86, -14.2, 0, 0, Math.PI / 2, 1, 42, 1],
+        [-5, 2.86, -35.8, 0, 0, Math.PI / 2, 1, 42, 1],
+      ], false);
+    conduit.name = 'pursuit-garage-conduit';
+
+    const bayLines = [];
+    for (const x of [-19, -9, 1, 11]) {
+      bayLines.push(
+        [x - 3.7, 0.018, -18.2, 0, 0, 0, 0.11, 0.025, 4.8],
+        [x - 3.7, 0.018, -31.5, 0, 0, 0, 0.11, 0.025, 4.8],
+      );
+    }
+    const lineBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), fadedPaint, bayLines, false);
+    lineBatch.name = 'pursuit-garage-bay-lines';
+
+    const stains = [
+      [-18, 0.022, -20, -Math.PI / 2, 0, 0.1, 2.2, 1.4, 1],
+      [-8, 0.022, -25, -Math.PI / 2, 0, -0.2, 1.55, 1.0, 1],
+      [2, 0.022, -31, -Math.PI / 2, 0, 0.32, 1.8, 1.1, 1],
+      [10, 0.022, -22, -Math.PI / 2, 0, -0.18, 1.35, 0.82, 1],
+    ];
+    const stainBatch = instanced(scene, raggedDisc(1, 18, 4417), oil, stains, false);
+    stainBatch.name = 'pursuit-garage-oil-stains';
+
+    // Localized blast damage near the street-side corner, out of the mandatory chase lane.
+    const garageRubble = [];
+    for (let i = 0; i < 24; i++) {
+      garageRubble.push([
+        14.5 - (i % 6) * 0.42,
+        0.1 + (i % 3) * 0.045,
+        -13.0 - Math.floor(i / 6) * 0.4,
+        i * 0.22, i * 0.31, i * 0.17,
+        0.45 + (i % 4) * 0.12, 0.36 + (i % 3) * 0.11, 0.42 + (i % 5) * 0.09,
+      ]);
+    }
+    for (let i = 0; i < RUBBLE_GEOMETRIES.length; i++) {
+      const rubble = instanced(
+        scene, RUBBLE_GEOMETRIES[i],
+        i === 1 ? frontline.brick : frontline.concrete,
+        garageRubble.filter((_, index) => index % RUBBLE_GEOMETRIES.length === i),
+        false,
+      );
+      rubble.name = `pursuit-garage-rubble-${i}`;
+    }
+
+    // The abandoned direction-finding position at the escape gate now reads as a technical
+    // team that left in a hurry rather than three anonymous cubes beside a pole.
+    addFieldTable(scene, -11.1, 0.92, -35.8, 0.08, 2.0, 0.82);
+    addEquipmentCases(scene, [
+      [-9.6, 0.29, -36.7, 0, 0.2, 0, 1.1, 0.9, 1],
+      [-8.4, 0.25, -37.1, 0, -0.15, 0, 0.92, 0.78, 0.92],
+      [-7.5, 0.21, -36.1, 0, 0.1, 0, 0.78, 0.68, 0.82],
     ]);
+    const consoleBody = instanced(scene, new THREE.BoxGeometry(1, 1, 1), dark, [
+      [-11.1, 1.12, -35.8, -0.08, 0.08, 0, 0.72, 0.18, 0.5],
+    ], false);
+    consoleBody.name = 'pursuit-direction-finder-console';
+    const consoleScreen = instanced(scene, new THREE.PlaneGeometry(1, 1), lampLens, [
+      [-11.1, 1.23, -35.54, -0.72, 0, 0, 0.5, 0.22, 1],
+    ], false);
+    consoleScreen.name = 'pursuit-direction-finder-screen';
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 5.2, 8), steel);
+    mast.name = 'pursuit-direction-finder-mast';
     mast.position.set(-10.5, 2.6, -36.8);
     mast.rotation.z = -0.12;
     scene.add(mast);
+
+    const gateLeaves = instanced(
+      scene, CORRUGATED_PANEL_GEO, frontline.barrierSteel,
+      [
+        [-10.25, 1.46, -38.78, 0, 0, 0, 3.7, 1.08, 1],
+        [-2.75, 1.46, -38.78, 0, 0, 0, 3.7, 1.08, 1],
+      ]);
+    gateLeaves.name = 'pursuit-escape-gate-leaves';
+    const gateBags = [];
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 5; i++) {
+        gateBags.push([
+          -6.5 + side * (3.6 + i * 0.48), 0.2, -38.2,
+          0, Math.PI / 2, Math.PI / 2, 1, 1, 1,
+        ]);
+      }
+    }
+    sandbagInstances(scene, 'pursuit-escape-gate-sandbags', gateBags);
   }
 
   if (levelId === 5) {

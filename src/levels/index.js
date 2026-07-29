@@ -447,6 +447,38 @@ export const LEVELS = [
       g.push(...wall(18, 20, 18, -5, 7, C.buildingB));
       g.push(...wall(18, -5, -20, -5, 7, C.building, [{ off: 14, w: 3, h: 2.8 }]));
       g.push(...wall(25, -10, -25, -10, 7, C.buildingB, [{ off: 20, w: 3, h: 2.8 }]));
+      // These collision runs used to be the finished environment: enormous brick rectangles
+      // with decals pasted onto them. Register occupied, damaged exterior faces toward each
+      // leg of the chase. The facade system contributes real reveals, varied room backs,
+      // glazing, boards, balconies, utilities, stepped rooflines and shell breaches while the
+      // simple walls remain authoritative for navigation and bullets.
+      const pursuitFacade = {
+        floorH: 3.05, step: 3.15, lit: 0.1, damage: 0.68,
+      };
+      g.push(...facade(-5, 50, -5, 20, 0, 7, 4401, {
+        ...pursuitFacade, away: [-10, 35],
+      }));
+      g.push(...facade(5, 50, 5, 25, 0, 7, 4402, {
+        ...pursuitFacade, away: [10, 37.5],
+      }));
+      g.push(...facade(5, 25, 25, 25, 0, 7, 4403, {
+        ...pursuitFacade, away: [15, 30],
+      }));
+      g.push(...facade(-5, 20, 18, 20, 0, 7, 4404, {
+        ...pursuitFacade, away: [6.5, 25], skip: [{ from: 7.8, to: 12.4 }],
+      }));
+      g.push(...facade(25, 25, 25, -10, 0, 7, 4405, {
+        ...pursuitFacade, away: [30, 7.5],
+      }));
+      g.push(...facade(18, 20, 18, -5, 0, 7, 4406, {
+        ...pursuitFacade, away: [13, 7.5],
+      }));
+      g.push(...facade(18, -5, -20, -5, 0, 7, 4407, {
+        ...pursuitFacade, away: [-1, 0], skip: [{ from: 12.8, to: 18.2 }],
+      }));
+      g.push(...facade(25, -10, -25, -10, 0, 7, 4408, {
+        ...pursuitFacade, away: [0, -5], skip: [{ from: 18.8, to: 24.2 }],
+      }));
       // parking structure: big slab on pillars
       g.push(...floorSlab(-5, -25, 44, 28, 3.5, 0.5, C.concrete));
       // 3.4 tall, not 3.5: at 3.5 each pillar cap is coplanar with the top of the slab it
@@ -454,14 +486,12 @@ export const LEVELS = [
       // the slab (which spans y 3.0..3.5) where it is never rasterized.
       for (const px of [-24, -14, -4, 6, 14]) for (const pz of [-16, -25, -34]) g.push([px, 1.7, pz, 0.7, 3.4, 0.7, C.concrete]);
       g.push(...car(-18, -20)); g.push(...car(-8, -25, true)); g.push(...car(2, -31)); g.push(...car(10, -22));
-      // Alley graffiti: this level is a corridor chase and the walls are all the player sees.
-      for (const [gx, gz, r, d] of [[-4.8, 40, true, 1], [-4.8, 28, true, 1], [4.8, 42, true, -1],
-        [4.8, 32, true, -1], [17.8, 12, true, -1], [17.8, 2, true, -1], [24.8, 16, true, -1],
-        [10, -4.8, false, -1], [-6, -4.8, false, -1], [4, -9.8, false, -1]]) {
+      // Keep a few route tags, but no longer use decals as a substitute for architecture.
+      for (const [gx, gz, r, d] of [[-4.76, 40, true, 1], [4.76, 32, true, -1],
+        [17.76, 12, true, -1], [10, -4.76, false, -1], [4, -9.76, false, -1]]) {
         g.push(...graffiti(gx, gz, r, 400 + gx * 3 + gz, 1.4, d));
       }
-      g.push(...posterWall(-4.78, 46, -4.78, 34, true, 410, 4, 1.7));
-      g.push(...posterWall(4.78, 38, 4.78, 27, true, 411, 4, 1.7, -1));
+      g.push(...posterWall(-4.74, 46, -4.74, 39, true, 410, 2, 1.7));
       g.push(...crate(21, 10), ...crate(21.8, 11));
       // exit gate south end of garage
       g.push(...wall(-27, -39, 17, -39, 4, C.metal, [{ off: 18, w: 5, h: 3 }]));

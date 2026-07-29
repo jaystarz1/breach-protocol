@@ -1722,6 +1722,12 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
   // They make each lot read as a separate building even where the gameplay wall is continuous.
   for (let i = 1; i < lots.length; i++) {
     const x = lots[i].start;
+    const along = x + len / 2;
+    // A facade overlay may span a real collision doorway. Window generation already observes
+    // `skip`, but an independently generated party pier could still occupy that same gap and
+    // create a visible wall the player walked through. Keep structural overlays clear too.
+    if ((def.skip || []).some(gap =>
+      along > gap.from - 0.24 && along < gap.to + 0.24)) continue;
     const top = def.height + Math.min(lots[i - 1].rise, lots[i].rise);
     const base = len > 50 ? Math.max(0, def.height - 1.35) : 0;
     const pierHeight = top - base;
