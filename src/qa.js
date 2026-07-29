@@ -86,7 +86,8 @@ export function run(from = 1, to = 10, opts = {}) {
     RESULTS.push({
       level, name: w.level.name, result,
       time: Math.round((performance.now() - levelStart) / 1000),
-      kills: w.stats.kills, civKills: w.stats.civKills, score: w.stats.score,
+      kills: w.stats.kills, surrenders: w.stats.surrenders,
+      civKills: w.stats.civKills, score: w.stats.score,
       notes: [...notes],
     });
     console.log(`[QA] L${level} ${w.level.name}: ${result}`, notes.join(' | '));
@@ -96,7 +97,7 @@ export function run(from = 1, to = 10, opts = {}) {
 
   window.QA_STATE = {
     get wpIdx() { return wpIdx; }, get stuck() { return stuckSince; }, get notes() { return notes; },
-    get target() { const w = BP.world; if (!w) return null; const t = w.enemies.find(e => !e.dead); return t ? [t.pos.x.toFixed(1), t.pos.z.toFixed(1)] : null; },
+    get target() { const w = BP.world; if (!w) return null; const t = w.enemies.find(e => !e.dead && !e.surrendered); return t ? [t.pos.x.toFixed(1), t.pos.z.toFixed(1)] : null; },
   };
 
   timer = setInterval(() => {
@@ -129,7 +130,7 @@ export function run(from = 1, to = 10, opts = {}) {
     // the authored route length instead of declaring a healthy larger level broken at 240s.
     const cap = w.level.sniper ? 300 : level === 3 ? 520 : 240;
     if ((performance.now() - levelStart) / 1000 > cap) {
-      notes.push(`TIMEOUT obj=${w.objectiveIdx} pos=${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)} live=${w.enemies.filter(e => !e.dead).map(e => `(${e.pos.x.toFixed(0)},${e.pos.y.toFixed(0)},${e.pos.z.toFixed(0)})`).join('')}`);
+      notes.push(`TIMEOUT obj=${w.objectiveIdx} pos=${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)} live=${w.enemies.filter(e => !e.dead && !e.surrendered).map(e => `(${e.pos.x.toFixed(0)},${e.pos.y.toFixed(0)},${e.pos.z.toFixed(0)})`).join('')}`);
       report('FAIL(timeout)');
       if (level >= to) { stop(); console.log('[QA] DONE', RESULTS); return; }
       level++; beginLevel(); return;
@@ -144,7 +145,7 @@ export function run(from = 1, to = 10, opts = {}) {
     const eye = { x: p.pos.x, y: p.pos.y + 1.6, z: p.pos.z };
     let target = null, tDist = Infinity;
     for (const e of w.enemies) {
-      if (e.dead) continue;
+      if (e.dead || e.surrendered) continue;
       const d = Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y, e.pos.z - p.pos.z);
       if (!hasLOS(w.solids, eye.x, eye.y, eye.z, e.pos.x, e.pos.y + 1.1, e.pos.z)) continue;
       const priority = e.hvt ? d - 400 : d;

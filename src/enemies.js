@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  makeCharacter, animateDeathRig, animateRig, deathPose, revealWeaponRig, settleDeathRig,
+  makeCharacter, animateDeathRig, animateRig, deathPose, dropWeaponRig,
+  revealWeaponRig, settleDeathRig, surrenderPoseRig,
 } from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { findPath, nearestNode } from './navgrid.js';
@@ -44,6 +45,8 @@ export class Enemy {
     this.maxHealth = this.health;
     this.diff = diff;
     this.dead = false;
+    this.surrendered = false;
+    this.executed = false;
     this.deathAnim = 0;
     this.patrol = (def.patrol || []).map(p => ({ x: p[0], z: p[1] }));
     this.patrolIdx = 0;
@@ -86,6 +89,9 @@ export class Enemy {
     this.suppressionSource = null;
     this.maneuverCooldown = 1.5 + (tacticalSeed % 7) * 0.37;
     this.tacticalGoal = null;
+    // Surrender decisions are authored by the encounter seed rather than rolled at the
+    // instant of contact. The same layout therefore produces the same personalities.
+    this.surrenderEligible = tacticalSeed % 5 < 2;
     this.flee = !!def.flee;          // HVT: runs its route instead of fighting
     this.hvt = !!def.hvt;
     this.escapes = !!def.escapes;   // only a runner with somewhere to go can get away
@@ -146,10 +152,53 @@ export class Enemy {
     revealWeaponRig(this.mesh);
   }
 
+  hasSupport(world, radius = 10) {
+    return world.enemies.some(other =>
+      other !== this && !other.dead && !other.surrendered && !other.escaped
+      && Math.abs(other.pos.y - this.pos.y) < 2.2
+      && Math.hypot(other.pos.x - this.pos.x, other.pos.z - this.pos.z) < radius);
+  }
+
+  trySurrender(world, reason = 'suppressed', force = false) {
+    if (this.dead || this.surrendered || this.hvt || this.bastion || this.flee
+        || this.perches || this.concealed) return false;
+    if (!force && (!this.surrenderEligible || this.hasSupport(world))) return false;
+    const hurtEnough = this.health <= this.maxHealth * 0.38 && this.suppression >= 0.68;
+    const stunnedEnough = reason === 'flash' && this.suppression >= 0.78;
+    if (!force && !hurtEnough && !stunnedEnough) return false;
+    this.surrendered = true;
+    this.state = 'surrender';
+    this.path = null;
+    this.pathGoal = null;
+    this.lastKnown = null;
+    this.tacticalGoal = null;
+    this.burstShots = 0;
+    this.burstTimer = 999;
+    this.moving = false;
+    this.shotPoseTimer = 0;
+    const floor = groundHeight(
+      world.solids, this.pos.x, this.pos.z, 0.3, this.pos.y + 0.75);
+    dropWeaponRig(this.mesh, this.scene, floor === -Infinity ? this.pos.y : floor);
+    surrenderPoseRig(this.mesh);
+    world.onEnemySurrendered?.(this, reason);
+    return true;
+  }
+
+  applyFlashStun(power, world) {
+    if (this.dead || this.surrendered) return false;
+    this.reactTimer = Math.max(this.reactTimer, 1 + power * 3.5);
+    this.burstShots = 0;
+    this.burstTimer = 1.2;
+    this.state = 'alert';
+    this.suppression = Math.min(1, this.suppression + power * 0.92);
+    return this.trySurrender(world, 'flash');
+  }
+
   // Whoever shoots a man is who that man turns to face. Without this the squad could gun down
   // hostiles from the flank all mission and never once be shot back at.
   damage(amt, world, fromHead, byAlly) {
     if (this.dead) return;
+    const wasDetainee = this.surrendered;
     this.health -= amt;
     this.suppression = Math.min(1, this.suppression + (fromHead ? 0.7 : 0.42));
     if (byAlly && this.state === 'patrol') this.tgtTimer = 0;   // force a retarget onto the shooter
@@ -161,6 +210,8 @@ export class Enemy {
       this.alertNearby(world);
     }
     if (this.health <= 0) {
+      this.executed = wasDetainee;
+      this.surrendered = false;
       this.dead = true;
       this.deathAnim = 0.001;
       deathPose(this.mesh);
@@ -170,6 +221,7 @@ export class Enemy {
     } else {
       sfx.hit();
       sfx.flesh(this.pos);
+      this.trySurrender(world, 'suppressed');
     }
   }
 
@@ -180,7 +232,7 @@ export class Enemy {
       sfx.contact(this.pos);
     }
     for (const e of world.enemies) {
-      if (e === this || e.dead || e.state !== 'patrol') continue;
+      if (e === this || e.dead || e.surrendered || e.state !== 'patrol') continue;
       if (e.pos.distanceTo(this.pos) < 16) {
         e.revealWeapon();
         e.state = 'alert';
@@ -194,7 +246,7 @@ export class Enemy {
   // position. A patrol investigates that last-known point and still needs sight before it can
   // present a weapon or shoot. Window specialists and the fleeing HVT retain authored logic.
   hearGunshot(origin, world, radius = 55) {
-    if (this.dead || this.perches || this.flee) return false;
+    if (this.dead || this.surrendered || this.perches || this.flee) return false;
     const distance = Math.hypot(
       origin.x - this.pos.x, origin.y - this.pos.y, origin.z - this.pos.z);
     if (distance > radius) return false;
@@ -216,7 +268,7 @@ export class Enemy {
   }
 
   applySuppression(amount, source, world) {
-    if (this.dead || this.perches || this.flee) return false;
+    if (this.dead || this.surrendered || this.perches || this.flee) return false;
     this.suppression = Math.min(1, this.suppression + amount);
     this.suppressionSource = source
       ? { x: source.x, y: source.y - 1.25, z: source.z } : null;
@@ -226,6 +278,7 @@ export class Enemy {
       this.reactTimer = Math.max(this.reactTimer, this.diff.enemyReaction * 0.8);
     }
     if (this.maneuverCooldown <= 0) this.planTacticalMove(world);
+    this.trySurrender(world, 'suppressed');
     return true;
   }
 
@@ -316,7 +369,7 @@ export class Enemy {
   }
 
   planTacticalMove(world, forcedMode = null) {
-    if (this.dead || this.perches || this.flee || this.maneuverCooldown > 0) return false;
+    if (this.dead || this.surrendered || this.perches || this.flee || this.maneuverCooldown > 0) return false;
     let mode = forcedMode;
     if (!mode) {
       const badlyHurt = this.health < this.maxHealth * 0.48;
@@ -462,6 +515,14 @@ export class Enemy {
     if (this.dead) {
       this.deathAnim = animateDeathRig(this.mesh, dt);
       settleDeathRig(this.mesh, world.solids, dt);
+      return;
+    }
+    if (this.surrendered) {
+      this.moving = false;
+      this.burstShots = 0;
+      this.shotPoseTimer = 0;
+      const g = groundHeight(world.solids, this.pos.x, this.pos.z, 0.3, this.pos.y + 0.75);
+      this.pos.y += ((g === -Infinity ? 0 : g) - this.pos.y) * Math.min(1, dt * 10);
       return;
     }
     this.shotPoseTimer = Math.max(0, this.shotPoseTimer - dt);
@@ -700,7 +761,7 @@ export class Enemy {
   }
 
   doShoot(dt, world, dist, target) {
-    if (this.concealed) return;
+    if (this.concealed || this.surrendered) return;
     this.burstTimer -= dt;
     if (this.burstTimer > 0) return;
     if (this.burstShots <= 0) {

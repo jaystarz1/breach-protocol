@@ -1408,6 +1408,35 @@ export function kneelAuthoredCharacter(root, amount) {
   rig.visual.rotation.x = -0.16 * amount;
 }
 
+// A surrender must read differently from both the civilian panic pose and a death sprawl.
+// Keep the torso upright and put the hands beside the head with bent elbows. The short arm
+// silhouette is intentional: a straight overhead V recreates the
+// rubber-limbed look that the authored civilian pass was meant to remove.
+export function poseAuthoredSurrender(root) {
+  const rig = root.userData.rig;
+  if (!rig?.authored || !rig.combatant) return false;
+  rig.mixer.stopAllAction();
+  const node = name => findRigObject(rig.visual, name);
+  const b = {
+    upperL: node('UpperArm.L'), lowerL: node('LowerArm.L'), wristL: node('Wrist.L'),
+    upperR: node('UpperArm.R'), lowerR: node('LowerArm.R'), wristR: node('Wrist.R'),
+    head: node('Head'), spine: node('Spine2') || node('Spine1'),
+  };
+  // Retain the clip's planted lower body. Forcing a generic skeleton into a kneel without a
+  // matching authored clip produces a split-legged contortion on some proportions; an
+  // upright, motionless detainee with both hands clearly off the weapon is the cleaner tell.
+  rig.visual.position.y = rig.baseVisualY;
+  rig.visual.rotation.set(0, 0, 0);
+  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(-0.46, 1.34, 0.08));
+  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(-0.18, 1.61, 0.02));
+  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(0.46, 1.34, 0.08));
+  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(0.18, 1.61, 0.02));
+  if (b.spine) b.spine.rotateX(-0.1);
+  if (b.head) b.head.rotateX(0.08);
+  root.userData.bob = 0;
+  return true;
+}
+
 export function stopAuthoredCharacter(root) {
   const rig = root.userData.rig;
   if (!rig?.authored) return false;

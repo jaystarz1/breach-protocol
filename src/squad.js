@@ -120,7 +120,7 @@ export class Ally {
     const p = this.pos;
     let best = null, bestD = Infinity;
     for (const e of world.enemies) {
-      if (e.dead || e.exposed === false) continue;   // not on the glass, not a target
+      if (e.dead || e.surrendered || e.exposed === false) continue;   // neutralized / not on the glass
       const d = Math.hypot(e.pos.x - p.x, e.pos.y - p.y, e.pos.z - p.z);
       if (d > 48 || d >= bestD) continue;
       if (!hasLOS(world.solids, p.x, p.y + EYE, p.z, e.pos.x, e.pos.y + 1.2, e.pos.z)) continue;
@@ -246,7 +246,7 @@ export class Ally {
     this.calloutTimer -= dt;
 
     // target upkeep: cheap per-frame LOS check on the CURRENT target only, full sweep on timer
-    if (this.target && (this.target.dead ||
+    if (this.target && (this.target.dead || this.target.surrendered ||
         !hasLOS(world.solids, p.x, p.y + EYE, p.z, this.target.pos.x, this.target.pos.y + 1.2, this.target.pos.z))) {
       this.target = null;
     }

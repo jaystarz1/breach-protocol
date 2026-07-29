@@ -451,16 +451,35 @@ function startLevel(id) {
     combatHeat: 0, slowmo: 0, blind: 0,
     hostageCommand: 'follow',
     objectiveIdx: 0, won: false, over: false,
-    stats: { kills: 0, shotsFired: 0, shotsHit: 0, civKills: 0, rescued: 0, startTime: performance.now(), score: 0 },
+    stats: {
+      kills: 0, surrenders: 0, detaineeKills: 0,
+      shotsFired: 0, shotsHit: 0, civKills: 0, rescued: 0,
+      startTime: performance.now(), score: 0,
+    },
     sniperTeam: null,
     // A kill the squad made still counts toward the objective — the room has to be clearable
     // — but it earns the player no score. Otherwise the optimal play is to stand behind cover
     // and let them farm, and the grade stops meaning anything.
     onEnemyKilled(e, byAlly) {
       this.stats.kills++;
-      if (byAlly) hud.feed('SQUAD — HOSTILE DOWN', '#8fd0ff');
+      if (e.executed) {
+        this.stats.detaineeKills++;
+        this.stats.score -= 300;
+        hud.noShoot('SURRENDERED HOSTILE — HOLD FIRE');
+        hud.feed('-300 DETAINEE KILLED', '#ef9a9a');
+        sfx.noShoot();
+      } else if (byAlly) hud.feed('SQUAD — HOSTILE DOWN', '#8fd0ff');
       else { this.stats.score += 100; hud.feed('HOSTILE DOWN', '#a5d6a7'); }
       this.combatHeat = Math.max(this.combatHeat, 4);
+    },
+    onEnemySurrendered(e, reason) {
+      this.stats.surrenders++;
+      this.stats.score += 140;
+      hud.feed(
+        reason === 'flash' ? 'HOSTILE SURRENDERED — FLASHED +140' : 'HOSTILE SURRENDERED +140',
+        '#b2dfdb',
+      );
+      this.combatHeat = Math.max(this.combatHeat, 2);
     },
     onAllyDown(a) {
       hud.feed(`${a.name} IS DOWN`, '#ef9a9a');
@@ -487,7 +506,7 @@ function startLevel(id) {
     },
     registerFriendlyFire(from, to, directHit = null, hearingRadius = 60) {
       for (const enemy of this.enemies) {
-        if (enemy.dead) continue;
+        if (enemy.dead || enemy.surrendered) continue;
         enemy.hearGunshot(from, this, hearingRadius);
         if (enemy === directHit || enemy.exposed === false) continue;
         const chest = {
@@ -748,7 +767,7 @@ function setObjective() {
     // drone view can never leave a rifleman shooting an immobile player.
     if (world.reinf) world.reinf.sent = world.reinf.max;
     for (const enemy of world.enemies) {
-      if (!enemy.dead && enemy.pos.y >= -1 && !enemy.hvt) {
+      if (!enemy.dead && !enemy.surrendered && enemy.pos.y >= -1 && !enemy.hvt) {
         enemy.defenseObjective = world.objectiveIdx;
       }
     }
@@ -810,7 +829,7 @@ function blackoutTrigger() {
   const cfg = world.level.blackoutOn;
   if (!cfg || world.blackedOut) return;
   const tagged = world.enemies.filter(e => e.tag === cfg.tag);
-  if (!tagged.length || !tagged.every(e => e.dead)) return;
+  if (!tagged.length || !tagged.every(e => e.dead || e.surrendered)) return;
   killPower();
 }
 
@@ -943,7 +962,7 @@ function updateDefenseObjective(obj, dt) {
     state.wavesSent++;
   }
   const threats = world.enemies.filter(enemy =>
-    !enemy.dead && enemy.defenseObjective === world.objectiveIdx);
+    !enemy.dead && !enemy.surrendered && enemy.defenseObjective === world.objectiveIdx);
   const seconds = Math.ceil(state.remaining);
   if (!atPost) {
     const distance = Math.round(Math.hypot(
@@ -971,7 +990,7 @@ function objectiveWatchdog(dt) {
   if (!obj) return;
   world.objStuckTime = (world.objStuckTime || 0) + dt;
   if (obj.type !== 'clear') return;
-  const live = world.enemies.filter(e => !e.dead);
+  const live = world.enemies.filter(e => !e.dead && !e.surrendered);
   // A stalled clear gets a coarse radio callout, never an x-ray marker. The direction is
   // relative and the range is deliberately broad: command can report a sector, not a head.
   if (world.objStuckTime > 60 && live.length
@@ -1036,7 +1055,7 @@ function onPlayerShot(spread) {
   if (assist > 0 && !world.level.sniper) {
     let bestAng = assist, bestDir = null;
     for (const e of world.enemies) {
-      if (e.dead) continue;
+      if (e.dead || e.surrendered) continue;
       const to = new THREE.Vector3(e.pos.x - camera.position.x, e.pos.y + 1.1 - camera.position.y, e.pos.z - camera.position.z);
       const d = to.length();
       if (d > weapons.spec.range) continue;
@@ -1101,10 +1120,12 @@ function onPlayerShot(spread) {
   if (hitEnemy) {
     world.stats.shotsHit++;
     hud.hitmarker();
-    if (headshot) {
+    if (headshot && !hitEnemy.surrendered) {
       world.stats.score += 50;
       hud.feed('HEADSHOT +50', '#ffd54f');
       sfx.headshot();
+      hitEnemy.damage(99999, world, true);
+    } else if (headshot) {
       hitEnemy.damage(99999, world, true);
     } else {
       hitEnemy.damage(weapons.spec.damage, world);
@@ -1238,15 +1259,13 @@ function detonateFlash(pos) {
     if (power > 0.08) { world.blind = Math.max(world.blind, power * 3.2); sfx.tinnitus(); }
   }
   for (const e of world.enemies) {
-    if (e.dead) continue;
+    if (e.dead || e.surrendered) continue;
     const d = e.pos.distanceTo(pos);
     if (d > 16) continue;
     if (!hasLOS(world.solids, pos.x, pos.y, pos.z, e.pos.x, e.pos.y + 1.5, e.pos.z)) continue;
-    // stunned: cannot shoot, cannot track, for a few seconds
-    e.reactTimer = Math.max(e.reactTimer, 3.5 * (1 - d / 16) + 1.0);
-    e.burstShots = 0;
-    e.burstTimer = 1.2;
-    e.state = 'alert';
+    // Stunned men cannot shoot or track. An isolated, mission-seeded subset may decide that
+    // this is the moment to put the rifle down instead of rejoining the fight.
+    e.applyFlashStun(1 - d / 16, world);
   }
   hud.feed('FLASHBANG', '#e0f7fa');
 }
@@ -1270,7 +1289,7 @@ function checkObjectives(dt = 0) {
   if (obj.type === 'clear') {
     const [zx, zz, zr, zy] = obj.zone || [];
     done = world.enemies.every(e => {
-      if (e.dead || (obj.excludeHvt && e.hvt)) return true;
+      if (e.dead || e.surrendered || (obj.excludeHvt && e.hvt)) return true;
       if (!obj.zone) return false;
       const dy = zy !== undefined ? Math.abs(e.pos.y - zy) : 0;
       return Math.hypot(e.pos.x - zx, e.pos.z - zz) > zr || dy > 4 ? true : false;
@@ -1278,7 +1297,7 @@ function checkObjectives(dt = 0) {
     if (obj.zone) {
       // zone-clear: no live enemy inside the zone
       done = !world.enemies.some(e => {
-        if (e.dead || (obj.excludeHvt && e.hvt)) return false;
+        if (e.dead || e.surrendered || (obj.excludeHvt && e.hvt)) return false;
         const dy = zy !== undefined ? Math.abs(e.pos.y - zy) : Math.abs(e.pos.y - player.pos.y) * 0;
         return Math.hypot(e.pos.x - zx, e.pos.z - zz) <= zr && dy < 4;
       });
@@ -1362,6 +1381,8 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     $('debrief-grade').style.color = won ? '#ffc107' : '#ef5350';
     const rows = [
       ['Hostiles eliminated', world.stats.kills],
+      ['Hostiles surrendered', world.stats.surrenders],
+      ['Detainee casualties', world.stats.detaineeKills],
       ['Accuracy', Math.round(acc * 100) + '%'],
       ['Civilian casualties', world.stats.civKills],
       ['Hostages freed', world.stats.rescued],
@@ -1644,8 +1665,11 @@ function frame() {
   hud.health(player.health, player.maxHealth);
   hud.ammo(weapons.ammo.mag, weapons.ammo.reserve, weapons.grenades, weapons.flashes);
   hud.weapon(weapons.spec.name + (weapons.reloading > 0 ? ' — RELOADING' : ''));
-  const remaining = world.enemies.filter(e => !e.dead).length;
-  let scoreLine = `HOSTILES: ${remaining} · SCORE: ${Math.max(0, world.stats.score)}`;
+  const remaining = world.enemies.filter(e => !e.dead && !e.surrendered).length;
+  const detained = world.enemies.filter(e => e.surrendered).length;
+  let scoreLine = `HOSTILES: ${remaining}`;
+  if (detained) scoreLine += ` · DETAINED: ${detained}`;
+  scoreLine += ` · SCORE: ${Math.max(0, world.stats.score)}`;
   if (world.ctMission) scoreLine += ` · TEAM: ${world.allies.filter(a => !a.dead).length}/${world.allies.length}`;
   hud.score(scoreLine);
   if (world.allies.length) {

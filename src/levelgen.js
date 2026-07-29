@@ -9,6 +9,7 @@ import {
   createCivilianCharacter,
   kneelAuthoredCharacter,
   poseAuthoredCivilianPanic, poseAuthoredCivilianCover,
+  poseAuthoredSurrender,
   releaseAuthoredHostage,
   stopAuthoredCharacter,
 } from './character-assets.js';
@@ -687,6 +688,44 @@ export function kneelRig(g, k) {
   r.lLeg.userData.shin.rotation.x = 0.78 * k;
   // The rifle is itself a child of the group, so the loop above has already lowered it with
   // the rest of the body. Nothing to do here, and adding a second offset would double it.
+}
+
+export function surrenderPoseRig(g) {
+  const r = g.userData.rig;
+  if (!r) return false;
+  if (r.authored) return poseAuthoredSurrender(g);
+  r.lLeg.rotation.x = -0.72;
+  r.lLeg.userData.shin.rotation.x = 1.25;
+  r.rLeg.rotation.x = -1.05;
+  r.rLeg.userData.shin.rotation.x = 1.5;
+  r.lArm.rotation.set(Math.PI - 0.62, 0, 0.55);
+  r.lArm.userData.fore.rotation.x = -1.18;
+  r.rArm.rotation.set(Math.PI - 0.62, 0, -0.55);
+  r.rArm.userData.fore.rotation.x = -1.18;
+  if (!r.surrenderBaseY) r.surrenderBaseY = g.children.map(c => c.position.y);
+  for (let i = 0; i < g.children.length; i++) {
+    g.children[i].position.y = r.surrenderBaseY[i] - 0.28;
+  }
+  return true;
+}
+
+// Detach the carried rifle and leave it beside the detainee. Reusing the rendered weapon is
+// cheaper and more convincing than spawning a second prop, and severing the rig reference
+// prevents later death animation from dragging the dropped weapon back into the body.
+export function dropWeaponRig(g, scene, floorY = g.position.y) {
+  const r = g.userData.rig;
+  const rifle = r?.rifle;
+  if (!rifle || !scene) return null;
+  scene.attach(rifle);
+  const yaw = g.rotation.y;
+  rifle.position.x = g.position.x + Math.cos(yaw) * 0.42;
+  rifle.position.y = floorY + 0.07;
+  rifle.position.z = g.position.z - Math.sin(yaw) * 0.42;
+  rifle.rotation.set(0.06, yaw + Math.PI - 0.28, 0.03);
+  rifle.name = 'dropped-hostile-rifle';
+  r.droppedWeapon = rifle;
+  r.rifle = null;
+  return rifle;
 }
 
 // Death sprawl: called once at kill time to splay the figure before it tips over.

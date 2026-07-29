@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v112-joined-op-alpha';
+const CACHE = 'breach-protocol-v113-surrender-state';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
