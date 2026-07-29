@@ -39,7 +39,23 @@ def main():
             objective => objective.type === 'defend')?.waves.length,
           strikeTargets: BP.world.level.objectives.find(
             objective => objective.type === 'drone')?.targets.map(target => target.kind),
+          bunkerUnlockObjective: BP.world.level.doors.find(
+            door => door.pos[1] === -5)?.unlockObjective,
+          postStrikeText: BP.world.level.objectives[4]?.text,
         })""")
+        bunker_lock = page.evaluate("""() => {
+          const door = BP.world.doors.doors.find(row => row.def.unlockObjective === 4);
+          BP.player.pos.copy(door.mesh.position);
+          return {
+            beforeStrike: BP.world.doors.nearBreachable(
+              BP.player.pos, BP.player.yaw, 3) === null,
+            afterStrike: BP.world.doors.nearBreachable(
+              BP.player.pos, BP.player.yaw, 4) === door,
+            directBreachRejected: BP.world.doors.breach(
+              door, {...BP.world, objectiveIdx: 3}) === false,
+            stillClosed: !door.breached,
+          };
+        }""")
         # Remove only the authored opening force. The defense code must create and own every
         # attacker counted below; bunker personnel remain alive but below the surface.
         page.evaluate("""() => {
@@ -53,6 +69,8 @@ def main():
             if (enemy.pos.y >= -1) {
               enemy.dead = true;
               enemy.mesh.visible = false;
+            } else {
+              enemy.update = () => {};
             }
           }
         }""")
@@ -204,23 +222,56 @@ def main():
           programs: BP.performance.resources.programs,
           compiledDuringWindow: BP.performance.resources.compiledDuringWindow,
         })""")
+        completion = page.evaluate("""() => {
+          for (const civilian of BP.world.civilians) {
+            if (civilian.hostage && civilian.pos.y < -2) civilian.rescue('you');
+          }
+          return { rescued: BP.world.civilians.filter(
+            civilian => civilian.wasHostage && civilian.pos.y < -2
+              && civilian.rescued).length };
+        }""")
+        page.wait_for_function("() => BP.world.objectiveIdx === 5")
+        page.evaluate("""() => {
+          for (const enemy of BP.world.enemies) {
+            if (!enemy.hvt && enemy.pos.y < -2) {
+              enemy.dead = true;
+              enemy.mesh.visible = false;
+            }
+          }
+        }""")
+        page.wait_for_function("() => BP.world.objectiveIdx === 6")
+        page.evaluate("""() => {
+          const bastion = BP.world.enemies.find(enemy => enemy.hvt);
+          bastion.dead = true;
+          bastion.mesh.visible = false;
+        }""")
+        page.wait_for_function("() => BP.mode === 'debrief' && BP.world.won")
+        completion.update(page.evaluate("""() => ({
+          finalObjectiveIdx: BP.world.objectiveIdx,
+          won: BP.world.won,
+        })"""))
 
         result = {
             "contract": objective_contract,
+            "bunkerLock": bunker_lock,
             "waves": waves,
             "pausedAwayFromPost": paused,
             "roofArt": roof_art,
             "programsBefore": programs_before,
             "strikeBefore": strike_before,
             "strikeAfter": strike_after,
+            "completion": completion,
             "screenshots": ["tower-defense.png", "network-strike.png"],
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
 
         assert objective_contract["types"] == [
-            "clear", "clear", "defend", "drone", "clear", "target", "rescue"
+            "clear", "clear", "defend", "drone", "rescue", "clear", "target"
         ], result
+        assert objective_contract["bunkerUnlockObjective"] == 4, result
+        assert "HUMAN SHIELDS" in objective_contract["postStrikeText"], result
+        assert all(bunker_lock.values()), result
         assert objective_contract["duration"] == 32, result
         assert objective_contract["waves"] == 3, result
         assert objective_contract["strikeTargets"] == [
@@ -251,6 +302,8 @@ def main():
         assert strike_before["programs"] == programs_before, result
         assert strike_after["programs"] == programs_before, result
         assert strike_after["compiledDuringWindow"] == 0, result
+        assert completion["rescued"] == 2, result
+        assert completion["won"] and completion["finalObjectiveIdx"] == 7, result
         assert not errors, result
         browser.close()
 

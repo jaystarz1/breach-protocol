@@ -76,6 +76,16 @@ export class Enemy {
     this.blocked = 0;         // seconds spent pushing into geometry and getting nowhere
     this.progress = 0;        // metres actually covered this frame, post-collision
     this.standoff = 7 + Math.random() * 5;   // how close this man is willing to close
+    // Tactical variation is mission-seeded, not rolled every engagement. One man in four is
+    // allowed to work laterally while the rest hold pressure or break contact. This creates
+    // readable manoeuvre without turning every contact into random pathfinding churn.
+    const tacticalSeed = Math.abs(def._seed ?? 0);
+    this.tacticalRole = tacticalSeed % 4 === 1 ? 'flanker' : 'rifleman';
+    this.tacticalSide = tacticalSeed % 2 ? 1 : -1;
+    this.suppression = 0;
+    this.suppressionSource = null;
+    this.maneuverCooldown = 1.5 + (tacticalSeed % 7) * 0.37;
+    this.tacticalGoal = null;
     this.flee = !!def.flee;          // HVT: runs its route instead of fighting
     this.hvt = !!def.hvt;
     this.escapes = !!def.escapes;   // only a runner with somewhere to go can get away
@@ -141,6 +151,7 @@ export class Enemy {
   damage(amt, world, fromHead, byAlly) {
     if (this.dead) return;
     this.health -= amt;
+    this.suppression = Math.min(1, this.suppression + (fromHead ? 0.7 : 0.42));
     if (byAlly && this.state === 'patrol') this.tgtTimer = 0;   // force a retarget onto the shooter
     this.flinch = fromHead ? 0.32 : 0.22;
     if (this.state === 'patrol') {
@@ -177,6 +188,45 @@ export class Enemy {
         e.lastKnown = this.lastKnown || { x: world.playerPos.x, z: world.playerPos.z, y: world.playerPos.y };
       }
     }
+  }
+
+  // Gunfire is heard through walls, but it reports a source—not the player's continuing
+  // position. A patrol investigates that last-known point and still needs sight before it can
+  // present a weapon or shoot. Window specialists and the fleeing HVT retain authored logic.
+  hearGunshot(origin, world, radius = 55) {
+    if (this.dead || this.perches || this.flee) return false;
+    const distance = Math.hypot(
+      origin.x - this.pos.x, origin.y - this.pos.y, origin.z - this.pos.z);
+    if (distance > radius) return false;
+    const source = { x: origin.x, y: origin.y - 1.25, z: origin.z };
+    const investigates = distance <= Math.min(radius, 34);
+    if (investigates) this.lastKnown = source;
+    else this.heardBearing = Math.atan2(origin.x - this.pos.x, origin.z - this.pos.z);
+    if (this.state === 'patrol') {
+      // A nearby report gets an investigation. A distant report only puts the position on
+      // alert; otherwise one rifle shot at the north end of a long level makes the entire
+      // map abandon authored positions and conga-line toward the player.
+      this.state = investigates ? 'hunt' : 'alert';
+      this.reactTimer = Math.max(
+        this.reactTimer, this.diff.enemyReaction * (1.05 + distance / radius * 0.45));
+      this.repathTimer = 0;
+      this.path = null;
+    }
+    return true;
+  }
+
+  applySuppression(amount, source, world) {
+    if (this.dead || this.perches || this.flee) return false;
+    this.suppression = Math.min(1, this.suppression + amount);
+    this.suppressionSource = source
+      ? { x: source.x, y: source.y - 1.25, z: source.z } : null;
+    if (source) this.lastKnown = { ...this.suppressionSource };
+    if (this.state === 'patrol') {
+      this.state = 'hunt';
+      this.reactTimer = Math.max(this.reactTimer, this.diff.enemyReaction * 0.8);
+    }
+    if (this.maneuverCooldown <= 0) this.planTacticalMove(world);
+    return true;
   }
 
   setPath(world, tx, ty, tz) {
@@ -226,6 +276,62 @@ export class Enemy {
       if (score < bestScore) { bestScore = score; best = { x: nav.nodeX[n], y: nav.nodeY[n], z: nav.nodeZ[n] }; }
     }
     return best;
+  }
+
+  findTacticalPosition(world, mode) {
+    const nav = world.nav;
+    if (!nav || nearestNode(nav, this.pos.x, this.pos.y, this.pos.z) < 0) return null;
+    const target = this.suppressionSource || this.lastKnown || world.playerPos;
+    const currentThreatDistance = Math.hypot(
+      this.pos.x - target.x, this.pos.z - target.z);
+    const currentAngle = Math.atan2(this.pos.z - target.z, this.pos.x - target.x);
+    let best = null, bestScore = Infinity;
+    for (let node = 0; node < nav.nodeX.length; node++) {
+      const x = nav.nodeX[node], y = nav.nodeY[node], z = nav.nodeZ[node];
+      if (Math.abs(y - this.pos.y) > 1.45) continue;
+      const travel = Math.hypot(x - this.pos.x, z - this.pos.z);
+      if (travel < 4.5 || travel > 14) continue;
+      const threatDistance = Math.hypot(x - target.x, z - target.z);
+      const visible = hasLOS(
+        world.solids, x, y + EYE, z, target.x, target.y + 1.45, target.z);
+      let score;
+      if (mode === 'retreat') {
+        if (threatDistance < currentThreatDistance + 2 || visible) continue;
+        score = travel - (threatDistance - currentThreatDistance) * 0.8;
+      } else {
+        if (!visible || threatDistance < 7 || threatDistance > 24) continue;
+        const candidateAngle = Math.atan2(z - target.z, x - target.x);
+        const sweep = normAng(candidateAngle - currentAngle);
+        if (Math.sign(sweep || this.tacticalSide) !== this.tacticalSide) continue;
+        const lateral = Math.abs(sweep);
+        if (lateral < 0.58 || lateral > 1.85) continue;
+        score = travel + Math.abs(lateral - 1.05) * 3 + Math.abs(threatDistance - 13) * 0.2;
+      }
+      if (score < bestScore) {
+        bestScore = score;
+        best = { x, y, z };
+      }
+    }
+    return best;
+  }
+
+  planTacticalMove(world, forcedMode = null) {
+    if (this.dead || this.perches || this.flee || this.maneuverCooldown > 0) return false;
+    let mode = forcedMode;
+    if (!mode) {
+      const badlyHurt = this.health < this.maxHealth * 0.48;
+      mode = badlyHurt || this.suppression > 0.72
+        ? 'retreat' : this.tacticalRole === 'flanker' ? 'flank' : 'cover';
+    }
+    const goal = mode === 'cover'
+      ? this.findCover(world) : this.findTacticalPosition(world, mode);
+    this.maneuverCooldown = 3.8 + (Math.abs(this.mesh.userData.rig?.variant || 0) % 5) * 0.42;
+    if (!goal || !this.setPath(world, goal.x, goal.y, goal.z)) return false;
+    this.state = mode;
+    this.tacticalGoal = goal;
+    this.coverTimer = mode === 'cover' ? 2.2 : 0;
+    this.repositionTimer = 1.2;
+    return true;
   }
 
   // Who this man is fighting. Held for a second and a half at a time: retargeting every frame
@@ -364,6 +470,8 @@ export class Enemy {
     this.progress = 0;
     this.flinch = Math.max(0, this.flinch - dt * 3);
     this.repathTimer -= dt;
+    this.maneuverCooldown -= dt;
+    this.suppression = Math.max(0, this.suppression - dt * 0.16);
 
     this.tgtTimer -= dt;
     const target = this.pickTarget(world);
@@ -396,6 +504,11 @@ export class Enemy {
       return;
     }
 
+    if (this.suppression > 0.38 && this.maneuverCooldown <= 0
+        && !['cover', 'flank', 'retreat'].includes(this.state)) {
+      this.planTacticalMove(world);
+    }
+
     if (this.state === 'patrol') {
       if (seesTarget && inCone) {
         this.revealWeapon();
@@ -407,10 +520,16 @@ export class Enemy {
         this.doPatrol(dt, world);
       }
     } else {
-      // alert family: engage / hunt / take cover
+      // Alert family: investigate, engage, suppress, flank, retreat or take cover.
       if (seesTarget) {
         this.lastKnown = { x: target.x, y: target.y, z: target.z };
-        this.state = this.state === 'cover' ? 'cover' : 'alert';
+        if (this.concealed) {
+          this.revealWeapon();
+          // Hearing can bring a disguised infiltrator toward the shot, but the visible draw
+          // tell still buys the player a reaction window before that man can fire.
+          this.reactTimer = Math.max(this.reactTimer, this.diff.enemyReaction * 0.8 + 0.2);
+        }
+        if (!['cover', 'flank', 'retreat'].includes(this.state)) this.state = 'alert';
       }
       this.reactTimer -= dt;
       this.repositionTimer -= dt;
@@ -418,7 +537,17 @@ export class Enemy {
 
       if (seesTarget) this.yaw = lerpAng(this.yaw, facing, Math.min(1, dt * 6));
 
-      if (this.state === 'cover') {
+      if (this.state === 'flank' || this.state === 'retreat') {
+        const maneuver = this.state;
+        const travelling = this.followPath(
+          dt, world, this.speed * (maneuver === 'retreat' ? 1.18 : 0.92));
+        if (!travelling) {
+          this.state = 'alert';
+          this.tacticalGoal = null;
+          this.path = null;
+          this.repositionTimer = maneuver === 'flank' ? 0.35 : 1.1;
+        }
+      } else if (this.state === 'cover') {
         // break contact, hold briefly, then push back out
         const arrived = !this.followPath(dt, world, this.speed);
         if (arrived && this.coverTimer <= 0) { this.state = 'alert'; this.path = null; this.repositionTimer = 0.5; }
@@ -433,16 +562,21 @@ export class Enemy {
         // hurt men break contact instead of standing in the open
         const hurt = this.health < this.maxHealth * 0.45;
         if (hurt && this.coverTimer <= 0 && this.repathTimer <= 0) {
-          const c = this.findCover(world);
-          this.repathTimer = 2;
-          if (c && this.setPath(world, c.x, c.y, c.z)) {
-            this.state = 'cover';
-            this.coverTimer = 2.5 + Math.random() * 2;
-          }
+          this.maneuverCooldown = Math.min(0, this.maneuverCooldown);
+          this.planTacticalMove(world, 'retreat');
+          this.repathTimer = 1.6;
+        } else if (this.suppression > 0.38 && this.maneuverCooldown <= 0) {
+          this.planTacticalMove(world);
         } else if (this.repositionTimer <= 0) {
-          // sidestep so a firefight isn't two statues trading dice
-          this.repositionTimer = 1.6 + Math.random() * 2.2;
-          this.strafeDir *= -1;
+          if (this.tacticalRole === 'flanker' && this.maneuverCooldown <= 0) {
+            this.planTacticalMove(world, 'flank');
+          }
+          if (this.state === 'alert') {
+            // A short local sidestep remains the fallback when no validated flank socket can
+            // be reached inside the shared path budget.
+            this.repositionTimer = 1.6 + Math.random() * 2.2;
+            this.strafeDir *= -1;
+          }
         } else if (dist > 7) {
           const sx = Math.cos(facing) * this.strafeDir, sz = -Math.sin(facing) * this.strafeDir;
           this.moveBy(sx * this.speed * 0.45 * dt, sz * this.speed * 0.45 * dt, world);
@@ -566,11 +700,16 @@ export class Enemy {
   }
 
   doShoot(dt, world, dist, target) {
+    if (this.concealed) return;
     this.burstTimer -= dt;
     if (this.burstTimer > 0) return;
     if (this.burstShots <= 0) {
-      this.burstShots = this.single ? 1 : 3 + Math.floor(Math.random() * 3);
-      this.burstTimer = this.single ? 0.9 + Math.random() * 0.5 : 0.7 + Math.random() * 0.8;
+      const normalBurst = 3 + Math.floor(Math.random() * 3);
+      this.burstShots = this.single
+        ? 1 : Math.max(1, Math.round(normalBurst * (1 - this.suppression * 0.62)));
+      this.burstTimer = this.single
+        ? 0.9 + Math.random() * 0.5
+        : 0.7 + Math.random() * 0.8 + this.suppression * 0.7;
       return;
     }
     this.burstShots--;
@@ -587,6 +726,7 @@ export class Enemy {
     // far away you are. That is the entire reason he is frightening.
     let acc = this.diff.enemyAccuracy * this.accMul
       * (this.single ? 0.5 : Math.min(1, 18 / Math.max(6, dist)));
+    acc *= 1 - this.suppression * 0.58;
     // The player's movement/stance modifiers must NOT apply when the round is aimed at a
     // squadmate: crouching would make an ally forty metres away harder to hit.
     if (!this.tgtAlly) {

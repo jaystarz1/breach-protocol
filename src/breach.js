@@ -63,10 +63,14 @@ export class DoorSystem {
     for (const d of this.doors) if (!d.breached) solids.push(d.solid);
   }
 
+  isUnlocked(door, objectiveIdx = Infinity) {
+    return (door?.def?.unlockObjective ?? -Infinity) <= objectiveIdx;
+  }
+
   // nearest un-breached door within reach & rough facing
-  nearBreachable(playerPos, yaw) {
+  nearBreachable(playerPos, yaw, objectiveIdx = Infinity) {
     for (const d of this.doors) {
-      if (d.breached) continue;
+      if (d.breached || !this.isUnlocked(d, objectiveIdx)) continue;
       const dx = d.mesh.position.x - playerPos.x, dz = d.mesh.position.z - playerPos.z;
       const dy = Math.abs((d.mesh.position.y + 1.2) - playerPos.y);
       const dist = Math.hypot(dx, dz);
@@ -81,10 +85,22 @@ export class DoorSystem {
   // Nearest un-breached door within `radius`, used to tell the squad to stack up. Separate
   // from nearBreachable because that one is tuned for the "press to breach" prompt and only
   // reaches 2.6m, by which point the player is already standing on the door.
-  nearStack(pos, radius = 5.5) {
+  nearStack(pos, radius = 5.5, objectiveIdx = Infinity) {
     let best = null, bestD = radius;
     for (const d of this.doors) {
-      if (d.breached) continue;
+      if (d.breached || !this.isUnlocked(d, objectiveIdx)) continue;
+      const dy = Math.abs((d.mesh.position.y + 1.2) - pos.y);
+      if (dy > 2.4) continue;
+      const dist = Math.hypot(d.mesh.position.x - pos.x, d.mesh.position.z - pos.z);
+      if (dist < bestD) { bestD = dist; best = d; }
+    }
+    return best;
+  }
+
+  nearLocked(pos, objectiveIdx, radius = 3.2) {
+    let best = null, bestD = radius;
+    for (const d of this.doors) {
+      if (d.breached || this.isUnlocked(d, objectiveIdx)) continue;
       const dy = Math.abs((d.mesh.position.y + 1.2) - pos.y);
       if (dy > 2.4) continue;
       const dist = Math.hypot(d.mesh.position.x - pos.x, d.mesh.position.z - pos.z);
@@ -94,6 +110,7 @@ export class DoorSystem {
   }
 
   breach(door, world) {
+    if (!this.isUnlocked(door, world?.objectiveIdx)) return false;
     door.breached = true;
     // remove its solid from world list
     const i = world.solids.indexOf(door.solid);
@@ -109,6 +126,7 @@ export class DoorSystem {
       if (d < 14 && !e.dead) { e.state = 'alert'; e.reactTimer = Math.max(e.reactTimer, world.diff.enemyReaction * 1.4); }
     }
     hud.feed('DOOR BREACHED', '#ffd54f');
+    return true;
   }
 
   update(dt) {

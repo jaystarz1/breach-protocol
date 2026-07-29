@@ -1167,6 +1167,13 @@ export function createCivilianCharacter({
   if (!hostage) {
     const head = findRigObject(visual, 'Head');
     const neck = findRigObject(visual, 'Neck');
+    const wristL = findRigObject(visual, 'Wrist.L');
+    const wristR = findRigObject(visual, 'Wrist.R');
+    // The source civilians use deliberately oversized hands for an isometric/cartoon read.
+    // At first-person distance that makes every surrender pose look like paddles attached to
+    // pipe-cleaner arms. Keep the authored skinning, but bring the hands back toward human
+    // proportion at the wrist bones.
+    for (const wrist of [wristL, wristR]) wrist?.scale.multiplyScalar(0.84);
     root.userData.rig.civilianStability = {
       head, neck,
       headRest: head?.quaternion.clone(),
@@ -1293,17 +1300,17 @@ export function poseAuthoredCivilianPanic(root, phase = 0) {
   const style = rig.panicStyle || 0;
   const arms = style === 0
     ? {
-      left: [[-0.38, 1.43, 0.12], [-0.2, 1.62 + pulse * 0.025, 0.18]],
-      right: [[0.38, 1.43, 0.12], [0.2, 1.62 - pulse * 0.025, 0.18]],
+      left: [[-0.47, 1.27, 0.2], [-0.27, 1.59 + pulse * 0.025, 0.16]],
+      right: [[0.42, 1.34, 0.24], [0.17, 1.63 - pulse * 0.025, 0.11]],
     }
     : style === 1
       ? {
-        left: [[-0.42, 1.34, 0.17], [-0.34, 1.52 + pulse * 0.035, 0.27]],
-        right: [[0.42, 1.34, 0.17], [0.34, 1.52 - pulse * 0.035, 0.27]],
+        left: [[-0.5, 1.2, 0.23], [-0.35, 1.5 + pulse * 0.035, 0.24]],
+        right: [[0.4, 1.31, 0.18], [0.29, 1.58 - pulse * 0.035, 0.2]],
       }
       : {
-        left: [[-0.38, 1.42, 0.12], [-0.17, 1.6 + pulse * 0.03, 0.19]],
-        right: [[0.44, 1.22, 0.12], [0.5, 1.38 - pulse * 0.04, 0.31]],
+        left: [[-0.44, 1.3, 0.17], [-0.15, 1.61 + pulse * 0.03, 0.14]],
+        right: [[0.48, 1.16, 0.25], [0.45, 1.4 - pulse * 0.04, 0.34]],
       };
   aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(...arms.left[0]));
   aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(...arms.left[1]));

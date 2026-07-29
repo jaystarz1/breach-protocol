@@ -483,6 +483,21 @@ function startLevel(id) {
         t.pos.y + 1.1 + (Math.random() - 0.5) * 0.9,
         t.pos.z + (Math.random() - 0.5) * 1.2);
       tracer(from, to, 0x9fd0ff, 8);
+      this.registerFriendlyFire(from, to, t, 62);
+    },
+    registerFriendlyFire(from, to, directHit = null, hearingRadius = 60) {
+      for (const enemy of this.enemies) {
+        if (enemy.dead) continue;
+        enemy.hearGunshot(from, this, hearingRadius);
+        if (enemy === directHit || enemy.exposed === false) continue;
+        const chest = {
+          x: enemy.pos.x, y: enemy.pos.y + 1.15, z: enemy.pos.z,
+        };
+        const missDistance = pointSegmentDistance(chest, from, to);
+        if (missDistance >= 1.75) continue;
+        enemy.applySuppression(
+          0.22 + (1 - missDistance / 1.75) * 0.38, from, this);
+      }
     },
     damagePlayer(amt, from) {
       player.damage(amt, diff);
@@ -987,6 +1002,21 @@ function objectiveWatchdog(dt) {
 
 // ---------- Shooting ----------
 let swayPhase = 0;
+
+function pointSegmentDistance(point, start, end) {
+  const abx = end.x - start.x, aby = end.y - start.y, abz = end.z - start.z;
+  const apx = point.x - start.x, apy = point.y - start.y, apz = point.z - start.z;
+  const lengthSq = abx * abx + aby * aby + abz * abz;
+  const t = lengthSq > 1e-8
+    ? Math.max(0, Math.min(1, (apx * abx + apy * aby + apz * abz) / lengthSq))
+    : 0;
+  return Math.hypot(
+    point.x - (start.x + abx * t),
+    point.y - (start.y + aby * t),
+    point.z - (start.z + abz * t),
+  );
+}
+
 function onPlayerShot(spread) {
   world.stats.shotsFired++;
   world.combatHeat = Math.max(world.combatHeat, 5);
@@ -1063,6 +1093,10 @@ function onPlayerShot(spread) {
   const end = new THREE.Vector3(o.x + dir.x * hitDist, o.y + dir.y * hitDist, o.z + dir.z * hitDist);
   const muzzle = new THREE.Vector3(o.x + dir.x * 0.6, o.y + dir.y * 0.6 - 0.12, o.z + dir.z * 0.6);
   tracer(muzzle, end, 0xfff0c0, world.level.sniper ? 4 : 11, world.level.sniper ? 0.85 : 0.5);
+  world.registerFriendlyFire(
+    muzzle, end, hitEnemy,
+    world.level.sniper ? 180 : weapons.spec.range > 70 ? 72 : 44,
+  );
 
   if (hitEnemy) {
     world.stats.shotsHit++;
@@ -1236,7 +1270,7 @@ function checkObjectives(dt = 0) {
   if (obj.type === 'clear') {
     const [zx, zz, zr, zy] = obj.zone || [];
     done = world.enemies.every(e => {
-      if (e.dead) return true;
+      if (e.dead || (obj.excludeHvt && e.hvt)) return true;
       if (!obj.zone) return false;
       const dy = zy !== undefined ? Math.abs(e.pos.y - zy) : 0;
       return Math.hypot(e.pos.x - zx, e.pos.z - zz) > zr || dy > 4 ? true : false;
@@ -1244,7 +1278,7 @@ function checkObjectives(dt = 0) {
     if (obj.zone) {
       // zone-clear: no live enemy inside the zone
       done = !world.enemies.some(e => {
-        if (e.dead) return false;
+        if (e.dead || (obj.excludeHvt && e.hvt)) return false;
         const dy = zy !== undefined ? Math.abs(e.pos.y - zy) : Math.abs(e.pos.y - player.pos.y) * 0;
         return Math.hypot(e.pos.x - zx, e.pos.z - zz) <= zr && dy < 4;
       });
@@ -1519,12 +1553,17 @@ function frame() {
   } else if (world.nadeRing) world.nadeRing.visible = false;
 
   // doors / breach
-  const near = world.doors.nearBreachable(player.pos, player.yaw);
+  const near = world.doors.nearBreachable(player.pos, player.yaw, world.objectiveIdx);
   hud.breachBtn(!!near && !world.level.sniper);
   // Stack cue for the squad. Deliberately a WIDER radius than the breach prompt: the men
   // should already be forming the column as you walk up on the door, not snapping into it at
   // the moment the button appears.
-  world.stackDoor = world.doors.nearStack(player.pos, 5.5);
+  world.stackDoor = world.doors.nearStack(player.pos, 5.5, world.objectiveIdx);
+  world.lockedDoorNotice = Math.max(0, (world.lockedDoorNotice ?? 0) - dt);
+  if (world.doors.nearLocked(player.pos, world.objectiveIdx) && world.lockedDoorNotice <= 0) {
+    hud.feed('BUNKER SEALED — COMPLETE THE NETWORK STRIKE', '#ffca80');
+    world.lockedDoorNotice = 3.5;
+  }
   if (input.breachPressed && near) world.doors.breach(near, world);
   world.doors.update(dt);
 

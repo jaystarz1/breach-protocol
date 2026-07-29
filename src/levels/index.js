@@ -29,6 +29,7 @@ const inBay = (b, wallZ) => [b[0], b[1], wallZ + 0.62];
 // tops out on a 1.1m landing connected to the main slab.
 function tower(x, z, w, d, floors, opts = {}) {
   const geo = [];
+  const visualStart = window.__bpVisualProps?.length ?? 0;
   const fh = 3;
   const x1 = x - w / 2, x2 = x + w / 2, z1 = z - d / 2, z2 = z + d / 2;
   const sx = x1 + 1.1; // stair lane center
@@ -159,6 +160,20 @@ function tower(x, z, w, d, floors, opts = {}) {
   geo.push(...facade(x2, z1, x1, z1, 0, floors * fh, 30103 + floors * 19, facadeOpts));
   geo.push(...facade(x2, z2, x2, z1, 0, floors * fh, 30107 + floors * 23, facadeOpts));
   geo.push(...facade(x1, z1, x1, z2, 0, floors * fh, 30109 + floors * 29, facadeOpts));
+  if (opts.mirror) {
+    // Reflect the complete authored module around its centre. Geometry, collision, facade
+    // definitions and wall dressing all move together, so this creates different circulation
+    // rather than a cosmetic "same building, different paint" repeat.
+    for (const part of geo) part[0] = 2 * x - part[0];
+    const newProps = window.__bpVisualProps?.slice(visualStart) ?? [];
+    for (const prop of newProps) {
+      if (Number.isFinite(prop.x)) prop.x = 2 * x - prop.x;
+      if (Number.isFinite(prop.x1)) prop.x1 = 2 * x - prop.x1;
+      if (Number.isFinite(prop.x2)) prop.x2 = 2 * x - prop.x2;
+      if (prop.away) prop.away[0] = 2 * x - prop.away[0];
+      if (prop.kind === 'wall-decal' && prop.rot) prop.dir = -(prop.dir ?? 1);
+    }
+  }
   return geo;
 }
 
@@ -910,18 +925,18 @@ export const LEVELS = [
     geo: () => {
       const g = [];
       g.push(...GROUND(70, 70, C.street));
-      g.push(...tower(0, -4, 16, 14, 4, { door: true }));
+      g.push(...tower(0, -4, 16, 14, 4, { door: true, mirror: true }));
       g.push(...car(12, 12)); g.push(...car(-14, 8, true));
       return g;
     },
     doors: [
-      { pos: [2, 9, -4], rot: 90, w: 1.5 }, { pos: [2, 3, -4], rot: 90, w: 1.5 },
+      { pos: [-2, 9, -4], rot: 90, w: 1.5 }, { pos: [-2, 3, -4], rot: 90, w: 1.5 },
     ],
     extraGeo: () => {
       const g = [];
       for (const y of [3, 9]) {
-        g.push(...wall(2, -11, 2, -4.75, 3, C.interiorWall, [], y));
-        g.push(...wall(2, -3.25, 2, 3, 3, C.interiorWall, [], y));
+        g.push(...wall(-2, -11, -2, -4.75, 3, C.interiorWall, [], y));
+        g.push(...wall(-2, -3.25, -2, 3, 3, C.interiorWall, [], y));
       }
       return g;
     },
@@ -1218,7 +1233,9 @@ export const LEVELS = [
     },
     doors: [
       { pos: [0, 0, -3.9], rot: 0, w: 1.6 },        // tower entry
-      { pos: [22.2, -5, -24], rot: 0, w: 2.4 },      // bunker door at the foot of the trench
+      { pos: [22.2, -5, -24], rot: 0, w: 2.4, unlockObjective: 4 },
+      // The bunker is physically present from mission load but remains sealed until the
+      // observation network destroys its supporting armour, guns and jammer.
     ],
     enemies: [
       // courtyard
@@ -1335,9 +1352,9 @@ export const LEVELS = [
           { pos: [19, 0.1, 46], kind: 'ew', label: 'MOBILE JAMMER', yaw: 0.32 },
         ],
       },
-      { type: 'clear', zone: null, text: 'THE BUNKER — HUMAN SHIELDS. SURGICAL.' },
+      { type: 'rescue', zone: [22, -34, 16, -5], text: 'BREACH THE BUNKER — CUT THE HUMAN SHIELDS LOOSE' },
+      { type: 'clear', zone: [22, -34, 16, -5], excludeHvt: true, text: 'SHIELDS CLEAR — ELIMINATE THE BUNKER GUARD' },
       { type: 'target', text: 'BASTION — END HIS COMMAND' },
-      { type: 'rescue', zone: [22, -34, 16, -5], text: 'CUT THE SHIELDS LOOSE AND GET THEM OUT' },
     ],
   },
 ];

@@ -88,6 +88,7 @@ def main():
             programs: BP.performance.programs?.length ?? null,
             solids: BP.world.solids.length,
             doors: BP.world.doors.doors.length,
+            interiorDoorXs: BP.world.doors.doors.map(door => door.def.pos[0]),
           };
         }""")
         result = {
@@ -127,6 +128,7 @@ def main():
             if name.startswith("op-bravo-entry-rubble-")
         ) == 42
         assert scene_state["doors"] == 2
+        assert scene_state["interiorDoorXs"] == [-2, -2]
         assert scene_state["calls"] <= 340
         assert scene_state["triangles"] < 1_500_000
         browser.close()
