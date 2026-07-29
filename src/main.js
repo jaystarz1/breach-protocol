@@ -26,7 +26,14 @@ import {
 import { addVisualProps } from './visual-kit.js';
 import { addInteriorMissionArt } from './interior-mission-art.js';
 import { createRenderPipeline } from './renderer/render-pipeline.js';
-import { CAMPAIGN, briefingText, campaignSnapshot } from './campaign.js';
+import {
+  CAMPAIGN,
+  briefingText,
+  campaignDebrief,
+  campaignMission,
+  campaignSnapshot,
+  nextCampaignMission,
+} from './campaign.js';
 import { DroneController, dronePrewarmGroup } from './drone.js';
 
 const $ = id => document.getElementById(id);
@@ -60,7 +67,7 @@ let mode = 'menu';           // menu | playing | paused | debrief
 let world = null;
 let player = null;
 let weapons = null;
-let currentLevel = 1;
+let currentLevel = nextCampaignMission(S);
 const missionRuns = new Uint16Array(11);
 let levelLoadId = 0;
 let flashlight = null;
@@ -100,13 +107,20 @@ function buildLevelList() {
 function showBrief(id) {
   currentLevel = id;
   const L = LEVELS[id - 1];
+  const mission = campaignMission(id);
   $('brief-num').textContent = `MISSION ${String(id).padStart(2, '0')} · ${DIFFICULTIES[S.difficulty].name}`;
   $('brief-title').textContent = L.name;
+  $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/10 NODES SECURED`;
+  $('brief-target-status').textContent = mission.target;
+  $('brief-evidence').textContent = `CURRENT INTELLIGENCE — ${mission.intel}`;
   $('brief-text').textContent = briefingText(id, L.brief);
   hud.screen('brief');
 }
 
-$('menu-continue').onclick = () => { audioUnlock(); showBrief(Math.min(Math.max(1, currentLevel), 10)); };
+$('menu-continue').onclick = () => {
+  audioUnlock();
+  showBrief(nextCampaignMission(S));
+};
 $('menu-levels').onclick = () => { audioUnlock(); buildDiffRow(); buildLevelList(); hud.screen('levels'); };
 $('menu-settings').onclick = () => hud.screen('settings');
 $('levels-back').onclick = () => hud.screen('menu');
@@ -1126,6 +1140,10 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
       ['FINAL SCORE', Math.max(0, world.stats.score)],
     ];
     $('debrief-grid').innerHTML = rows.map(r => `<div>${r[0]}</div><div class="val">${r[1]}</div>`).join('');
+    const intel = campaignDebrief(currentLevel, won);
+    $('debrief-intel-head').textContent = intel.heading;
+    $('debrief-intel-result').textContent = intel.result;
+    $('debrief-intel-lead').textContent = `NEXT LEAD — ${intel.nextLead}`;
     $('debrief-next').style.display = won && currentLevel < 10 ? 'block' : 'none';
     hud.screen('debrief');
   }, won ? 800 : 1200);

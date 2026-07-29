@@ -123,16 +123,23 @@ function factionMaterial(original, faction, silhouette, objectName = '') {
       const label = `${objectName} ${original.name || ''}`.toLowerCase();
       const friendlyBlack = faction === 'black';
       const friendlyBlue = faction === 'friendly';
+      const bastion = faction === 'bastion';
       if (/(skin)/.test(label)) {
-        tint = friendlyBlack ? 0xa8795c : friendlyBlue ? 0x9d7158 : 0x8d654c;
+        tint = friendlyBlack ? 0xa8795c
+          : friendlyBlue ? 0x9d7158
+            : bastion ? 0x9a6c52 : 0x8d654c;
       } else if (/(visor)/.test(label)) {
         tint = 0x090d10;
         out.roughness = 0.38;
         out.metalness = 0.22;
       } else if (/(black|feet|boot)/.test(label)) {
-        tint = friendlyBlack ? 0x0d1114 : friendlyBlue ? 0x121a21 : 0x171a16;
+        tint = friendlyBlack ? 0x0d1114
+          : friendlyBlue ? 0x121a21
+            : bastion ? 0x101315 : 0x171a16;
       } else {
-        tint = friendlyBlack ? 0x181d20 : friendlyBlue ? 0x26343e : 0x3d4232;
+        tint = friendlyBlack ? 0x181d20
+          : friendlyBlue ? 0x26343e
+            : bastion ? 0x282c2d : 0x3d4232;
       }
       out.color.set(tint);
     }
@@ -712,11 +719,11 @@ function mapActions(clips, mixer) {
   return actions;
 }
 
-export function createAuthoredCharacter({ friendly, black, silhouette }) {
+export function createAuthoredCharacter({ friendly, black, silhouette, bastion = false }) {
   if (!soldierSource) return null;
   const root = new THREE.Group();
   const visual = cloneSkeleton(soldierSource);
-  const faction = friendly ? (black ? 'black' : 'friendly') : 'hostile';
+  const faction = friendly ? (black ? 'black' : 'friendly') : bastion ? 'bastion' : 'hostile';
   visual.scale.setScalar(soldierScale);
   visual.position.y = -soldierFloor * soldierScale;
   visual.traverse(object => {
@@ -758,6 +765,58 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
       patch(0x4f96a8, [0, 1.42, 0.245], [0.075, 0.025, 0.014]),
       patch(0x4f96a8, [0, 1.42, -0.245], [0.075, 0.025, 0.014]),
     );
+  } else if (!silhouette && bastion) {
+    // BASTION must be recognizable because of what he is wearing, not because the renderer
+    // draws a game icon over him. A command radio changes the silhouette from every angle;
+    // the muted sand tabs are readable in the bunker without becoming a glowing faction cue.
+    const radioMat = new THREE.MeshStandardMaterial({
+      color: 0x161b1d, roughness: 0.76, metalness: 0.16,
+    });
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.43, 0.14), radioMat);
+    pack.name = 'bastion-radio-pack';
+    pack.position.set(0, 1.15, -0.205);
+    pack.castShadow = pack.receiveShadow = quality.shadows;
+    const aerial = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.009, 0.012, 0.55, 7),
+      new THREE.MeshStandardMaterial({ color: 0x111416, roughness: 0.58, metalness: 0.48 }),
+    );
+    aerial.name = 'bastion-radio-aerial';
+    aerial.position.set(0.13, 1.56, -0.23);
+    aerial.rotation.z = -0.08;
+    aerial.castShadow = quality.shadows;
+    const leftTab = patch(0x9a8155, [-0.29, 1.39, 0], [0.04, 0.085, 0.12]);
+    const rightTab = patch(0x9a8155, [0.29, 1.39, 0], [0.04, 0.085, 0.12]);
+    leftTab.name = 'bastion-command-tab-left';
+    rightTab.name = 'bastion-command-tab-right';
+    const commandMat = new THREE.MeshStandardMaterial({
+      color: 0x826d49, roughness: 0.92, metalness: 0,
+    });
+    const neckGaiter = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.17, 0.205, 0.14, 12),
+      commandMat,
+    );
+    neckGaiter.name = 'bastion-command-gaiter';
+    neckGaiter.position.set(0, 1.515, 0.015);
+    neckGaiter.castShadow = neckGaiter.receiveShadow = quality.shadows;
+    const commandPouch = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.15, 0.035),
+      commandMat,
+    );
+    commandPouch.name = 'bastion-command-map-pouch';
+    commandPouch.position.set(0.055, 1.245, 0.255);
+    commandPouch.rotation.x = -0.06;
+    commandPouch.castShadow = commandPouch.receiveShadow = quality.shadows;
+    const radioHandset = new THREE.Mesh(
+      new THREE.BoxGeometry(0.075, 0.17, 0.045),
+      radioMat,
+    );
+    radioHandset.name = 'bastion-radio-handset';
+    radioHandset.position.set(-0.16, 1.35, 0.265);
+    radioHandset.rotation.z = -0.12;
+    radioHandset.castShadow = quality.shadows;
+    root.add(
+      pack, aerial, leftTab, rightTab, neckGaiter, commandPouch, radioHandset,
+    );
   } else if (!silhouette) {
     // Small shoulder tape, not a floating faction bar. Identification must come from the
     // uniform, weapon and behavior at useful range rather than a red UI-like slab.
@@ -783,6 +842,7 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
     mergedSkin,
     hostile: true,
     friendly: !!friendly,
+    bastion: !!bastion,
     combatant: true,
     baseVisualY: visual.position.y,
     baseRiflePosition: rifle.position.clone(),
@@ -791,6 +851,7 @@ export function createAuthoredCharacter({ friendly, black, silhouette }) {
   root.userData.rig.applyWeaponPose = () => poseAuthoredRifle(root, root.userData.rig);
   root.userData.rig.applyWeaponPose();
   root.userData.bob = 0;
+  root.name = bastion ? 'campaign-antagonist-bastion' : 'authored-combatant';
   return root;
 }
 

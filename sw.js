@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v80-prewarmed-drone-strike';
+const CACHE = 'breach-protocol-v81-bastion-intelligence-thread';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

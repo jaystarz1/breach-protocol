@@ -180,6 +180,11 @@
   .diff-pill { padding:8px 13px; border-radius:16px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.05); font-size:12px; color:#b0bec5; }
   .diff-pill.sel { background:rgba(255,193,7,.2); border-color:#ffc107; color:#ffd54f; font-weight:700; }
   .brief-text { max-width:620px; font-size:14px; line-height:1.55; color:#b0bec5; margin:14px 0 26px; white-space:pre-line; }
+  .intel-card { width:min(620px,88vw); border:1px solid rgba(105,205,235,.28); background:rgba(4,13,19,.72); padding:13px 16px; margin:0 0 18px; text-align:left; box-shadow:inset 3px 0 0 rgba(93,205,235,.5); }
+  .intel-head { display:flex; justify-content:space-between; gap:16px; color:#72d8ef; font:700 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:2px; }
+  .intel-target { margin-top:8px; color:#f1f4f5; font-size:13px; letter-spacing:.7px; }
+  .intel-status { margin-top:5px; color:#94aab3; font-size:12px; line-height:1.45; }
+  .intel-lead { margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,.1); color:#d7b36d; font-size:11px; line-height:1.4; letter-spacing:.4px; }
   .debrief-grid { display:grid; grid-template-columns:auto auto; gap:8px 26px; font-size:14px; margin:18px 0 26px; text-align:left; }
   .debrief-grid .val { text-align:right; font-weight:700; color:#fff; }
   .grade { font-size:52px; font-weight:900; color:#ffc107; margin:6px 0; }
@@ -320,6 +325,12 @@
 <div class="screen" id="screen-brief">
   <div style="font-size:11px;letter-spacing:3px;color:#607d8b" id="brief-num">MISSION 1</div>
   <h1 class="logo" style="font-size:26px" id="brief-title">FIRST DOOR</h1>
+  <div class="intel-card" id="brief-intel">
+    <div class="intel-head"><span>TARGET DOSSIER</span><span id="brief-progress">0/10 NODES</span></div>
+    <div class="intel-target">ANTON MOROZOV // CALLSIGN BASTION</div>
+    <div class="intel-status" id="brief-target-status"></div>
+    <div class="intel-lead" id="brief-evidence"></div>
+  </div>
   <div class="brief-text" id="brief-text"></div>
   <button class="menu-btn primary" id="brief-go">DEPLOY</button>
   <button class="menu-btn" id="brief-back">BACK</button>
@@ -329,6 +340,11 @@
   <div style="font-size:11px;letter-spacing:3px;color:#607d8b" id="debrief-status">MISSION COMPLETE</div>
   <div class="grade" id="debrief-grade">A</div>
   <div class="debrief-grid" id="debrief-grid"></div>
+  <div class="intel-card" id="debrief-intel">
+    <div class="intel-head"><span id="debrief-intel-head">INTELLIGENCE RECOVERED</span><span>BASTION TRACK</span></div>
+    <div class="intel-status" id="debrief-intel-result"></div>
+    <div class="intel-lead" id="debrief-intel-lead"></div>
+  </div>
   <button class="menu-btn primary" id="debrief-next">NEXT MISSION</button>
   <button class="menu-btn" id="debrief-retry">RETRY</button>
   <button class="menu-btn" id="debrief-menu">MAIN MENU</button>

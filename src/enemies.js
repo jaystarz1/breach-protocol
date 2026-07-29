@@ -27,9 +27,10 @@ const DUCK_DROP = 1.72;
 export class Enemy {
   constructor(scene, def, diff) {
     this.concealed = !!def.concealed;
+    this.bastion = !!def.bastion;
     this.mesh = makeCharacter({
       hostile: true, silhouette: !!def.silhouette, concealed: this.concealed,
-      variant: def._seed,
+      variant: def._seed, bastion: this.bastion,
     });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
     scene.add(this.mesh);

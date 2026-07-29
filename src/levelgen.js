@@ -352,7 +352,9 @@ const OD_PANTS = [0x343a25, 0x3b4129, 0x2e3320];
 // him back into a grey figure and the whole "he is inside an unlit room" read collapses.
 const SILHOUETTE_MAT = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
-export function makeCharacter({ hostile, hostage, friendly, black, silhouette, concealed, variant }) {
+export function makeCharacter({
+  hostile, hostage, friendly, black, silhouette, concealed, variant, bastion = false,
+}) {
   const armed = !!hostile || !!friendly;
   if (!armed || concealed) {
     const civilian = createCivilianCharacter({
@@ -361,7 +363,7 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
     if (civilian) return civilian;
   }
   if (armed && !concealed && !hostage) {
-    const authored = createAuthoredCharacter({ friendly, black, silhouette });
+    const authored = createAuthoredCharacter({ friendly, black, silhouette, bastion });
     if (authored) return authored;
   }
   const g = new THREE.Group();
@@ -387,6 +389,29 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
     // matters most. A red armband and helmet rag put that cue back — and irregular forces
     // really do mark themselves this way, so it costs nothing in plausibility.
     g.add(characterMesh(HOSTILE_MARK_GEO, 0x8f2622));
+  }
+  if (bastion && !concealed) {
+    const commandTab = 0x9a8155;
+    g.add(
+      accent(0.06, 0.14, 0.18, commandTab, -0.27, 1.4, 0),
+      accent(0.06, 0.14, 0.18, commandTab, 0.27, 1.4, 0),
+      accent(0.32, 0.45, 0.14, 0x161b1d, 0, 1.17, -0.2),
+    );
+    const aerial = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.01, 0.012, 0.55, 7),
+      bodyMaterial(0x111416),
+    );
+    aerial.position.set(0.13, 1.57, -0.24);
+    aerial.rotation.z = -0.08;
+    aerial.name = 'bastion-radio-aerial';
+    const gaiter = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.17, 0.205, 0.14, 12),
+      bodyMaterial(0x826d49),
+    );
+    gaiter.position.set(0, 1.52, 0);
+    gaiter.name = 'bastion-command-gaiter';
+    g.add(aerial, gaiter);
+    g.name = 'campaign-antagonist-bastion';
   }
   if (friendly) {
     g.add(accent(0.2, 0.05, 0.02, 0x38e8ff, 0, 1.48, 0.135));   // chest IFF panel
@@ -524,7 +549,8 @@ export function makeCharacter({ hostile, hostage, friendly, black, silhouette, c
   // must set it too or a squadmate swings its arms while carrying a rifle.
   g.userData.rig = {
     headG, lLeg, rLeg, lArm, rArm, rifle,
-    hostile: armed, hostage, friendly, concealed: !!concealed, torsoTilt: 0,
+    hostile: armed, hostage, friendly, bastion: !!bastion,
+    concealed: !!concealed, torsoTilt: 0,
   };
   if (silhouette) g.traverse(o => { if (o.isMesh) o.material = SILHOUETTE_MAT; });
   return g;

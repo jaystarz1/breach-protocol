@@ -962,8 +962,8 @@ export const LEVELS = [
       { pos: [4, 6, -12], hold: true, yaw: 120 },
       // bunker
       { pos: [22, -5, -30], hold: true, yaw: 0 }, { pos: [18, -5, -38], hold: true, yaw: 0 }, { pos: [27, -5, -36], hold: true, yaw: 30 },
-      // the cell leader, cornered: bolts around the bunker rather than standing and fighting
-      { pos: [24, -5, -41], flee: true, hvt: true,
+      // BASTION, cornered: his command radio and tabs identify him without a floating marker.
+      { pos: [24, -5, -41], flee: true, hvt: true, bastion: true,
         patrol: [[17, -41], [28, -41], [28, -28], [17, -30], [17, -41]] },
     ],
     civilians: [
@@ -978,7 +978,7 @@ export const LEVELS = [
       { type: 'clear', zone: [0, 10, 34], text: 'TAKE THE COURTYARD' },
       { type: 'clear', zone: [0, -10, 14, 8], text: 'CLEAR THE TOWER' },
       { type: 'clear', zone: null, text: 'THE BUNKER — HUMAN SHIELDS. SURGICAL.' },
-      { type: 'target', text: 'THE CELL LEADER — TAKE HIM' },
+      { type: 'target', text: 'BASTION — END HIS COMMAND' },
       { type: 'rescue', zone: [22, -34, 16, -5], text: 'CUT THE SHIELDS LOOSE AND GET THEM OUT' },
     ],
   },
