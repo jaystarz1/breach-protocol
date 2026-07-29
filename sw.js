@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v105-hostage-formation';
+const CACHE = 'breach-protocol-v106-desktop-spatial-audio';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

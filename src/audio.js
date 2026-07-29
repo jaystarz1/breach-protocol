@@ -1,8 +1,29 @@
+import { quality } from './quality.js';
+
 // Procedural WebAudio SFX with 3D positioning. No asset files.
 let ctx = null;
 let master = null;
+let reverb = null;
+let reverbWet = null;
+let lastPanningModel = null;
 let active = 0;                    // concurrent voice budget (mobile chokes past ~24)
 const MAX_VOICES = 24;
+
+function reverbImpulse(a) {
+  const length = Math.floor(a.sampleRate * 1.25);
+  const impulse = a.createBuffer(2, length, a.sampleRate);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
+    const data = impulse.getChannelData(channel);
+    for (let i = 0; i < length; i++) {
+      const t = i / length;
+      // Dense early reflections with a short controlled tail. This is deliberately not a
+      // cathedral wash: it gives exterior rifle reports and tunnel impacts spatial size
+      // without turning target direction into mud.
+      data[i] = (Math.random() * 2 - 1) * (1 - t) ** 2.8;
+    }
+  }
+  return impulse;
+}
 
 function ac() {
   if (!ctx) {
@@ -12,6 +33,13 @@ function ac() {
     master = ctx.createGain();
     master.gain.value = 0.9;
     master.connect(ctx.destination);
+    if (quality.desktop) {
+      reverb = ctx.createConvolver();
+      reverb.buffer = reverbImpulse(ctx);
+      reverbWet = ctx.createGain();
+      reverbWet.gain.value = 0.07;
+      reverb.connect(reverbWet).connect(ctx.destination);
+    }
   }
   if (ctx.state === 'suspended') ctx.resume();
   return ctx;
@@ -47,7 +75,10 @@ function sink(at) {
   const a = ac();
   if (!at) return master;
   const p = a.createPanner();
-  p.panningModel = 'equalpower';   // HRTF is too expensive for a phone with this many sources
+  // Desktop is now the product path: precise front/back and elevation cues are worth the
+  // modest CPU cost. The retained compatibility renderer keeps equal-power panning.
+  p.panningModel = quality.desktop ? 'HRTF' : 'equalpower';
+  lastPanningModel = p.panningModel;
   p.distanceModel = 'inverse';
   p.refDistance = 5;
   p.maxDistance = 160;
@@ -55,6 +86,7 @@ function sink(at) {
   if (p.positionX) { p.positionX.value = at.x; p.positionY.value = at.y; p.positionZ.value = at.z; }
   else p.setPosition(at.x, at.y, at.z);
   p.connect(master);
+  if (reverb) p.connect(reverb);
   return p;
 }
 
@@ -173,11 +205,28 @@ export const sfx = {
   teamCall()  { shout({ at: null, pitch: 1.0, vol: 0.35 }); },
 };
 
+export function audioSnapshot() {
+  return {
+    initialized: !!ctx,
+    rendererMode: quality.rendererMode,
+    panningModel: lastPanningModel,
+    reverb: !!reverb,
+    reverbWet: reverbWet ? +reverbWet.gain.value.toFixed(3) : 0,
+    activeVoices: active,
+    maxVoices: MAX_VOICES,
+  };
+}
+
 // ---------- Ambient bed: filtered noise + slow low drone, so silence isn't dead ----------
 let ambient = null;
 export function startAmbient(kind = 'urban') {
   stopAmbient();
   const a = ac();
+  if (reverbWet) {
+    const wet = kind === 'tunnel' ? 0.18 : 0.07;
+    reverbWet.gain.cancelScheduledValues(a.currentTime);
+    reverbWet.gain.linearRampToValueAtTime(wet, a.currentTime + 0.35);
+  }
   const src = a.createBufferSource();
   src.buffer = noiseBuffer();
   src.loop = true;
