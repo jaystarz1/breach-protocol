@@ -1,0 +1,59 @@
+// Bounded replay variation selected once at mission load. Every option is an authored socket:
+// no runtime procedural generation, no unconstrained offsets, and no objective geometry moves.
+
+export const STREET_SHOP_LAYOUTS = Object.freeze([
+  Object.freeze([
+    Object.freeze({ x: 11, z: 20, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 0 }),
+    Object.freeze({ x: 11, z: -5, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 1 }),
+    Object.freeze({ x: -11, z: -25, w: 9, d: 7, face: 'e', finish: 'brick', damage: 2 }),
+  ]),
+  Object.freeze([
+    Object.freeze({ x: -11, z: 22, w: 9, d: 7, face: 'e', finish: 'plaster', damage: 0 }),
+    Object.freeze({ x: 11, z: 2, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 1 }),
+    Object.freeze({ x: 11, z: -26, w: 9, d: 7, face: 'w', finish: 'brick', damage: 2 }),
+  ]),
+  Object.freeze([
+    Object.freeze({ x: 11, z: 28, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 0 }),
+    Object.freeze({ x: -11, z: 5, w: 9, d: 7, face: 'e', finish: 'plaster', damage: 1 }),
+    Object.freeze({ x: -11, z: -20, w: 9, d: 7, face: 'e', finish: 'brick', damage: 2 }),
+  ]),
+]);
+
+export function variantIndex(value = window.__bpMissionVariant || 0, count = 3) {
+  return ((Number(value) || 0) % count + count) % count;
+}
+
+export function streetShopLayout(value = window.__bpMissionVariant || 0) {
+  return STREET_SHOP_LAYOUTS[variantIndex(value, STREET_SHOP_LAYOUTS.length)];
+}
+
+export function resolveActorVariant(definition, value) {
+  const index = variantIndex(value);
+  const override = definition.variants?.[
+    variantIndex(index, definition.variants.length)
+  ] || null;
+  const out = override ? { ...definition, ...override } : { ...definition };
+  if (!override && definition.positions?.length) {
+    out.pos = definition.positions[
+      variantIndex(index, definition.positions.length)
+    ];
+  }
+  if (!override && definition.patrols?.length) {
+    out.patrol = definition.patrols[
+      variantIndex(index, definition.patrols.length)
+    ];
+  }
+  if (out.pos) out.pos = [...out.pos];
+  if (out.patrol) out.patrol = out.patrol.map(point => [...point]);
+  return out;
+}
+
+export function resolveReinforcementVariant(definition, value) {
+  if (!definition) return null;
+  const out = { ...definition };
+  const sockets = definition.atVariants?.[
+    variantIndex(value, definition.atVariants.length)
+  ] || definition.at;
+  out.at = sockets.map(point => [...point]);
+  return out;
+}

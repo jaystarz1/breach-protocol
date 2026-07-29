@@ -4,6 +4,7 @@
 import { input } from './input.js';
 import { hasLOS, raySphere } from './physics.js';
 import { findPath } from './navgrid.js';
+import { streetShopLayout } from './mission-variants.js';
 
 // Waypoints per level: [x, z] or [x, z, y]. The bot walks them in order,
 // fights anything it sees along the way, auto-breaches doors, then relies on
@@ -31,6 +32,22 @@ const PATHS = {
        [-6.9, -3.8, 6], [-6.9, -7.7, 3], [-6.9, -16.3, 3], [-6.9, -12.3, 0], [0, -2, 0], [10, -2], [17, -14], [22, -15], [22, -19, -2], [22, -23, -5],
        [22, -28, -5], [18, -34, -5], [26, -36, -5], [22, -39, -5]],
 };
+
+function streetSweepPath(variant) {
+  const path = [[0, 34]];
+  const shops = [...streetShopLayout(variant)].sort((a, b) => b.z - a.z);
+  for (const shop of shops) {
+    const approachX = shop.face === 'w' ? 6 : -6;
+    path.push(
+      [0, shop.z + 4],
+      [approachX, shop.z],
+      [shop.x, shop.z],
+      [approachX, shop.z],
+    );
+  }
+  path.push([0, -34], [0, -44], [0, -51]);
+  return path;
+}
 
 export const RESULTS = [];
 window.QA_RESULTS = RESULTS;
@@ -229,7 +246,7 @@ export function run(from = 1, to = 10, opts = {}) {
     dynPath = null;
 
     // --- navigate waypoints ---
-    const path = PATHS[level] || [];
+    const path = level === 2 ? streetSweepPath(w.missionVariant) : PATHS[level] || [];
     if (wpIdx >= path.length) return; // path done; objectives (reach zone) should have fired
     const wp = path[wpIdx];
     const wdx = wp[0] - p.pos.x, wdz = wp[1] - p.pos.z;

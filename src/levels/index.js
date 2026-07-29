@@ -1,5 +1,6 @@
 import { C, floorSlab, wall, stairs, crate, car, policeCar, marketStall } from '../levelgen.js';
 import { quality } from '../quality.js';
+import { streetShopLayout } from '../mission-variants.js';
 import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
@@ -261,13 +262,25 @@ export const LEVELS = [
       { pos: [3.15, 0, 13.25], rot: 90 }, { pos: [3.15, 0, 1.25], rot: 90 }, { pos: [3.15, 0, -10.75], rot: 90 },
     ],
     enemies: [
-      { pos: [8, 0, 11], hold: true, yaw: 270 },
+      { pos: [8, 0, 11], positions: [[8, 0, 11], [6.2, 0, 9.4], [9.1, 0, 12.4]],
+        hold: true, yaw: 270 },
       // room two. Putting these men down cuts the power — see blackoutOn below.
-      { pos: [9, 0, -1], hold: true, yaw: 270, tag: 'r2' }, { pos: [6, 0, -3], hold: true, yaw: 270, tag: 'r2' },
-      { pos: [8, 0, -13], hold: true, yaw: 270 }, { pos: [9.4, 0, -15], hold: true, yaw: 270 },
+      { pos: [9, 0, -1], positions: [[9, 0, -1], [7.3, 0, 0.2], [9.5, 0, -2.3]],
+        hold: true, yaw: 270, tag: 'r2' },
+      { pos: [6, 0, -3], positions: [[6, 0, -3], [9.2, 0, -3.1], [6.2, 0, -0.7]],
+        hold: true, yaw: 270, tag: 'r2' },
+      { pos: [8, 0, -13], positions: [[8, 0, -13], [6.2, 0, -14.5], [9.1, 0, -12.2]],
+        hold: true, yaw: 270 },
+      { pos: [9.4, 0, -15], positions: [[9.4, 0, -15], [8.7, 0, -11.7], [6.1, 0, -15.3]],
+        hold: true, yaw: 270 },
     ],
     civilians: [
-      { pos: [6, 0, 13], hostage: true }, { pos: [9.6, 0, 1.5], hostage: true }, { pos: [6.2, 0, -15.4], hostage: true },
+      { pos: [6, 0, 13], positions: [[6, 0, 13], [8.8, 0, 12.5], [6.5, 0, 9.2]],
+        hostage: true },
+      { pos: [9.6, 0, -0.5], positions: [[9.6, 0, -0.5], [6.2, 0, 2.0], [8.7, 0, -2.7]],
+        hostage: true },
+      { pos: [6.2, 0, -15.4], positions: [[6.2, 0, -15.4], [9.4, 0, -14.6], [6.4, 0, -12.3]],
+        hostage: true },
     ],
     objectives: [
       { type: 'clear', zone: null, text: 'CLEAR ALL THREE ROOMS — HOSTILES ONLY' },
@@ -300,14 +313,23 @@ export const LEVELS = [
         g.push(...lift(acUnit(ax, 9, az, 1.1), 0));
       }
       g.push(...lift(waterTank(-19.5, 9, -12), 0), ...lift(waterTank(19.5, 9, 40), 0));
-      // shops open toward the street
-      g.push(...shop(11, 20, 9, 7, 'w'));
-      g.push(...shop(11, -5, 9, 7, 'w'));
-      g.push(...shop(-11, -25, 9, 7, 'e'));
-      g.push(...awning(6.2, 20, 0.9, 7, 3.1), ...awning(6.2, -5, 0.9, 7, 3.1, 0x3b4d6a));
-      g.push(...awning(-6.2, -25, 0.9, 7, 3.1, 0x4a5a3b));
-      g.push(...shopSign(6.6, 20, 3.4, 3.6, true), ...shopSign(6.6, -5, 3.4, 3.6, true));
-      g.push(...shopSign(-6.6, -25, 3.4, 3.6, true));
+      // Three validated storefront modules rotate between authored sockets on each retry.
+      // Collision, desktop interiors, enemy starts and the QA route all consume this same
+      // layout table, so variation cannot leave art or actors behind in the old building.
+      for (const shopDef of streetShopLayout(v)) {
+        g.push(...shop(
+          shopDef.x, shopDef.z, shopDef.w, shopDef.d, shopDef.face,
+        ));
+        const right = shopDef.face === 'w';
+        const awningColor = shopDef.damage === 1 ? 0x3b4d6a
+          : shopDef.damage === 2 ? 0x4a5a3b : 0x7a4a4a;
+        g.push(...awning(
+          right ? 6.2 : -6.2, shopDef.z, 0.9, 7, 3.1, awningColor,
+        ));
+        g.push(...shopSign(
+          right ? 6.6 : -6.6, shopDef.z, 3.4, 3.6, true,
+        ));
+      }
       // street furniture: lamps down both sidewalks, signals at the barricade end
       for (const lz of [46, 32, 18, 4, -10, -24, -38]) {
         g.push(...lamp(-13.4, lz, 6.8, 1.9, 1));
@@ -348,11 +370,23 @@ export const LEVELS = [
     doors: [],
     enemies: [
       { pos: [0, 0, 22], positions: [[0, 0, 22], [-5, 0, 20], [5, 0, 24]], patrol: [[-6, 22], [6, 22]] },
-      { pos: [11, 0, 20], hold: true, yaw: 180 },
+      { pos: [11, 0, 20], hold: true, yaw: 180, variants: [
+        { pos: [11, 0, 20], yaw: 180 },
+        { pos: [-11, 0, 22], yaw: 0 },
+        { pos: [11, 0, 28], yaw: 180 },
+      ] },
       { pos: [-4, 0, 2], positions: [[-4, 0, 2], [4, 0, 8], [-7, 0, 7]], patrol: [[-8, 2], [4, 8]], concealed: true },
-      { pos: [11, 0, -5], hold: true, yaw: 180 },
+      { pos: [11, 0, -5], hold: true, yaw: 180, variants: [
+        { pos: [11, 0, -5], yaw: 180 },
+        { pos: [11, 0, 2], yaw: 180 },
+        { pos: [-11, 0, 5], yaw: 0 },
+      ] },
       { pos: [2, 0, -20], patrol: [[2, -20], [-5, -30]], aggro: true },
-      { pos: [-11, 0, -25], hold: true, yaw: 0 },
+      { pos: [-11, 0, -25], hold: true, yaw: 0, variants: [
+        { pos: [-11, 0, -25], yaw: 0 },
+        { pos: [11, 0, -26], yaw: 180 },
+        { pos: [-11, 0, -20], yaw: 0 },
+      ] },
       { pos: [0, 0, -44], hold: true, yaw: 0 },
     ],
     civilians: [
@@ -361,7 +395,12 @@ export const LEVELS = [
     ],
     // Fed in from both ends of the street. Dawdle and the block refills behind you.
     reinforce: { every: 24, first: 28, max: 6, group: 2, range: 70,
-      at: [[0, 0, 50], [-8, 0, -46], [8, 0, -46]] },
+      at: [[0, 0, 50], [-8, 0, -46], [8, 0, -46]],
+      atVariants: [
+        [[0, 0, 50], [-8, 0, -46], [8, 0, -46]],
+        [[0, 0, 50], [-12, 0, 34], [8, 0, -46]],
+        [[0, 0, 50], [12, 0, 32], [-8, 0, -46]],
+      ] },
     objectives: [
       { type: 'clear', zone: null, text: 'SWEEP THE BLOCK — ELIMINATE ALL HOSTILES' },
       { type: 'reach', zone: [-11.2, -41.6, 3], text: 'ESTABLISH OBSERVATION POST ALPHA' },
@@ -586,7 +625,12 @@ export const LEVELS = [
       { pos: [-30, 0, 18] }, { pos: [30, 0, 18], rush: true },
     ],
     reinforce: { every: 26, first: 30, max: 6, group: 2, range: 60,
-      at: [[0, 0, 34], [-30, 0, -34], [30, 0, -34]] },
+      at: [[0, 0, 34], [-30, 0, -34], [30, 0, -34]],
+      atVariants: [
+        [[0, 0, 34], [-30, 0, -34], [30, 0, -34]],
+        [[-30, 0, 32], [30, 0, -30], [0, 0, -34]],
+        [[30, 0, 32], [-30, 0, -30], [0, 0, -34]],
+      ] },
     objectives: [
       { type: 'clear', zone: null, text: 'NEUTRALIZE EMBEDDED SHOOTERS — ZERO CIVILIAN CASUALTIES' },
       { type: 'reach', zone: [0, -40, 3.5], text: 'EXIT THE MARKET SOUTH GATE' },
@@ -772,15 +816,35 @@ export const LEVELS = [
       return g;
     },
     enemies: [
-      { pos: [-5, 9, -8], hold: true, yaw: 0 }, { pos: [5, 9, -6], hold: true, yaw: 90 },
-      { pos: [4, 6, -7], patrol: [[4, -7], [-4, -7]] }, { pos: [-5.5, 6, -3], hold: true, yaw: 300 },
-      { pos: [5, 3, -8], hold: true, yaw: 90 }, { pos: [-4, 3, -6], patrol: [[-4, -6], [4, -3]] },
-      { pos: [0, 0, -6], hold: true, yaw: 0 }, { pos: [5, 0, -3], hold: true, yaw: 45 }, { pos: [-5, 0, -9], hold: true, yaw: 0 },
+      { pos: [-5, 9, -8], positions: [[-5, 9, -8], [-4, 9, -5], [-5.3, 9, -2.5]],
+        hold: true, yaw: 0 },
+      { pos: [5, 9, -6], positions: [[5, 9, -6], [5.2, 9, -8.5], [3.7, 9, -3.0]],
+        hold: true, yaw: 90 },
+      { pos: [4, 6, -7], positions: [[4, 6, -7], [2.5, 6, -8.5], [5.2, 6, -5.2]],
+        patrol: [[4, -7], [-4, -7]] },
+      { pos: [-5.5, 6, -3], positions: [[-5.5, 6, -3], [-4.2, 6, -8.8], [-5.2, 6, -5.5]],
+        hold: true, yaw: 300 },
+      { pos: [5, 3, -8], positions: [[5, 3, -8], [3.2, 3, -5.8], [5.4, 3, -2.8]],
+        hold: true, yaw: 90 },
+      { pos: [-4, 3, -6], positions: [[-4, 3, -6], [-5.2, 3, -8.7], [-3.8, 3, -2.8]],
+        patrol: [[-4, -6], [4, -3]] },
+      { pos: [0, 0, -6], positions: [[0, 0, -6], [3.5, 0, -8], [-2.8, 0, -4.2]],
+        hold: true, yaw: 0 },
+      { pos: [5, 0, -3], positions: [[5, 0, -3], [4.2, 0, -8.5], [1.8, 0, -1.5]],
+        hold: true, yaw: 45 },
+      { pos: [-5, 0, -9], positions: [[-5, 0, -9], [-4.5, 0, -5.5], [-5.2, 0, -2.2]],
+        hold: true, yaw: 0 },
     ],
     civilians: [
       { pos: [6, 6, -9.5], hostage: true }, { pos: [-6, 0, -2], hostage: true },
     ],
-    reinforce: { every: 26, first: 30, max: 5, group: 2, range: 50, at: [[0, 0, 6], [-6, 0, 8]] },
+    reinforce: { every: 26, first: 30, max: 5, group: 2, range: 50,
+      at: [[0, 0, 6], [-6, 0, 8]],
+      atVariants: [
+        [[0, 0, 6], [-6, 0, 8]],
+        [[6, 0, 8], [-4, 0, 10]],
+        [[-6, 0, 8], [4, 0, 11]],
+      ] },
     objectives: [
       {
         type: 'drone',
@@ -861,17 +925,31 @@ export const LEVELS = [
     },
     doors: [{ pos: [1, 0, -14], rot: 0, w: 2 }],
     enemies: [
-      { pos: [-10, 0, 6], patrol: [[-10, 6], [-2, 6]] },
-      { pos: [10, 0, 6], hold: true, yaw: 180 },
-      { pos: [-10, 0, -6], patrol: [[-10, -6], [-10, -12]], aggro: true },
-      { pos: [10, 0, -10], hold: true, yaw: 300 },
-      { pos: [2, 0, -8], patrol: [[2, -8], [-4, -4]], aggro: true },
-      { pos: [-8, 0, -17], hold: true, yaw: 0 }, { pos: [8, 0, -17], hold: true, yaw: 0 },
+      { pos: [-10, 0, 6], positions: [[-10, 0, 6], [-12, 0, 4], [-8.5, 0, 7.5]],
+        patrol: [[-10, 6], [-2, 6]] },
+      { pos: [10, 0, 6], positions: [[10, 0, 6], [12, 0, 3.5], [8.5, 0, 7.2]],
+        hold: true, yaw: 180 },
+      { pos: [-10, 0, -6], positions: [[-10, 0, -6], [-12, 0, -10], [-8.5, 0, -4]],
+        patrol: [[-10, -6], [-10, -12]], aggro: true },
+      { pos: [10, 0, -10], positions: [[10, 0, -10], [12, 0, -8], [8.5, 0, -12]],
+        hold: true, yaw: 300 },
+      { pos: [2, 0, -8], positions: [[2, 0, -8], [4, 0, -4], [-4, 0, -8]],
+        patrol: [[2, -8], [-4, -4]], aggro: true },
+      { pos: [-8, 0, -17], positions: [[-8, 0, -17], [-11, 0, -16], [-5, 0, -18]],
+        hold: true, yaw: 0 },
+      { pos: [8, 0, -17], positions: [[8, 0, -17], [11, 0, -16], [5, 0, -18]],
+        hold: true, yaw: 0 },
     ],
     civilians: [
       { pos: [-12, 0, 2], hostage: true }, { pos: [12, 0, -16], hostage: true },
     ],
-    reinforce: { every: 28, first: 32, max: 5, group: 2, range: 40, at: [[0, 0, 18], [-13, 0, 17]] },
+    reinforce: { every: 28, first: 32, max: 5, group: 2, range: 40,
+      at: [[0, 0, 18], [-13, 0, 17]],
+      atVariants: [
+        [[0, 0, 18], [-13, 0, 17]],
+        [[0, 0, 18], [13, 0, 16]],
+        [[-3, 0, 18], [13, 0, 8]],
+      ] },
     objectives: [
       { type: 'clear', zone: null, text: 'NVGs ON — CLEAR THE DARK FLOOR' },
       { type: 'reach', zone: [0, -18, 2.5], text: 'SECURE THE SERVER ROOM' },
@@ -940,20 +1018,34 @@ export const LEVELS = [
     },
     doors: [],
     enemies: [
-      { pos: [0, 0, 20], patrol: [[-6, 20], [6, 20]] },
-      { pos: [-10, 0, 10], hold: true, yaw: 0 },
-      { pos: [10, 0, 4], patrol: [[10, 4], [10, -10]], aggro: true },
-      { pos: [-4, 0, -8], hold: true, yaw: 20 },
-      { pos: [6, 0, -18], patrol: [[6, -18], [-6, -24]], aggro: true },
-      { pos: [0, 0, -26], hold: true, yaw: 0 },
-      { pos: [-2, 0, -38], hold: true, yaw: 0 },
-      { pos: [3, 0, -52], hold: true, yaw: 0 },
+      { pos: [0, 0, 20], positions: [[0, 0, 20], [-9, 0, 18], [9, 0, 17]],
+        patrol: [[-6, 20], [6, 20]] },
+      { pos: [-10, 0, 10], positions: [[-10, 0, 10], [9, 0, 12], [-9, 0, 6]],
+        hold: true, yaw: 0 },
+      { pos: [10, 0, 4], positions: [[10, 0, 4], [9, 0, -4], [-10, 0, 2]],
+        patrol: [[10, 4], [10, -10]], aggro: true },
+      { pos: [-4, 0, -8], positions: [[-4, 0, -8], [5, 0, -10], [-9, 0, -12]],
+        hold: true, yaw: 20 },
+      { pos: [6, 0, -18], positions: [[6, 0, -18], [-5, 0, -20], [9, 0, -16]],
+        patrol: [[6, -18], [-6, -24]], aggro: true },
+      { pos: [0, 0, -26], positions: [[0, 0, -26], [9, 0, -24], [-9, 0, -25]],
+        hold: true, yaw: 0 },
+      { pos: [-2, 0, -38], positions: [[-2, 0, -38], [3, 0, -40], [-3.5, 0, -43]],
+        hold: true, yaw: 0 },
+      { pos: [3, 0, -52], positions: [[3, 0, -52], [-3, 0, -50], [1, 0, -56]],
+        hold: true, yaw: 0 },
     ],
     civilians: [
       { pos: [-7.2, 0, 8], hostage: true }, { pos: [8.2, 0, -12], hostage: true },
       { pos: [-7.2, 0, -22], hostage: true }, { pos: [0, 0, -56], hostage: true },
     ],
-    reinforce: { every: 26, first: 30, max: 6, group: 2, range: 55, at: [[0, 0, 24], [0, 0, -28]] },
+    reinforce: { every: 26, first: 30, max: 6, group: 2, range: 55,
+      at: [[0, 0, 24], [0, 0, -28]],
+      atVariants: [
+        [[0, 0, 24], [0, 0, -28]],
+        [[-10, 0, 24], [4, 0, -29]],
+        [[10, 0, 24], [-4, 0, -29]],
+      ] },
     objectives: [
       { type: 'clear', zone: [0, 0, 40], text: 'CLEAR THE PLATFORM — HOSTAGES ON THE COLUMNS' },
       { type: 'clear', zone: null, text: 'PUSH THE SOUTH TUNNEL' },

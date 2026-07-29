@@ -41,6 +41,8 @@ def main():
               });
               return {
                 stats: root.userData.storefrontStats,
+                layout: root.userData.streetShopLayout,
+                variant: BP.world.missionVariant,
                 wallDecals: root.userData.wallDecalStats,
                 parts,
                 calls: BP.performance.render.calls,
@@ -70,13 +72,20 @@ def main():
         }""")
         page.wait_for_timeout(220)
         page.screenshot(path=str(output / "damaged-storefront.png"))
-        repeat = capture()
+        second = capture()
+        third = capture()
+        cycle = capture()
 
         result = {
             "first": first,
-            "repeatStable": first["stats"] == repeat["stats"]
-            and first["parts"] == repeat["parts"]
-            and first["wallDecals"] == repeat["wallDecals"],
+            "variants": [
+                {"variant": row["variant"], "layout": row["layout"]}
+                for row in [first, second, third, cycle]
+            ],
+            "repeatStable": first["stats"] == cycle["stats"]
+            and first["parts"] == cycle["parts"]
+            and first["wallDecals"] == cycle["wallDecals"]
+            and first["layout"] == cycle["layout"],
             "errors": errors[:8],
             "screenshots": [
                 "west-storefront.png", "east-storefront.png",
@@ -124,6 +133,11 @@ def main():
         }
         assert not errors
         assert result["repeatStable"]
+        assert [row["variant"] for row in result["variants"]] == [0, 1, 2, 0]
+        assert len({
+            json.dumps(row["layout"], sort_keys=True)
+            for row in result["variants"][:3]
+        }) == 3
         assert first["stats"] == expected_stats
         assert set(first["parts"]) == set(expected_parts)
         assert all(

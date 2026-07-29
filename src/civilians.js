@@ -31,6 +31,7 @@ export class Civilian {
       hostile: false, hostage: this.hostage, variant: def._seed,
     });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
+    this.spawnPos = this.mesh.position.clone();
     this.mesh.rotation.y = (def.yaw ?? this.random() * 360) * Math.PI / 180;
     scene.add(this.mesh);
     this.dead = false;

@@ -35,6 +35,10 @@ import {
   nextCampaignMission,
 } from './campaign.js';
 import { DroneController, dronePrewarmGroup } from './drone.js';
+import {
+  resolveActorVariant,
+  resolveReinforcementVariant,
+} from './mission-variants.js';
 
 const $ = id => document.getElementById(id);
 
@@ -389,7 +393,7 @@ function startLevel(id) {
   if (!indoor) addFrontlineAmbientArt(scene, L.id, bounds);
   addFrontlineMissionArt(scene, L.id);
   if (L.id === 2) {
-    addStreetSweepArt(scene, solids);
+    addStreetSweepArt(scene, solids, missionVariant);
     addFrontlineStreetArt(scene);
   }
 
@@ -515,9 +519,7 @@ function startLevel(id) {
   // enemy count scaling
   // Retries rotate only between authored-safe positions. No unconstrained random offset may
   // put an actor inside a wall, outside the nav graph, or on the wrong side of a breach.
-  let defs = L.enemies.map(d => d.positions
-    ? { ...d, pos: [...d.positions[missionVariant % d.positions.length]] }
-    : d);
+  let defs = L.enemies.map(d => resolveActorVariant(d, missionVariant));
   const mul = diff.enemyCountMul;
   if (mul < 1) {
     const keep = Math.max(1, Math.round(defs.length * mul));
@@ -541,7 +543,7 @@ function startLevel(id) {
   // and reinforcing during the final objective would do the same, so both are ruled out below.
   if (L.reinforce) {
     world.reinf = {
-      ...L.reinforce,
+      ...resolveReinforcementVariant(L.reinforce, missionVariant),
       timer: L.reinforce.first ?? L.reinforce.every,
       sent: 0,
       max: Math.max(1, Math.round(L.reinforce.max * diff.enemyCountMul)),
@@ -549,7 +551,7 @@ function startLevel(id) {
   }
 
   // civilian scaling (never scale hostages — they're placed deliberately)
-  let cdefs = [...L.civilians];
+  let cdefs = L.civilians.map(d => resolveActorVariant(d, missionVariant));
   const cmul = diff.civilianMul;
   const free = cdefs.filter(c => !c.hostage);
   if (cmul > 1 && free.length) {

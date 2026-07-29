@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { quality } from './quality.js';
 import { rng } from './world.js';
 import { makeBox } from './physics.js';
+import { streetShopLayout } from './mission-variants.js';
 
 const ROOT = './assets/street-sweep/';
 let kit = null;
@@ -250,13 +251,9 @@ function instanceBatch(scene, name, geometry, material, items, shadows = true) {
   return out;
 }
 
-function storefronts(scene, solids) {
+function storefronts(scene, solids, missionVariant) {
   const m = materials();
-  const shops = [
-    { x: 11, z: 20, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 0 },
-    { x: 11, z: -5, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 1 },
-    { x: -11, z: -25, w: 9, d: 7, face: 'e', finish: 'brick', damage: 2 },
-  ];
+  const shops = streetShopLayout(missionVariant);
   const plaster = [], brick = [], interiors = [];
   const frames = [], shutters = [], thresholds = [], bollards = [];
   const floors = [], ceilings = [], fixtures = [], counters = [], shelves = [];
@@ -490,6 +487,9 @@ function storefronts(scene, solids) {
     solidFixtures: counters.length
       + shelves.filter(part => part.h > 0.25).length,
   };
+  scene.userData.streetShopLayout = shops.map(
+    ({ x, z, face, damage }) => ({ x, z, face, damage }),
+  );
 }
 
 function plane(scene, w, h, material, x, y, z, rx = -Math.PI / 2, ry = 0, rz = 0) {
@@ -608,7 +608,7 @@ function streetLights(scene) {
   }
 }
 
-export function addStreetSweepArt(scene, solids) {
+export function addStreetSweepArt(scene, solids, missionVariant = 0) {
   if (!quality.pbr) return;
   const m = materials();
   const facadeBatches = { stone: [], trim: [] };
@@ -623,7 +623,7 @@ export function addStreetSweepArt(scene, solids) {
     m.stone, facadeBatches.stone);
   instanceBatch(scene, 'facade-pilasters', new THREE.BoxGeometry(1, 1, 1),
     m.trim, facadeBatches.trim);
-  storefronts(scene, solids);
+  storefronts(scene, solids, missionVariant);
   roadDamage(scene);
   roadMarkings(scene);
   wetAndContact(scene);

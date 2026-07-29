@@ -35,6 +35,9 @@ export class Enemy {
       variant: def._seed, bastion: this.bastion,
     });
     this.mesh.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
+    // Immutable authored socket. `pos` becomes live simulation state immediately, so patrol
+    // timing must never be mistaken for a different seeded encounter layout.
+    this.spawnPos = this.mesh.position.clone();
     scene.add(this.mesh);
     this.scene = scene;
     this.health = 100 * diff.enemyHealthMul;
