@@ -263,6 +263,7 @@ def main():
         assert result["variantOrder"] == [0, 1, 2, 0]
         assert result["variantRepeatStable"]
         assert reaction["crossers"] > 0
+        assert 4 <= reaction["rushers"] <= 10
         assert reaction["panicked"] >= reaction["total"] - 2
         assert reaction["moved"] >= reaction["total"] - 2
         assert reaction["panicPosed"] == reaction["total"]

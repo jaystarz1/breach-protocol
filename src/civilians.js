@@ -1,7 +1,8 @@
 import {
   makeCharacter, animateDeathRig, animateRig, coverPoseRig, deathPose, releaseHostageRig,
 } from './levelgen.js';
-import { groundHeight, resolveXZ } from './physics.js';
+import { groundHeight, hasLOS, resolveXZ } from './physics.js';
+import { findPath, nearestNode } from './navgrid.js';
 import { sfx } from './audio.js';
 
 // Matches DUCK_DROP in enemies.js and the apron height in windowBay(): the distance a window
@@ -45,14 +46,20 @@ export class Civilian {
     this.screamed = false;
     this.exhausted = 0;
     this.prone = 0;                       // 0..1 blend into a living kneel/cower
-    // Some bound people flatten themselves; others freeze upright in a cower. Keeping a
+    this.coverSearchAt = 1.1 + this.random() * 2.2;
+    this.coverTarget = null;
+    this.coverPath = null;
+    this.coverPathIdx = 0;
+    this.coverSearchDone = false;
+    this.inHardCover = false;
+    // Some bound people drop into a cower; others freeze upright. Keeping a
     // hostage-sized obstruction in the target picture is intentional pressure, while the
     // split prevents every hostage encounter from behaving identically.
     this.duckOnFire = this.random() < 0.45;
     // A civilian who runs AT you is the actual shoot/no-shoot test. Fleeing bodies are easy:
     // they leave the frame. Someone sprinting at your muzzle with their hands up, in a level
     // where everything else running at you is trying to kill you, is the decision.
-    this.rush = def.rush !== undefined ? !!def.rush : (!this.hostage && this.random() < 0.35);
+    this.rush = def.rush !== undefined ? !!def.rush : (!this.hostage && this.random() < 0.18);
     this.crossLane = !this.hostage && !this.rush && this.random() < 0.32;
     this.rushDone = false;
     this.escort = false;
@@ -83,8 +90,7 @@ export class Civilian {
 
   get pos() { return this.mesh.position; }
 
-  // Hit sphere. Goes low and forward once they are face-down, because a sphere floating at
-  // chest height over a prone body means you can "miss" a hostage you visibly shot.
+  // Hit sphere follows the compact cover pose instead of floating at standing chest height.
   get hitY() { return this.hostage ? 0.6 - this.prone * 0.35 : 1.0 - this.prone * 0.6; }
   get hitR() { return this.hostage ? 0.45 : 0.5; }
 
@@ -148,6 +154,83 @@ export class Civilian {
     sfx.civScream(this.pos);
   }
 
+  // Find nearby navigable ground that breaks the crouched sightline to the gunfire. Selection
+  // is deterministic and biased away from the player, so a retry produces the same crowd
+  // flow instead of new random obstruction. The nav path prevents "take cover" from meaning
+  // sprint face-first into the nearest wall.
+  findHardCover(world) {
+    const nav = world.nav;
+    if (!nav || nearestNode(nav, this.pos.x, this.pos.y, this.pos.z) < 0) return false;
+    const threat = world.playerPos;
+    const currentThreatDistance = Math.hypot(
+      this.pos.x - threat.x, this.pos.z - threat.z);
+    const candidates = [];
+    const radius = 12;
+    for (let node = 0; node < nav.nodeX.length; node++) {
+      const x = nav.nodeX[node], y = nav.nodeY[node], z = nav.nodeZ[node];
+      const dx = x - this.pos.x, dz = z - this.pos.z;
+      if (Math.abs(dx) > radius || Math.abs(dz) > radius) continue;
+      if (Math.abs(y - this.pos.y) > 1.45) continue;
+      const distance = Math.hypot(dx, dz);
+      if (distance < 2 || distance > radius) continue;
+      const threatDistance = Math.hypot(x - threat.x, z - threat.z);
+      if (threatDistance < currentThreatDistance - 0.8) continue;
+      // Test at cower head height. Waist-high vehicles and barricades should count as cover;
+      // a standing-eye test incorrectly rejected exactly the places civilians would kneel.
+      if (hasLOS(world.solids, x, y + 0.72, z, threat.x, threat.y + 1.5, threat.z)) continue;
+      let crowdPenalty = 0;
+      for (const other of world.civilians || []) {
+        if (other === this || !other.coverTarget) continue;
+        const separation = Math.hypot(
+          other.coverTarget.x - x, other.coverTarget.z - z);
+        if (separation < 1.15) crowdPenalty += (1.15 - separation) * 8;
+      }
+      candidates.push({
+        x, y, z,
+        score: distance + crowdPenalty + this.random() * 0.08,
+      });
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    for (const candidate of candidates.slice(0, 8)) {
+      const path = findPath(
+        nav, this.pos.x, this.pos.y, this.pos.z,
+        candidate.x, candidate.y, candidate.z, 520);
+      if (!path?.length) continue;
+      this.coverTarget = candidate;
+      this.coverPath = path;
+      this.coverPathIdx = 0;
+      this.coverSearchDone = true;
+      return true;
+    }
+    this.coverSearchDone = true;
+    return false;
+  }
+
+  followCoverPath(dt, world) {
+    if (!this.coverPath || this.coverPathIdx >= this.coverPath.length) {
+      this.inHardCover = !!this.coverTarget;
+      this.takeCover(dt);
+      return true;
+    }
+    const waypoint = this.coverPath[this.coverPathIdx];
+    const distance = Math.hypot(
+      waypoint.x - this.pos.x, waypoint.z - this.pos.z);
+    if (distance < 0.72 && Math.abs(waypoint.y - this.pos.y) < 1.5) {
+      this.coverPathIdx++;
+      if (this.coverPathIdx >= this.coverPath.length) {
+        this.coverPath = null;
+        this.inHardCover = true;
+        this.takeCover(dt);
+        return true;
+      }
+      return this.followCoverPath(dt, world);
+    }
+    this.panicDir = Math.atan2(
+      waypoint.x - this.pos.x, waypoint.z - this.pos.z);
+    this.step(dt, world, 3.45);
+    return true;
+  }
+
   update(dt, world) {
     if (this.dead) {
       this.deathAnim = animateDeathRig(this.mesh, dt);
@@ -202,6 +285,14 @@ export class Civilian {
       }
     }
     if (this.rushDone) { this.takeCover(dt); return; }
+
+    if (!this.rush && this.exhausted >= this.coverSearchAt) {
+      if (!this.coverSearchDone) this.findHardCover(world);
+      if (this.coverPath || this.inHardCover) {
+        this.followCoverPath(dt, world);
+        return;
+      }
+    }
 
     if (this.exhausted > 14) { this.takeCover(dt); return; }
 

@@ -4,7 +4,14 @@ import argparse
 import json
 from pathlib import Path
 
+from PIL import Image, ImageChops, ImageStat
 from playwright.sync_api import sync_playwright
+
+
+def mean_scope_difference(left, right):
+    a = Image.open(left).convert("RGB").crop((620, 260, 1160, 820))
+    b = Image.open(right).convert("RGB").crop((620, 260, 1160, 820))
+    return sum(ImageStat.Stat(ImageChops.difference(a, b)).mean) / 3
 
 
 def main():
@@ -140,6 +147,66 @@ def main():
           window.__bpVisualProps = previous;
           return result;
         }""")
+        page.evaluate("""() => {
+          for (const actor of [
+            ...BP.world.enemies, ...BP.world.civilians, ...(BP.world.allies || []),
+          ]) {
+            actor.update = () => {};
+            actor.mesh.visible = false;
+          }
+          BP.player.health = 100000;
+          BP.player.locked = true;
+          BP.input.ads = true;
+          BP.input.breath = true;
+          BP.player.pos.set(0, 24.2, 62);
+          const target = [0, 6.2, -99.4];
+          const dx = target[0] - BP.player.pos.x;
+          const dz = target[2] - BP.player.pos.z;
+          BP.player.yaw = Math.atan2(-dx, -dz);
+          BP.player.pitch = Math.atan2(
+            target[1] - (BP.player.pos.y + 1.6), Math.hypot(dx, dz));
+          BP.world.staticMesh.parent.traverse(object => {
+            const label = (object.name || '').toLowerCase();
+            if (object.isPoints || object.isSprite
+              || label.includes('snow') || label.includes('particle')) {
+              object.visible = false;
+            }
+          });
+        }""")
+        page.wait_for_timeout(500)
+        sniper["farArchitecturalPanes"] = page.evaluate("""async () => {
+          const THREE = await import('three');
+          const matrix = new THREE.Matrix4();
+          const worldMatrix = new THREE.Matrix4();
+          const position = new THREE.Vector3();
+          let count = 0;
+          BP.world.staticMesh.parent.updateMatrixWorld(true);
+          BP.world.staticMesh.parent.traverse(object => {
+            if (object.name !== 'pane-architectural' || !object.isInstancedMesh) return;
+            for (let index = 0; index < object.count; index++) {
+              object.getMatrixAt(index, matrix);
+              worldMatrix.multiplyMatrices(object.matrixWorld, matrix);
+              position.setFromMatrixPosition(worldMatrix);
+              const onFarBlock = position.z < -79 && position.z > -102
+                && ((position.x > -56 && position.x < -24)
+                  || (position.x > 24 && position.x < 56)
+                  || (position.x > -21 && position.x < 21));
+              if (onFarBlock) count++;
+            }
+          });
+          return count;
+        }""")
+        stability_frames = []
+        for index in range(4):
+            frame = output / f"sniper-stability-{index}.png"
+            page.screenshot(path=str(frame))
+            stability_frames.append(frame)
+            page.wait_for_timeout(90)
+        sniper["temporalDifferences"] = [
+            round(mean_scope_difference(stability_frames[index], stability_frames[index + 1]), 5)
+            for index in range(len(stability_frames) - 1)
+        ]
+        sniper["temporalSettledMax"] = max(sniper["temporalDifferences"][1:])
 
         result = {
             "correction": correction,
@@ -166,6 +233,11 @@ def main():
         assert doors == {"count": 3, "framed": True, "persistentAfterLeaf": True}, result
         assert sniper["facades"] == 3 and sniper["allStatic"], result
         assert all(count > 0 for count in sniper["skipCounts"]), result
+        assert sniper["farArchitecturalPanes"] == 0, result
+        # Desktop film grain deliberately changes sub-pixel values every frame. Ignore the
+        # first ADS-settling pair and cap the remaining full-window-region change well below
+        # the discontinuity produced by overlapping depth layers.
+        assert sniper["temporalSettledMax"] < 1.0, result
         browser.close()
 
 

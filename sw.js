@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v99-playtest-corrections';
+const CACHE = 'breach-protocol-v100-civilian-cover';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
