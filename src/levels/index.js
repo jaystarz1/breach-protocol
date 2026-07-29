@@ -624,17 +624,29 @@ export const LEVELS = [
       g.push(...facade(10, 60, 10, 76, 0, 24, 602, { out: 0.22, away: PERCH }));
       g.push(...facade(-10, 76, 10, 76, 0, 24, 603, { out: 0.22, away: PERCH }));
       // firing position: sandbag rest at the parapet, with the barrel gap left clear
-      g.push(...lift(sandbags(-3.4, 61.0, 5, 3, false, 61), 24));
-      g.push(...lift(sandbags(3.4, 61.0, 5, 3, false, 62), 24));
-      g.push(...lift(sandbags(-6.2, 62.6, 3, 2, true, 63), 24));
+      // Keep the original coarse bags as bullet/player collision, then let the desktop
+      // rooftop pass replace their visible boxes with stitched, irregular fabric sacks.
+      const hiddenRoofGeometry = geo => lift(geo, 24).map(entry => {
+        const hidden = [...entry];
+        hidden[9] = false;
+        return hidden;
+      });
+      g.push(...hiddenRoofGeometry(sandbags(-3.4, 61.0, 5, 3, false, 61)));
+      g.push(...hiddenRoofGeometry(sandbags(3.4, 61.0, 5, 3, false, 62)));
+      g.push(...hiddenRoofGeometry(sandbags(-6.2, 62.6, 3, 2, true, 63)));
       // roof furniture: the actual difference between a roof and the top of a cube
-      g.push(...lift(waterTank(6.6, 0, 71.5), 24));
-      g.push(...lift(acUnit(-6.5, 0, 69.5, 1.2), 24));
-      g.push(...lift(acUnit(-4.0, 0, 72.4, 1.0), 24));
-      g.push(...lift(ventStack(2.2, 0, 73.6), 24));
-      g.push(...lift(roofHutch(-1.0, 0, 66.4, 's'), 24));
+      // Their blockouts remain collision; the desktop layer supplies cylindrical tanks,
+      // fan grilles, louvers, support feet and rain-capped vents.
+      g.push(...hiddenRoofGeometry(waterTank(6.6, 0, 71.5)));
+      g.push(...hiddenRoofGeometry(acUnit(-6.5, 0, 69.5, 1.2)));
+      g.push(...hiddenRoofGeometry(acUnit(-4.0, 0, 72.4, 1.0)));
+      g.push(...hiddenRoofGeometry(ventStack(2.2, 0, 73.6)));
+      // Collision remains the original hutch shell. The desktop pass draws its cladding,
+      // access door, roof flashing, vent and utility hardware.
+      g.push(...hiddenRoofGeometry(roofHutch(-1.0, 0, 66.4, 's')));
       g.push(...lift(lamp(8.4, 64.0, 3.2, 1.0, -1), 24));
-      g.push([0, 24.3, 63.2, 5.0, 0.12, 1.6, C.metal, false]);          // duckboard by the rest
+      // Authored timber slats replace the old single silver rectangle.
+      g.push([0, 24.3, 63.2, 5.0, 0.12, 1.6, C.metal, false, false, false]);
       // team cover: fountain
       g.push([0, 0.6, -10, 6, 1.2, 6, C.concrete]);
       g.push([0, 1.5, -10, 2, 3, 2, C.metal]);

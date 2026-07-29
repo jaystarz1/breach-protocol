@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v89-hold-district-gate';
+const CACHE = 'breach-protocol-v90-relay-rooftop';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

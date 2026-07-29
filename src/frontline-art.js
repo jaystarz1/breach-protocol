@@ -614,6 +614,35 @@ function fortifiedGateSectorTexture() {
   return gateSectorTexture;
 }
 
+let relayHutchSign = null;
+function relayHutchSignTexture() {
+  if (relayHutchSign) return relayHutchSign;
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#d1c7a1';
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = '#1c2523';
+  ctx.fillRect(10, 10, 236, 236);
+  ctx.fillStyle = '#d8b65d';
+  ctx.font = '800 31px monospace';
+  ctx.fillText('OP RELAY', 36, 62);
+  ctx.fillStyle = '#d7d3c5';
+  ctx.font = '700 20px monospace';
+  ctx.fillText('ROOF ACCESS', 48, 104);
+  ctx.fillText('AUTHORIZED', 60, 135);
+  ctx.fillStyle = '#b65748';
+  for (let i = 0; i < 5; i++) ctx.fillRect(25 + i * 44, 174, 26, 18);
+  ctx.fillStyle = '#9d9b8c';
+  ctx.font = '700 16px monospace';
+  ctx.fillText('VECTOR // 06', 66, 224);
+  relayHutchSign = new THREE.CanvasTexture(canvas);
+  relayHutchSign.colorSpace = THREE.SRGBColorSpace;
+  relayHutchSign.anisotropy = 8;
+  return relayHutchSign;
+}
+
 function droneModel() {
   const root = new THREE.Group();
   const carbon = new THREE.MeshStandardMaterial({ color: 0x171a1c, roughness: 0.5, metalness: 0.45 });
@@ -975,7 +1004,7 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
   }
 }
 
-function addObservationPost(scene, x, y, z, yaw = 0) {
+function addObservationPost(scene, x, y, z, yaw = 0, opts = {}) {
   const frontline = frontlineMaterials();
   const steel = new THREE.MeshStandardMaterial({ color: 0x262d30, roughness: 0.58, metalness: 0.62 });
   const equipment = new THREE.MeshStandardMaterial({ color: 0x252b2a, roughness: 0.76 });
@@ -987,7 +1016,9 @@ function addObservationPost(scene, x, y, z, yaw = 0) {
       bags.push([x + c * i * 0.5, y + 0.48, z - s * i * 0.5, 0, yaw, Math.PI / 2, 1, 1, 1]);
     }
   }
-  sandbagInstances(scene, 'frontline-mission-op-sandbags', bags);
+  if (opts.bags !== false) {
+    sandbagInstances(scene, 'frontline-mission-op-sandbags', bags);
+  }
 
   addFieldTable(scene, x, y + 0.86, z + 1.25, yaw, 1.9, 0.78);
   const drone = droneModel();
@@ -1003,6 +1034,397 @@ function addObservationPost(scene, x, y, z, yaw = 0) {
   panel.position.y += 1.18;
   panel.rotation.y = yaw + 0.25;
   scene.add(panel);
+}
+
+function addRelayRooftop(scene) {
+  const frontline = frontlineMaterials();
+  const R = rng(66017);
+
+  // Cover the brick family inherited from the building collision box with a dedicated roof
+  // membrane. Cloned maps can repeat at rooftop scale without mutating the shared street map.
+  const sourceMap = frontline.asphalt.map?.clone() || null;
+  const sourceBump = frontline.asphalt.bumpMap?.clone() || null;
+  for (const texture of [sourceMap, sourceBump]) {
+    if (!texture) continue;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(5, 4);
+    texture.needsUpdate = true;
+  }
+  const membraneMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4d514f,
+    map: sourceMap,
+    bumpMap: sourceBump,
+    bumpScale: sourceBump ? 0.022 : 0,
+    roughness: 0.98,
+    metalness: 0,
+  });
+  const membrane = new THREE.Mesh(
+    new THREE.PlaneGeometry(19.6, 15.6), membraneMaterial);
+  membrane.name = 'relay-roof-bitumen-membrane';
+  membrane.rotation.x = -Math.PI / 2;
+  membrane.position.set(0, 24.018, 68);
+  membrane.receiveShadow = quality.shadows;
+  scene.add(membrane);
+
+  const roofPatchMaterial = new THREE.MeshStandardMaterial({
+    color: 0x252a29, roughness: 0.99, metalness: 0,
+  });
+  const patches = [
+    [-5.8, 24.034, 65.6, -Math.PI / 2, 0, 0.12, 2.1, 1.2, 1],
+    [4.9, 24.034, 71.2, -Math.PI / 2, 0, -0.18, 1.6, 0.95, 1],
+    [6.9, 24.034, 65.0, -Math.PI / 2, 0, 0.32, 1.05, 0.7, 1],
+  ];
+  const patchBatch = instanced(
+    scene, raggedDisc(1, 22, 66019), roofPatchMaterial, patches, false);
+  patchBatch.name = 'relay-roof-membrane-patches';
+
+  const puddleMaterial = new THREE.MeshStandardMaterial({
+    color: 0x090d0d,
+    roughness: 0.72,
+    metalness: 0,
+  });
+  const puddles = [
+    [-7.2, 24.039, 72.4, -Math.PI / 2, 0, 0.18, 0.92, 0.44, 1],
+    [5.9, 24.039, 68.2, -Math.PI / 2, 0, -0.24, 0.72, 0.38, 1],
+  ];
+  const puddleBatch = instanced(
+    scene, raggedDisc(1, 20, 66023), puddleMaterial, puddles, false);
+  puddleBatch.name = 'relay-roof-standing-water';
+
+  const gravel = [];
+  for (let i = 0; i < 88; i++) {
+    let x;
+    let z;
+    do {
+      x = -9 + R() * 18;
+      z = 61 + R() * 14;
+    } while (Math.abs(x) < 4.8 && z < 65.5);
+    gravel.push([
+      x, 24.05 + R() * 0.035, z,
+      R() * 0.3, R() * Math.PI, R() * 0.3,
+      0.3 + R() * 0.5, 0.22 + R() * 0.38, 0.3 + R() * 0.5,
+    ]);
+  }
+  const gravelBatch = instanced(
+    scene, FINE_RUBBLE_GEO, frontline.concreteDark, gravel, false);
+  gravelBatch.name = 'relay-roof-ballast-gravel';
+
+  // Replace all three coarse collision banks with the same stitched authored sack used by
+  // the frontline defenses. Their positions mirror the level geometry exactly.
+  const roofBags = [];
+  const addBagBank = (cx, cz, cols, rows, rotated, seed) => {
+    const B = rng(seed);
+    for (let row = 0; row < rows; row++) {
+      const count = cols - (row % 2 ? 1 : 0);
+      for (let i = 0; i < count; i++) {
+        const off = (i - (count - 1) / 2) * 0.52
+          + (row % 2 ? 0.26 : 0) + (B() - 0.5) * 0.05;
+        roofBags.push(rotated
+          ? [cx + (B() - 0.5) * 0.06, 24.14 + row * 0.26, cz + off,
+            Math.PI / 2, 0, 0, 0.88, 0.94, 0.88]
+          : [cx + off, 24.14 + row * 0.26, cz + (B() - 0.5) * 0.06,
+            0, 0, Math.PI / 2, 0.88, 0.94, 0.88]);
+      }
+    }
+  };
+  addBagBank(-3.4, 61.0, 5, 3, false, 61);
+  addBagBank(3.4, 61.0, 5, 3, false, 62);
+  addBagBank(-6.2, 62.6, 3, 2, true, 63);
+  sandbagInstances(scene, 'relay-roof-authored-sandbags', roofBags);
+
+  const duckboards = [];
+  for (let i = 0; i < 10; i++) {
+    duckboards.push([-2.18 + i * 0.485, 24.065, 63.2, 0, 0, 0, 0.42, 0.055, 1.52]);
+  }
+  duckboards.push(
+    [0, 24.035, 62.68, 0, 0, 0, 4.9, 0.06, 0.09],
+    [0, 24.035, 63.72, 0, 0, 0, 4.9, 0.06, 0.09],
+  );
+  const duckboardBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), frontline.timber, duckboards);
+  duckboardBatch.name = 'relay-roof-timber-duckboards';
+
+  const matMaterial = new THREE.MeshStandardMaterial({
+    color: 0x171d1a,
+    map: surfaces().fabric.map,
+    normalMap: surfaces().fabric.normalMap,
+    normalScale: new THREE.Vector2(0.18, 0.18),
+    roughness: 0.96,
+    metalness: 0,
+  });
+  const firingMat = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), matMaterial,
+    [[0, 24.07, 62.1, 0, 0, 0, 1.06, 0.035, 2.16]]);
+  firingMat.name = 'relay-roof-firing-mat';
+  const matSeams = [
+    [-0.49, 24.092, 62.1, 0, 0, 0, 0.022, 0.014, 2.08],
+    [0.49, 24.092, 62.1, 0, 0, 0, 0.022, 0.014, 2.08],
+    [0, 24.092, 61.08, 0, 0, 0, 1.0, 0.014, 0.022],
+    [0, 24.092, 63.12, 0, 0, 0, 1.0, 0.014, 0.022],
+    [0, 24.092, 62.1, 0, 0, 0, 0.018, 0.014, 2.02],
+  ];
+  const matSeamBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), frontline.equipment, matSeams, false);
+  matSeamBatch.name = 'relay-roof-firing-mat-seams';
+  const matRoll = instanced(
+    scene, new THREE.CylinderGeometry(0.055, 0.055, 1, 12),
+    matMaterial,
+    [[0, 24.13, 63.18, 0, 0, Math.PI / 2, 1, 1.03, 1]], false);
+  matRoll.name = 'relay-roof-firing-mat-roll';
+
+  // Rebuild the access hutch as a panelled service enclosure around the retained solid shell.
+  const cladding = frontline.barrierSteel.clone();
+  cladding.color.setHex(0x69736f);
+  cladding.roughness = 0.82;
+  const darkSteel = frontline.barrierSteel.clone();
+  darkSteel.color.setHex(0x252c2d);
+  const hutchPanels = [
+    [-2.02, 25.2, 67.63, 0, 0, 0, 0.56, 2.3, 0.08],
+    [0.02, 25.2, 67.63, 0, 0, 0, 0.56, 2.3, 0.08],
+    [-1, 26.28, 67.63, 0, 0, 0, 2.6, 0.22, 0.08],
+    [-1, 25.2, 65.18, 0, 0, 0, 2.6, 2.3, 0.08],
+    [-2.3, 25.2, 66.4, 0, 0, 0, 0.08, 2.3, 2.38],
+    [0.3, 25.2, 66.4, 0, 0, 0, 0.08, 2.3, 2.38],
+  ];
+  const hutchPanelBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), cladding, hutchPanels);
+  hutchPanelBatch.name = 'relay-hutch-cladding';
+  const roofParts = [
+    [-1, 26.48, 66.4, 0, 0, 0, 3.0, 0.16, 2.78],
+    [-1, 26.58, 65.04, 0, 0, 0, 3.0, 0.08, 0.09],
+    [-1, 26.58, 67.76, 0, 0, 0, 3.0, 0.08, 0.09],
+  ];
+  for (const x of [-2.25, -1.62, -0.99, -0.36, 0.27]) {
+    roofParts.push([x, 26.59, 66.4, 0, 0, 0, 0.045, 0.045, 2.72]);
+  }
+  const hutchRoof = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), darkSteel, roofParts);
+  hutchRoof.name = 'relay-hutch-roof-flashing';
+
+  const door = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), darkSteel,
+    [[-1, 25.12, 67.69, 0, 0, 0, 1.08, 2.02, 0.08]]);
+  door.name = 'relay-hutch-access-door';
+  const doorHardware = [
+    [-1.56, 25.12, 67.75, 0, 0, 0, 0.06, 2.2, 0.06],
+    [-0.44, 25.12, 67.75, 0, 0, 0, 0.06, 2.2, 0.06],
+    [-1, 26.21, 67.75, 0, 0, 0, 1.18, 0.06, 0.06],
+    [-1, 24.03, 67.75, 0, 0, 0, 1.18, 0.06, 0.06],
+    [-0.62, 25.05, 67.79, 0, 0, 0, 0.24, 0.055, 0.055],
+  ];
+  const hardware = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), frontline.rebar, doorHardware);
+  hardware.name = 'relay-hutch-door-hardware';
+  const hinges = [
+    [-1.48, 24.48, 67.8, 0, 0, 0, 0.09, 0.18, 0.08],
+    [-1.48, 25.12, 67.8, 0, 0, 0, 0.09, 0.18, 0.08],
+    [-1.48, 25.76, 67.8, 0, 0, 0, 0.09, 0.18, 0.08],
+  ];
+  const hingeBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), frontline.rebar, hinges);
+  hingeBatch.name = 'relay-hutch-door-hinges';
+
+  const ventSlats = [];
+  for (let i = 0; i < 6; i++) {
+    ventSlats.push(
+      [0.35, 25.52 - i * 0.13, 66.2, 0, 0, 0, 0.03, 0.045, 0.72],
+      [-2.35, 25.52 - i * 0.13, 66.45, 0, 0, 0, 0.018, 0.035, 0.38],
+    );
+  }
+  const vent = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), darkSteel, ventSlats, false);
+  vent.name = 'relay-hutch-service-vent';
+  const sideSeams = [];
+  for (const z of [65.52, 66.08, 66.64, 67.2]) {
+    sideSeams.push([-2.35, 25.2, z, 0, 0, 0, 0.014, 2.24, 0.022]);
+  }
+  const seamBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), darkSteel, sideSeams, false);
+  seamBatch.name = 'relay-hutch-panel-seams';
+
+  const signMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: relayHutchSignTexture(),
+    roughness: 0.78,
+    metalness: 0.08,
+  });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.58), signMaterial);
+  sign.name = 'relay-hutch-access-sign';
+  sign.position.set(-1, 25.47, 67.745);
+  scene.add(sign);
+
+  const conduits = [
+    [0.38, 24.86, 66.88, 0, 0, 0, 0.045, 1.55, 0.045],
+    [0.38, 24.1, 64.75, Math.PI / 2, 0, 0, 0.045, 4.25, 0.045],
+    [4.5, 24.1, 62.65, 0, 0, Math.PI / 2, 0.045, 8.2, 0.045],
+  ];
+  const conduitBatch = instanced(
+    scene, new THREE.CylinderGeometry(0.5, 0.5, 1, 7),
+    frontline.rebar, conduits, false);
+  conduitBatch.name = 'relay-roof-conduit';
+
+  // The original rooftop utilities remain as invisible collision in the level definition.
+  // These assemblies replace their square silhouettes with recognisable service equipment
+  // while sharing each small family of parts in one draw call.
+  const utilitySteel = frontline.barrierSteel.clone();
+  utilitySteel.color.setHex(0x66706f);
+  utilitySteel.roughness = 0.76;
+  const utilityDark = frontline.barrierSteel.clone();
+  utilityDark.color.setHex(0x242a2b);
+  utilityDark.roughness = 0.68;
+  const utilityRust = frontline.rebar.clone();
+  utilityRust.color.setHex(0x664438);
+
+  const acBodies = [];
+  const acLids = [];
+  const acFeet = [];
+  const acFanRings = [];
+  const acFanHubs = [];
+  const acFanBlades = [];
+  const acLouvers = [];
+  const addAc = (x, z, scale) => {
+    const bodyTop = 24 + 0.7 * scale;
+    acBodies.push([x, 24 + 0.35 * scale, z, 0, 0, 0,
+      1.5 * scale, 0.7 * scale, 1.2 * scale]);
+    acLids.push([x, bodyTop + 0.035, z, 0, 0, 0,
+      1.58 * scale, 0.07, 1.28 * scale]);
+    for (const dx of [-0.56, 0.56]) {
+      for (const dz of [-0.42, 0.42]) {
+        acFeet.push([x + dx * scale, 24.08, z + dz * scale, 0, 0, 0,
+          0.13 * scale, 0.16, 0.13 * scale]);
+      }
+    }
+    acFanRings.push([x, bodyTop + 0.084, z, Math.PI / 2, 0, 0,
+      scale, scale, scale]);
+    acFanHubs.push([x, bodyTop + 0.083, z, 0, 0, 0,
+      scale, 0.055, scale]);
+    for (let i = 0; i < 5; i++) {
+      const angle = i * Math.PI * 2 / 5;
+      acFanBlades.push([
+        x + Math.cos(angle) * 0.18 * scale,
+        bodyTop + 0.084,
+        z + Math.sin(angle) * 0.18 * scale,
+        0, -angle + 0.24, 0,
+        0.34 * scale, 0.025, 0.105 * scale,
+      ]);
+    }
+    for (let i = 0; i < 7; i++) {
+      acLouvers.push([
+        x - 0.55 * scale + i * 0.183 * scale,
+        24 + 0.38 * scale,
+        z - 0.605 * scale,
+        0.18, 0, 0,
+        0.105 * scale, 0.035, 0.025,
+      ]);
+    }
+  };
+  addAc(-6.5, 69.5, 1.2);
+  addAc(-4.0, 72.4, 1.0);
+  const acBodyBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), utilitySteel, acBodies);
+  acBodyBatch.name = 'relay-roof-ac-housings';
+  const acLidBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), utilityDark, acLids);
+  acLidBatch.name = 'relay-roof-ac-lids';
+  const acFootBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), utilityRust, acFeet);
+  acFootBatch.name = 'relay-roof-ac-feet';
+  const acRingBatch = instanced(
+    scene, new THREE.TorusGeometry(0.34, 0.027, 6, 18), utilityDark,
+    acFanRings, false);
+  acRingBatch.name = 'relay-roof-ac-fan-rings';
+  const acHubBatch = instanced(
+    scene, new THREE.CylinderGeometry(0.075, 0.075, 1, 10), utilityDark,
+    acFanHubs, false);
+  acHubBatch.name = 'relay-roof-ac-fan-hubs';
+  const acBladeBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), utilityDark, acFanBlades, false);
+  acBladeBatch.name = 'relay-roof-ac-fan-blades';
+  const acLouverBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), utilityDark, acLouvers, false);
+  acLouverBatch.name = 'relay-roof-ac-louvers';
+
+  const tankBody = instanced(
+    scene, new THREE.CylinderGeometry(1, 1, 2.8, 20, 1, false),
+    utilitySteel, [[6.6, 26.0, 71.5, 0, 0, 0, 1, 1, 1]]);
+  tankBody.name = 'relay-roof-water-tank';
+  const tankCap = instanced(
+    scene, new THREE.CylinderGeometry(0.93, 1.04, 0.22, 20),
+    utilityDark, [[6.6, 27.48, 71.5, 0, 0, 0, 1, 1, 1]]);
+  tankCap.name = 'relay-roof-water-tank-cap';
+  const tankBands = [];
+  for (const y of [24.82, 25.58, 26.34, 27.1]) {
+    tankBands.push([6.6, y, 71.5, Math.PI / 2, 0, 0, 1, 1, 1]);
+  }
+  const tankBandBatch = instanced(
+    scene, new THREE.TorusGeometry(1.015, 0.035, 6, 20),
+    utilityRust, tankBands, false);
+  tankBandBatch.name = 'relay-roof-water-tank-bands';
+  const tankSupports = [
+    [5.56, 24.08, 70.46, 0, 0, 0, 0.15, 0.16, 0.15],
+    [7.64, 24.08, 70.46, 0, 0, 0, 0.15, 0.16, 0.15],
+    [5.56, 24.08, 72.54, 0, 0, 0, 0.15, 0.16, 0.15],
+    [7.64, 24.08, 72.54, 0, 0, 0, 0.15, 0.16, 0.15],
+    [6.6, 24.18, 71.5, 0, 0, 0, 2.34, 0.12, 2.34],
+  ];
+  const tankSupportBatch = instanced(
+    scene, new THREE.BoxGeometry(1, 1, 1), utilityDark, tankSupports);
+  tankSupportBatch.name = 'relay-roof-water-tank-supports';
+  const tankLadder = [
+    [6.18, 26.0, 70.43, 0, 0, 0, 0.045, 2.86, 0.045],
+    [7.02, 26.0, 70.43, 0, 0, 0, 0.045, 2.86, 0.045],
+  ];
+  for (let i = 0; i < 7; i++) {
+    tankLadder.push([6.6, 24.78 + i * 0.39, 70.43, 0, 0, Math.PI / 2,
+      0.045, 0.84, 0.045]);
+  }
+  const tankLadderBatch = instanced(
+    scene, new THREE.CylinderGeometry(0.5, 0.5, 1, 7),
+    utilityRust, tankLadder, false);
+  tankLadderBatch.name = 'relay-roof-water-tank-ladder';
+
+  const ventBase = instanced(
+    scene, new THREE.CylinderGeometry(0.39, 0.46, 0.12, 14),
+    utilityDark, [[2.2, 24.08, 73.6, 0, 0, 0, 1, 1, 1]]);
+  ventBase.name = 'relay-roof-vent-flashing';
+  const ventStack = instanced(
+    scene, new THREE.CylinderGeometry(0.23, 0.25, 1.18, 14),
+    utilitySteel, [[2.2, 24.64, 73.6, 0, 0, 0, 1, 1, 1]]);
+  ventStack.name = 'relay-roof-vent-stack';
+  const ventCap = instanced(
+    scene, new THREE.CylinderGeometry(0.31, 0.42, 0.24, 14),
+    utilityDark, [[2.2, 25.35, 73.6, 0, 0, 0, 1, 1, 1]]);
+  ventCap.name = 'relay-roof-vent-rain-cap';
+
+  // A dedicated spotting optic gives the observation post an actual second job beside the
+  // drone table. Its tripod and angled tube stay behind the parapet and outside player motion.
+  const tripodLegs = [
+    [3.25, 24.53, 62.08, 0.42, 0, 0.22, 1, 1.05, 1],
+    [3.64, 24.53, 62.08, 0.42, 0, -0.22, 1, 1.05, 1],
+    [3.45, 24.53, 62.45, -0.42, 0, 0, 1, 1.05, 1],
+  ];
+  const tripod = instanced(
+    scene, new THREE.CylinderGeometry(0.025, 0.035, 1, 8),
+    frontline.barrierSteel, tripodLegs);
+  tripod.name = 'relay-spotter-tripod';
+  const opticParts = [
+    [3.45, 25.18, 61.95, Math.PI / 2, 0, 0, 1, 0.82, 1],
+    [3.45, 25.18, 61.51, Math.PI / 2, 0, 0, 1.25, 0.18, 1.25],
+    [3.45, 25.18, 62.39, Math.PI / 2, 0, 0, 1.08, 0.16, 1.08],
+  ];
+  const optic = instanced(
+    scene, new THREE.CylinderGeometry(0.09, 0.11, 1, 12),
+    frontline.equipment, opticParts);
+  optic.name = 'relay-spotter-optic';
+  const opticLensMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x4c7180, roughness: 0.16, metalness: 0.04,
+    clearcoat: 0.7, clearcoatRoughness: 0.08,
+  });
+  const opticLens = instanced(
+    scene, new THREE.CylinderGeometry(0.085, 0.085, 0.018, 14),
+    opticLensMaterial,
+    [[3.45, 25.18, 61.42, Math.PI / 2, 0, 0, 1, 1, 1]], false);
+  opticLens.name = 'relay-spotter-objective-lens';
 }
 
 export function addFrontlineMissionArt(scene, levelId) {
@@ -1217,7 +1639,10 @@ export function addFrontlineMissionArt(scene, levelId) {
       [18.6, 0.92, 14.0, 0, 0.22, 0, 0.82, 0.82, 0.82],
     ]);
   }
-  if (levelId === 6) addObservationPost(scene, -4, 24.2, 60, 0);
+  if (levelId === 6) {
+    addObservationPost(scene, -4, 24.2, 60, 0, { bags: false });
+    addRelayRooftop(scene);
+  }
   if (levelId === 7) addObservationPost(scene, -3, 12.25, -2, Math.PI / 2);
 
   if (levelId === 4) {
