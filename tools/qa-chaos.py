@@ -154,6 +154,7 @@ def main():
               BP.world.staticMesh.parent.traverse(object => {
                 if (!object.name?.startsWith('stall-')
                     && !object.name?.startsWith('frontline-aid-')
+                    && !object.name?.startsWith('market-')
                     && !object.name?.startsWith('supply-crate')) return;
                 parts[object.name] = {
                   instances: object.count || object.userData.instanceCount || 1,
@@ -310,6 +311,27 @@ def main():
         assert market_art["supply-crates-authored"]["vertices"] > 400
         assert market_art["supply-crates-authored"]["mapped"]
         assert market_art["supply-crates-authored"]["relief"]
+        assert (
+            market_art["market-plaza-pavers-a"]["instances"]
+            + market_art["market-plaza-pavers-b"]["instances"]
+        ) == 289
+        assert market_art["market-plaza-drainage"]["instances"] == 18
+        assert market_art["market-plaza-drain-slots"]["instances"] == 108
+        assert market_art["market-plaza-standing-water"]["instances"] == 6
+        assert market_art["market-plaza-impact-scars"]["instances"] == 5
+        assert market_art["market-aid-shelter-tarps"]["instances"] == 4
+        assert market_art["market-aid-shelter-poles"]["instances"] == 16
+        assert market_art["market-aid-queue-posts"]["instances"] == 12
+        assert market_art["market-aid-queue-rails"]["instances"] == 10
+        assert market_art["market-aid-water-tanks"]["instances"] == 2
+        assert market_art["market-aid-water-tank-bands"]["instances"] == 4
+        assert market_art["market-aid-direction-signs"]["instances"] == 4
+        assert market_art["market-plaza-paper-litter"]["instances"] == 78
+        assert market_art["market-plaza-hard-litter"]["instances"] == 42
+        assert sum(
+            row["instances"] for name, row in market_art.items()
+            if name.startswith("market-perimeter-rubble-")
+        ) == 54
         assert market_collision == {"stalls": 16, "crates": 3}
         assert sorted(rig_coverage.keys()) == ["0", "1", "2"]
         assert all(

@@ -582,6 +582,8 @@ export const LEVELS = [
       { pos: [19, 0, 22] }, { pos: [30, 0, 3], rush: true },
       { pos: [-28, 0, -11] }, { pos: [14, 0, -15] },
       { pos: [-3, 0, -28], rush: true }, { pos: [25, 0, -23] },
+      { pos: [-9, 0, 28], rush: true }, { pos: [9, 0, 28] },
+      { pos: [-30, 0, 18] }, { pos: [30, 0, 18], rush: true },
     ],
     reinforce: { every: 26, first: 30, max: 6, group: 2, range: 60,
       at: [[0, 0, 34], [-30, 0, -34], [30, 0, -34]] },

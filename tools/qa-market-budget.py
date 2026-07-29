@@ -93,8 +93,8 @@ def main():
         print(json.dumps(result, indent=2))
         assert not errors
         assert result["renderer"]["calls"] <= args.ceiling, result
-        assert result["civilians"]["actors"] == 20, result
-        assert result["civilians"]["draws"] == 20, result
+        assert result["civilians"]["actors"] == 24, result
+        assert result["civilians"]["draws"] == 24, result
         assert result["samples"]["civilian"]["merged"], result
         assert result["samples"]["concealedEnemy"]["merged"], result
         browser.close()

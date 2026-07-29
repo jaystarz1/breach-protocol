@@ -1065,6 +1065,36 @@ function opBravoSignTexture() {
   return opBravoSignMap;
 }
 
+let marketAidSignMap = null;
+function marketAidSignTexture() {
+  if (marketAidSignMap) return marketAidSignMap;
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 384;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#d5d0bd';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#272d2c';
+  ctx.fillRect(18, 18, canvas.width - 36, canvas.height - 36);
+  ctx.fillStyle = '#d5d0bd';
+  ctx.fillRect(38, 38, canvas.width - 76, canvas.height - 76);
+  ctx.fillStyle = '#aa3330';
+  ctx.fillRect(70, 68, 44, 178);
+  ctx.fillRect(3, 135, 178, 44);
+  ctx.fillStyle = '#202727';
+  ctx.font = '700 70px sans-serif';
+  ctx.fillText('AID DISTRIBUTION', 220, 128);
+  ctx.font = '600 40px sans-serif';
+  ctx.fillText('TRIAGE  →   KEEP MOVING', 220, 205);
+  ctx.fillStyle = '#56625d';
+  ctx.font = '600 25px sans-serif';
+  ctx.fillText('VEKTOR CIVIL SUPPORT  /  SECTOR 4', 220, 270);
+  marketAidSignMap = new THREE.CanvasTexture(canvas);
+  marketAidSignMap.colorSpace = THREE.SRGBColorSpace;
+  marketAidSignMap.anisotropy = quality.anisotropy || 1;
+  return marketAidSignMap;
+}
+
 function addOpBravoTower(scene) {
   const frontline = frontlineMaterials();
   const R = rng(77031);
@@ -2281,6 +2311,252 @@ export function addFrontlineMissionArt(scene, levelId) {
       [-25.8, 0.55, -21.4, 0, -0.05, 0, 1.45, 1.08, 0.92],
       [23.8, 0.55, -27.6, 0, 0.05, 0, 1.45, 1.08, 0.92],
     ]);
+
+    // The original market occupied one pristine 90-metre concrete plate. Retain that plate
+    // for collision, but give the visible plaza construction logic: individually repaired
+    // pavers, drainage lanes, patched standing water and local impact damage.
+    const marketRng = rng(55041);
+    const unitBox = new THREE.BoxGeometry(1, 1, 1);
+    const paverA = frontline.concrete.clone();
+    paverA.color.setHex(0x918f88);
+    const paverB = frontline.concrete.clone();
+    paverB.color.setHex(0x7b7e79);
+    const paversA = [];
+    const paversB = [];
+    for (let iz = 0; iz < 17; iz++) {
+      for (let ix = 0; ix < 17; ix++) {
+        const x = -32 + ix * 4;
+        const z = -32 + iz * 4;
+        const transform = [
+          x, 0.026, z,
+          0, (marketRng() - 0.5) * 0.008, 0,
+          3.88 - marketRng() * 0.08, 0.028, 3.88 - marketRng() * 0.08,
+        ];
+        ((ix + iz + (ix * iz) % 3) % 2 ? paversA : paversB).push(transform);
+      }
+    }
+    const marketPaversA = instanced(scene, unitBox, paverA, paversA, false);
+    marketPaversA.name = 'market-plaza-pavers-a';
+    const marketPaversB = instanced(scene, unitBox, paverB, paversB, false);
+    marketPaversB.name = 'market-plaza-pavers-b';
+
+    const drainMaterial = frontline.barrierSteel.clone();
+    drainMaterial.color.setHex(0x303638);
+    drainMaterial.roughness = 0.82;
+    const drainRuns = [];
+    for (const x of [-3.15, 3.15]) {
+      for (let i = 0; i < 9; i++) {
+        drainRuns.push([x, 0.047, -31.2 + i * 7.8, 0, 0, 0, 0.22, 0.035, 7.45]);
+      }
+    }
+    const drains = instanced(scene, unitBox, drainMaterial, drainRuns, false);
+    drains.name = 'market-plaza-drainage';
+    const drainSlots = [];
+    for (const x of [-3.15, 3.15]) {
+      for (let i = 0; i < 54; i++) {
+        drainSlots.push([x, 0.069, -34.2 + i * 1.3, 0, 0, 0, 0.34, 0.018, 0.06]);
+      }
+    }
+    const slots = instanced(scene, unitBox, dark, drainSlots, false);
+    slots.name = 'market-plaza-drain-slots';
+
+    const wetMaterial = new THREE.MeshStandardMaterial({
+      color: 0x151b1c,
+      roughness: 0.62,
+      metalness: 0,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+    const plazaPuddles = instanced(
+      scene, raggedDisc(1, 24, 55043), wetMaterial, [
+        [-29, 0.066, 11.5, -Math.PI / 2, 0, 0.12, 2.7, 1.35, 1],
+        [17.5, 0.066, 27.6, -Math.PI / 2, 0, -0.18, 2.1, 0.95, 1],
+        [28.2, 0.066, -9.5, -Math.PI / 2, 0, 0.25, 2.4, 1.2, 1],
+        [-10.2, 0.066, -31.0, -Math.PI / 2, 0, -0.1, 1.8, 0.85, 1],
+        [5.6, 0.066, -14.0, -Math.PI / 2, 0, 0.08, 1.15, 0.6, 1],
+        [-5.5, 0.066, 13.8, -Math.PI / 2, 0, -0.22, 1.25, 0.56, 1],
+      ], false);
+    plazaPuddles.name = 'market-plaza-standing-water';
+    const scarMaterial = new THREE.MeshStandardMaterial({
+      color: 0x373b39, roughness: 0.99, metalness: 0,
+    });
+    const plazaScars = instanced(
+      scene, raggedDisc(1, 22, 55049), scarMaterial, [
+        [-18.5, 0.062, 29.5, -Math.PI / 2, 0, 0.12, 1.6, 0.72, 1],
+        [28.4, 0.062, 3.8, -Math.PI / 2, 0, -0.3, 1.4, 0.65, 1],
+        [-27.8, 0.062, -10.2, -Math.PI / 2, 0, 0.2, 1.25, 0.58, 1],
+        [13.2, 0.062, -29.4, -Math.PI / 2, 0, -0.08, 1.7, 0.8, 1],
+        [1.1, 0.062, 20.2, -Math.PI / 2, 0, 0.15, 0.9, 0.4, 1],
+      ], false);
+    plazaScars.name = 'market-plaza-impact-scars';
+
+    // Four relief-processing shelters break the stall grid with larger, sagging fabric spans.
+    // Their poles sit tight to the perimeter aid pallets and do not enter crowd escape lanes.
+    const tarpGeometry = new THREE.PlaneGeometry(1, 1, 5, 4);
+    const tarpPositions = tarpGeometry.attributes.position;
+    for (let i = 0; i < tarpPositions.count; i++) {
+      const x = tarpPositions.getX(i) * 2;
+      const y = tarpPositions.getY(i) * 2;
+      const edge = Math.min(1, Math.hypot(x, y));
+      tarpPositions.setZ(i, -0.1 * (1 - edge));
+    }
+    tarpPositions.needsUpdate = true;
+    tarpGeometry.computeVertexNormals();
+    const tarpMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8b8b75,
+      map: surfaces().fabric.map,
+      normalMap: surfaces().fabric.normalMap,
+      roughnessMap: surfaces().fabric.roughnessMap,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+      roughness: 0.96,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    });
+    const tarpSites = [
+      [-26, 2.75, 26, -Math.PI / 2, 0, 0.04, 8, 5.8, 1],
+      [25.5, 2.75, 25, -Math.PI / 2, 0, -0.05, 7.5, 5.4, 1],
+      [-25.5, 2.75, -27, -Math.PI / 2, 0, -0.04, 7.6, 5.5, 1],
+      [24, 2.75, -28, -Math.PI / 2, 0, 0.06, 8, 5.8, 1],
+    ];
+    const tarps = instanced(scene, tarpGeometry, tarpMaterial, tarpSites);
+    tarps.name = 'market-aid-shelter-tarps';
+    for (let i = 0; i < tarpSites.length; i++) {
+      tarps.setColorAt(i, new THREE.Color(
+        [0x7d8b82, 0x9a8a68, 0x6e8185, 0x8c785e][i]));
+    }
+    if (tarps.instanceColor) tarps.instanceColor.needsUpdate = true;
+    const shelterPoles = [];
+    for (const [x, , z, , , yaw, width, depth] of tarpSites) {
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const lx = sx * (width / 2 - 0.25);
+          const lz = sz * (depth / 2 - 0.25);
+          shelterPoles.push([
+            x + c * lx + s * lz, 1.35, z - s * lx + c * lz,
+            0, 0, 0, 1, 2.65, 1,
+          ]);
+        }
+      }
+    }
+    const poles = instanced(
+      scene, new THREE.CylinderGeometry(0.035, 0.045, 1, 8),
+      frontline.rebar, shelterPoles);
+    poles.name = 'market-aid-shelter-poles';
+
+    // Queue rails, potable-water tanks and directional boards establish an aid operation
+    // rather than a decorative bazaar. They remain visual-only and sit beside authored cover.
+    const queuePosts = [];
+    const queueRails = [];
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 6; i++) {
+        queuePosts.push([side * 18, 0.62, 31 - i * 2.1, 0, 0, 0, 1, 1.2, 1]);
+        if (i < 5) {
+          queueRails.push([
+            side * 18, 0.82, 29.95 - i * 2.1,
+            Math.PI / 2, 0, 0, 1, 2.05, 1,
+          ]);
+        }
+      }
+    }
+    const queuePostBatch = instanced(
+      scene, new THREE.CylinderGeometry(0.045, 0.055, 1, 8),
+      frontline.barrierSteel, queuePosts);
+    queuePostBatch.name = 'market-aid-queue-posts';
+    const queueRailBatch = instanced(
+      scene, new THREE.CylinderGeometry(0.025, 0.025, 1, 8),
+      frontline.barrierSteel, queueRails);
+    queueRailBatch.name = 'market-aid-queue-rails';
+    const waterMaterial = new THREE.MeshStandardMaterial({
+      color: 0x334d56, roughness: 0.62, metalness: 0.1,
+    });
+    const waterTanks = instanced(
+      scene, new THREE.CylinderGeometry(0.72, 0.72, 1.5, 18),
+      waterMaterial, [
+        [-30.8, 0.78, 24.5, 0, 0, 0, 1, 1, 1],
+        [30.4, 0.78, -25.7, 0, 0, 0, 1, 1, 1],
+      ]);
+    waterTanks.name = 'market-aid-water-tanks';
+    const tankBands = instanced(
+      scene, new THREE.TorusGeometry(0.74, 0.025, 6, 18),
+      frontline.barrierSteel, [
+        [-30.8, 0.35, 24.5, Math.PI / 2, 0, 0, 1, 1, 1],
+        [-30.8, 1.2, 24.5, Math.PI / 2, 0, 0, 1, 1, 1],
+        [30.4, 0.35, -25.7, Math.PI / 2, 0, 0, 1, 1, 1],
+        [30.4, 1.2, -25.7, Math.PI / 2, 0, 0, 1, 1, 1],
+      ]);
+    tankBands.name = 'market-aid-water-tank-bands';
+    const aidSignMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: marketAidSignTexture(),
+      roughness: 0.8,
+      metalness: 0.04,
+      side: THREE.DoubleSide,
+    });
+    const aidSigns = instanced(
+      scene, new THREE.PlaneGeometry(4.6, 1.7),
+      aidSignMaterial, [
+        [0, 3.9, 37.68, 0, Math.PI, 0, 1, 1, 1],
+        [0, 3.9, -37.68, 0, 0, 0, 1, 1, 1],
+        [34.68, 3.9, 0, 0, -Math.PI / 2, 0, 1, 1, 1],
+        [-34.68, 3.9, 0, 0, Math.PI / 2, 0, 1, 1, 1],
+      ], false);
+    aidSigns.name = 'market-aid-direction-signs';
+
+    // Paper, torn packaging and localized masonry collect at stall legs and walls instead of
+    // being evenly sprinkled. This introduces the aftermath of use and shelling cheaply.
+    const paper = [];
+    const hardLitter = [];
+    for (let i = 0; i < 78; i++) {
+      const row = Math.floor(i / 20);
+      const side = i % 2 ? -1 : 1;
+      const x = side * (8 + (i % 10) * 2.4) + (marketRng() - 0.5) * 1.3;
+      const z = 18 - row * 12 + (marketRng() - 0.5) * 2.2;
+      paper.push([
+        Math.max(-33, Math.min(33, x)), 0.075, z,
+        -Math.PI / 2, 0, marketRng() * Math.PI,
+        0.65 + marketRng() * 0.75, 0.6 + marketRng() * 0.65, 1,
+      ]);
+      if (i < 42) {
+        hardLitter.push([
+          -32 + marketRng() * 64, 0.09 + marketRng() * 0.06, -32 + marketRng() * 64,
+          marketRng() * Math.PI, marketRng() * Math.PI, marketRng() * Math.PI,
+          0.55 + marketRng(), 0.45 + marketRng() * 0.6, 0.5 + marketRng() * 0.8,
+        ]);
+      }
+    }
+    const paperMaterial = new THREE.MeshStandardMaterial({
+      color: 0xc9c3af, roughness: 0.98, metalness: 0, side: THREE.DoubleSide,
+    });
+    const paperBatch = instanced(scene, AID_LABEL_GEO, paperMaterial, paper, false);
+    paperBatch.name = 'market-plaza-paper-litter';
+    const litterBatch = instanced(
+      scene, FINE_RUBBLE_GEO, frontline.concreteDark, hardLitter, false);
+    litterBatch.name = 'market-plaza-hard-litter';
+
+    const perimeterRubble = [[], [], []];
+    for (let i = 0; i < 54; i++) {
+      const wallSide = i % 4;
+      const along = -31 + marketRng() * 62;
+      const x = wallSide < 2 ? (wallSide ? 33.4 : -33.4) : along;
+      const z = wallSide < 2 ? along : (wallSide === 2 ? 33.4 : -33.4);
+      perimeterRubble[i % 3].push([
+        x, 0.09 + marketRng() * 0.12, z,
+        marketRng() * Math.PI, marketRng() * Math.PI, marketRng() * Math.PI,
+        0.58 + marketRng() * 0.75, 0.52 + marketRng() * 0.65,
+        0.55 + marketRng() * 0.72,
+      ]);
+    }
+    for (let i = 0; i < perimeterRubble.length; i++) {
+      const rubble = instanced(
+        scene, RUBBLE_GEOMETRIES[i],
+        i === 1 ? frontline.brick : frontline.concrete,
+        perimeterRubble[i], false);
+      rubble.name = `market-perimeter-rubble-${i}`;
+    }
   }
 
   if (levelId === 10) {
