@@ -599,7 +599,7 @@ function streetLights(scene) {
     [-11.5, 46], [11.5, 25], [-11.5, 18],
     [11.5, -3], [-11.5, -10], [11.5, -31],
   ]) {
-    const light = new THREE.PointLight(0xffd29a, 3.2, 15, 2);
+    const light = new THREE.PointLight(0xffd29a, 4.25, 17, 2);
     light.position.set(x, 5.7, z);
     scene.add(light);
   }

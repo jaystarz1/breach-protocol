@@ -73,6 +73,7 @@ def main():
                   let triangles = 0;
                   let carriedRifle = null;
                   let combatantSurface = null;
+                  let civilianSurface = null;
                   let handRig = null;
                   row.actor.mesh.traverse(object => {
                     if (!object.isMesh || !object.visible) return;
@@ -128,6 +129,27 @@ def main():
                         visorRange: visorValues.length
                           ? [Math.min(...visorValues), Math.max(...visorValues)] : null,
                         visorVertices: visorValues.filter(value => value > 0).length,
+                      };
+                    }
+                    if (object.userData.mergedCivilian) {
+                      const values = attribute => {
+                        if (!attribute) return [];
+                        const out = [];
+                        for (let i = 0; i < attribute.count; i++) out.push(attribute.getX(i));
+                        return out;
+                      };
+                      const countMasked = attribute =>
+                        values(object.geometry.attributes[attribute])
+                          .filter(value => value > 0).length;
+                      const source = texture => texture?.image?.currentSrc
+                        || texture?.image?.src || '';
+                      civilianSurface = {
+                        material: object.material.name,
+                        normalMap: source(object.material.normalMap),
+                        skinVertices: countMasked('skinMask'),
+                        hairVertices: countMasked('hairMask'),
+                        eyeVertices: countMasked('eyeMask'),
+                        fabricVertices: countMasked('fabricMask'),
                       };
                     }
                     for (const material of mats) materials.push({
@@ -208,6 +230,7 @@ def main():
                     triangles,
                     carriedRifle,
                     combatantSurface,
+                    civilianSurface,
                     handRig,
                     materials,
                   };
@@ -329,6 +352,16 @@ def main():
         assert all(row and row["authored"] for row in captures.values()), result
         assert captures["civilian"]["draws"] == 1, result
         assert captures["concealed"]["draws"] == 1, result
+        for kind in ("civilian", "concealed"):
+            surface = captures[kind]["civilianSurface"]
+            assert surface and surface["material"] == "civilian-layered-surface", result
+            assert surface["normalMap"].endswith(
+                "assets/characters/materials/fabric074-normal.webp"
+            ), result
+            assert surface["skinVertices"] > 0, result
+            assert surface["hairVertices"] > 0, result
+            assert surface["eyeVertices"] > 0, result
+            assert surface["fabricVertices"] > 0, result
         assert captures["enemy"]["mergedCombatant"], result
         assert captures["friendly"]["mergedCombatant"], result
         assert captures["enemy"]["draws"] <= 3, result

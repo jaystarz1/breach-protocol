@@ -71,7 +71,7 @@ function gunMaterials() {
       }),
     glove: quality.pbr
       ? new THREE.MeshStandardMaterial({
-        color: 0x242a2d, roughness: 0.91, metalness: 0.01,
+        color: 0x2c3336, roughness: 0.91, metalness: 0.01,
         map: s?.fabric.map || null,
         normalMap: s?.fabric.normalMap || null,
         normalScale: new THREE.Vector2(0.22, 0.22),
@@ -84,7 +84,7 @@ function gunMaterials() {
       : new THREE.MeshLambertMaterial({ color: 0x101619 }),
     sleeve: quality.pbr
       ? new THREE.MeshStandardMaterial({
-        color: 0x171c1f, roughness: 0.96, metalness: 0,
+        color: 0x202629, roughness: 0.96, metalness: 0,
         map: s?.fabric.map || null,
         roughnessMap: s?.fabric.roughnessMap || null,
         normalMap: s?.fabric.normalMap || null,
@@ -586,10 +586,10 @@ export class Weapons {
       this.meshes[k].traverse(object => object.layers.set(1));
       this.holder.add(this.meshes[k]);
     }
-    this.viewFill = new THREE.HemisphereLight(0xb8c6cf, 0x11171b, 0.78);
+    this.viewFill = new THREE.HemisphereLight(0xb8c6cf, 0x11171b, 0.88);
     this.viewFill.layers.set(1);
     camera.add(this.viewFill);
-    this.viewKey = new THREE.DirectionalLight(0xffe8d2, 1.05);
+    this.viewKey = new THREE.DirectionalLight(0xffe8d2, 1.14);
     this.viewKey.position.set(-0.8, 1.1, 0.7);
     this.viewKey.layers.set(1);
     this.viewKey.target.position.set(0, -0.12, -1.4);

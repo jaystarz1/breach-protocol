@@ -18,6 +18,7 @@ def main():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
+        page.set_default_timeout(90000)
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on(
@@ -81,7 +82,7 @@ def main():
           });
         }""")
         page.wait_for_timeout(100)
-        page.screenshot(path=str(output / "intent-lineup.png"))
+        page.screenshot(path=str(output / "intent-lineup.png"), timeout=90000)
 
         start()
         deaths = page.evaluate("""async () => {
@@ -134,7 +135,7 @@ def main():
           });
         }""")
         page.wait_for_timeout(100)
-        page.screenshot(path=str(output / "death-lineup.png"))
+        page.screenshot(path=str(output / "death-lineup.png"), timeout=90000)
 
         result = {
             "intents": intents,

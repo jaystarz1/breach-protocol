@@ -173,16 +173,19 @@ MERGED_CIVILIAN_MATERIAL.onBeforeCompile = shader => {
 attribute float fabricMask;
 attribute float skinMask;
 attribute float hairMask;
+attribute float eyeMask;
 varying float vFabricMask;
 varying float vSkinMask;
-varying float vHairMask;`,
+varying float vHairMask;
+varying float vEyeMask;`,
     )
     .replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
 vFabricMask = fabricMask;
 vSkinMask = skinMask;
-vHairMask = hairMask;`,
+vHairMask = hairMask;
+vEyeMask = eyeMask;`,
     );
   shader.fragmentShader = shader.fragmentShader
     .replace(
@@ -190,7 +193,8 @@ vHairMask = hairMask;`,
       `#include <common>
 varying float vFabricMask;
 varying float vSkinMask;
-varying float vHairMask;`,
+varying float vHairMask;
+varying float vEyeMask;`,
     )
     .replace(
       '#include <roughnessmap_fragment>',
@@ -204,9 +208,17 @@ roughnessFactor = mix(roughnessFactor, 0.5, vHairMask);`,
       `vec3 bpBaseNormal = normal;
 #include <normal_fragment_maps>
 normal = normalize(mix(bpBaseNormal, normal, vFabricMask));`,
+    )
+    .replace(
+      '#include <opaque_fragment>',
+      `// Skin gets a restrained warm bounce while the authored eye geometry receives a
+// tiny cool catchlight. Both are material-role masks baked before the one-draw merge.
+outgoingLight += diffuseColor.rgb * vSkinMask * 0.055;
+outgoingLight += vec3(0.026, 0.031, 0.034) * vEyeMask;
+#include <opaque_fragment>`,
     );
 };
-MERGED_CIVILIAN_MATERIAL.customProgramCacheKey = () => 'bp-civilian-surface-v1';
+MERGED_CIVILIAN_MATERIAL.customProgramCacheKey = () => 'bp-civilian-surface-v2';
 const MERGED_COMBATANT_MATERIAL = new THREE.MeshStandardMaterial({
   name: 'combatant-scanned-fabric',
   vertexColors: true,
@@ -255,12 +267,20 @@ metalnessFactor = mix(metalnessFactor, 0.2, vVisorMask);`,
       `vec3 bpBaseNormal = normal;
 #include <normal_fragment_maps>
 normal = normalize(mix(bpBaseNormal, normal, vFabricMask));`,
+    )
+    .replace(
+      '#include <opaque_fragment>',
+      `float bpVisorFresnel = pow(
+  1.0 - saturate(dot(geometryNormal, geometryViewDir)), 2.0);
+outgoingLight += vVisorMask * (0.014 + bpVisorFresnel * 0.055)
+  * vec3(0.35, 0.62, 0.74);
+#include <opaque_fragment>`,
     );
 };
-MERGED_COMBATANT_MATERIAL.customProgramCacheKey = () => 'bp-combatant-surface-v1';
+MERGED_COMBATANT_MATERIAL.customProgramCacheKey = () => 'bp-combatant-surface-v2';
 const MERGED_SILHOUETTE_MATERIAL = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
-function bakeVertexColor(geometry, material, surfaceRoles = false) {
+function bakeVertexColor(geometry, material, surfaceRoles = false, objectName = '') {
   const materials = Array.isArray(material) ? material : [material];
   const count = geometry.attributes.position.count;
   const values = new Float32Array(count * 3);
@@ -268,14 +288,22 @@ function bakeVertexColor(geometry, material, surfaceRoles = false) {
   const visorValues = surfaceRoles === 'combatant' ? new Float32Array(count) : null;
   const skinValues = surfaceRoles === 'civilian' ? new Float32Array(count) : null;
   const hairValues = surfaceRoles === 'civilian' ? new Float32Array(count) : null;
+  const eyeValues = surfaceRoles === 'civilian' ? new Float32Array(count) : null;
   const fill = (start, length, source) => {
     const color = source?.color || new THREE.Color(0xffffff);
-    const label = source?.name?.toLowerCase() || '';
+    const materialLabel = source?.name?.toLowerCase() || '';
+    const label = `${objectName} ${materialLabel}`.toLowerCase();
     const skin = surfaceRoles === 'civilian' && label.includes('skin') ? 1 : 0;
     const hair = surfaceRoles === 'civilian'
       && /(hair|eyebrow|brow)/.test(label) ? 1 : 0;
+    // CivilianWoman exports its 48-vertex eye primitive as the generic material "Brown".
+    // Its mesh position in the authored head stack is stable and matches the explicitly
+    // named eye primitive in the other civilian sources.
+    const eye = surfaceRoles === 'civilian'
+      && (/([^a-z]|^)eyes?([^a-z]|$)/.test(materialLabel)
+        || /head_4([^0-9]|$)/.test(objectName.toLowerCase())) ? 1 : 0;
     const fabric = surfaceRoles === 'civilian'
-      ? (/(skin|eye|hair|eyebrow|brow)/.test(label) ? 0 : 1)
+      ? (eye || /(skin|eye|hair|eyebrow|brow)/.test(label) ? 0 : 1)
       : (label.includes('skin') || label.includes('visor')
         ? 0
         : label.includes('black') ? 0.38 : 1);
@@ -290,6 +318,7 @@ function bakeVertexColor(geometry, material, surfaceRoles = false) {
         if (visorValues) visorValues[i] = visor;
         if (skinValues) skinValues[i] = skin;
         if (hairValues) hairValues[i] = hair;
+        if (eyeValues) eyeValues[i] = eye;
       }
     }
   };
@@ -309,6 +338,7 @@ function bakeVertexColor(geometry, material, surfaceRoles = false) {
     if (skinValues) {
       geometry.setAttribute('skinMask', new THREE.BufferAttribute(skinValues, 1));
       geometry.setAttribute('hairMask', new THREE.BufferAttribute(hairValues, 1));
+      geometry.setAttribute('eyeMask', new THREE.BufferAttribute(eyeValues, 1));
     }
   }
 }
@@ -394,7 +424,12 @@ function mergeCivilianVisual(visual, cacheKey, {
             geometry.deleteAttribute(name);
           }
         }
-        bakeVertexColor(geometry, piece.material, civilian ? 'civilian' : 'combatant');
+        bakeVertexColor(
+          geometry,
+          piece.material,
+          civilian ? 'civilian' : 'combatant',
+          piece.name || '',
+        );
         geometries.push(geometry);
       }
       const geometry = mergeGeometries(geometries, false);

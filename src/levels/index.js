@@ -293,7 +293,7 @@ export const LEVELS = [
     id: 2, name: 'STREET SWEEP',
     brief: 'A shell-damaged main street is the battery and warhead corridor for Observation Post Alpha. Russian assault troops hold the storefronts, civilians remain trapped on the block, and a direction-finding team is listening for drone-control traffic. Clear the route, then reach the launch table at the southern barricade.',
     weapons: ['pistol', 'm4'], grenades: 0, squad: 2,
-    sky: 0x1b2634, fog: [0x1b2634, 40, 160], ambient: 0.85, sun: 1.1,
+    sky: 0x1b2634, fog: [0x1b2634, 40, 160], ambient: 0.72, sun: 1.25,
     start: [0, 0, 40, 0],
     geo: () => {
       const g = [];
