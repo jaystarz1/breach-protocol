@@ -1036,6 +1036,424 @@ function addObservationPost(scene, x, y, z, yaw = 0, opts = {}) {
   scene.add(panel);
 }
 
+let opBravoSignMap = null;
+function opBravoSignTexture() {
+  if (opBravoSignMap) return opBravoSignMap;
+  const canvas = document.createElement('canvas');
+  canvas.width = 768;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#192225';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#3a4b4c';
+  ctx.fillRect(18, 18, canvas.width - 36, canvas.height - 36);
+  ctx.fillStyle = '#111819';
+  ctx.fillRect(28, 28, canvas.width - 56, canvas.height - 56);
+  ctx.fillStyle = '#49d9e8';
+  ctx.fillRect(42, 44, 18, canvas.height - 88);
+  ctx.fillStyle = '#e8eeea';
+  ctx.font = '700 72px sans-serif';
+  ctx.fillText('OP BRAVO', 92, 112);
+  ctx.fillStyle = '#9faaa5';
+  ctx.font = '600 28px sans-serif';
+  ctx.fillText('EASTERN APPROACH  /  VEKTOR', 94, 166);
+  ctx.fillStyle = '#d4a650';
+  ctx.fillRect(94, 190, 382, 8);
+  opBravoSignMap = new THREE.CanvasTexture(canvas);
+  opBravoSignMap.colorSpace = THREE.SRGBColorSpace;
+  opBravoSignMap.anisotropy = quality.anisotropy || 1;
+  return opBravoSignMap;
+}
+
+function addOpBravoTower(scene) {
+  const frontline = frontlineMaterials();
+  const R = rng(77031);
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  const steel = frontline.barrierSteel.clone();
+  steel.color.setHex(0x394346);
+  steel.roughness = 0.7;
+  const darkSteel = frontline.barrierSteel.clone();
+  darkSteel.color.setHex(0x202729);
+  darkSteel.roughness = 0.76;
+  const rubber = new THREE.MeshStandardMaterial({
+    color: 0x171c1c,
+    map: surfaces().fabric.map,
+    normalMap: surfaces().fabric.normalMap,
+    normalScale: new THREE.Vector2(0.18, 0.18),
+    roughness: 0.96,
+    metalness: 0,
+  });
+  const screen = new THREE.MeshStandardMaterial({
+    color: 0x182f32,
+    emissive: 0x246f75,
+    emissiveIntensity: 0.26,
+    roughness: 0.42,
+    metalness: 0.08,
+  });
+  const warning = new THREE.MeshStandardMaterial({
+    color: 0xb68c3e,
+    roughness: 0.84,
+    metalness: 0.08,
+  });
+
+  // The retained roof slab supplies collision. This photographed membrane, its repairs and
+  // ballast make it read as a working observation roof instead of a glossy white rectangle.
+  const roofMap = frontline.asphalt.map?.clone() || null;
+  const roofBump = frontline.asphalt.bumpMap?.clone() || null;
+  for (const texture of [roofMap, roofBump]) {
+    if (!texture) continue;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(5, 4);
+    texture.needsUpdate = true;
+  }
+  const roofMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4c514f,
+    map: roofMap,
+    bumpMap: roofBump,
+    bumpScale: roofBump ? 0.024 : 0,
+    roughness: 0.99,
+    metalness: 0,
+  });
+  const membrane = new THREE.Mesh(new THREE.PlaneGeometry(15.45, 13.45), roofMaterial);
+  membrane.name = 'op-bravo-roof-membrane';
+  membrane.rotation.x = -Math.PI / 2;
+  membrane.position.set(0, 12.044, -4);
+  membrane.receiveShadow = quality.shadows;
+  scene.add(membrane);
+
+  const roofPatchMaterial = new THREE.MeshStandardMaterial({
+    color: 0x242a29, roughness: 0.99, metalness: 0,
+  });
+  const roofPatches = instanced(scene, raggedDisc(1, 22, 77033), roofPatchMaterial, [
+    [-4.9, 12.055, -7.4, -Math.PI / 2, 0, 0.15, 1.6, 0.85, 1],
+    [4.7, 12.055, -1.0, -Math.PI / 2, 0, -0.24, 1.3, 0.72, 1],
+    [5.7, 12.055, -8.2, -Math.PI / 2, 0, 0.32, 0.9, 0.55, 1],
+  ], false);
+  roofPatches.name = 'op-bravo-roof-repairs';
+  const roofGravel = [];
+  for (let i = 0; i < 72; i++) {
+    let x;
+    let z;
+    do {
+      x = -7.1 + R() * 14.2;
+      z = -10.2 + R() * 12.4;
+    } while (Math.hypot(x - 3, z + 2) < 2.2 || Math.hypot(x + 3, z + 2) < 2.5);
+    roofGravel.push([
+      x, 12.07 + R() * 0.025, z,
+      R() * 0.3, R() * Math.PI, R() * 0.3,
+      0.26 + R() * 0.44, 0.2 + R() * 0.3, 0.25 + R() * 0.42,
+    ]);
+  }
+  const gravel = instanced(
+    scene, FINE_RUBBLE_GEO, frontline.concreteDark, roofGravel, false);
+  gravel.name = 'op-bravo-roof-ballast';
+
+  // Replace the generic nine-sack line with a defended sector: an L-shaped parapet position,
+  // timber standing boards, command table, drone station and packed signal cases.
+  addObservationPost(scene, -3, 12.25, -2, Math.PI / 2, { bags: false });
+  const roofBags = [];
+  for (let i = 0; i < 10; i++) {
+    roofBags.push([-6.85 + i * 0.53, 12.23, -9.95, 0, 0, Math.PI / 2, 0.92, 0.95, 0.9]);
+    if (i > 0 && i < 9) {
+      roofBags.push([-6.58 + i * 0.53, 12.5, -9.94, 0, 0, Math.PI / 2, 0.92, 0.95, 0.9]);
+    }
+  }
+  for (let i = 0; i < 6; i++) {
+    roofBags.push([
+      -7.25, 12.23 + (i > 3 ? 0.27 : 0), -9.5 + (i % 4) * 0.53,
+      Math.PI / 2, 0, 0, 0.92, 0.95, 0.9,
+    ]);
+  }
+  sandbagInstances(scene, 'op-bravo-roof-sandbags', roofBags);
+  const duckboards = [];
+  for (let i = 0; i < 9; i++) {
+    duckboards.push([-5.6 + i * 0.48, 12.075, -8.72, 0, 0, 0, 0.42, 0.055, 1.35]);
+  }
+  const boards = instanced(scene, FIELD_BOARD_GEO, frontline.timber, duckboards);
+  boards.name = 'op-bravo-roof-duckboards';
+  const launchMat = instanced(scene, unitBox, rubber, [
+    [3, 12.076, -2, 0, 0, 0, 2.25, 0.035, 2.25],
+    [-2.8, 12.076, -0.72, 0, 0, 0, 2.65, 0.035, 1.05],
+  ], false);
+  launchMat.name = 'op-bravo-drone-and-command-mats';
+  addEquipmentCases(scene, [
+    [-5.9, 12.34, -6.8, 0, 0.12, 0, 1.05, 0.84, 0.92],
+    [-4.85, 12.27, -6.85, 0, -0.08, 0, 0.88, 0.72, 0.82],
+    [-6.15, 12.28, -5.9, 0, -0.16, 0, 0.82, 0.72, 0.82],
+  ]);
+  const windbreak = instanced(scene, unitBox, rubber, [
+    [-6.55, 13.18, -3.85, 0, 0, 0, 0.07, 1.75, 1.28],
+    [-6.55, 13.18, -2.48, 0, 0, 0, 0.07, 1.75, 1.28],
+    [-6.55, 13.18, -1.11, 0, 0, 0, 0.07, 1.75, 1.28],
+  ], false);
+  windbreak.name = 'op-bravo-command-windbreak';
+  const windbreakPoles = instanced(
+    scene, new THREE.CylinderGeometry(0.035, 0.045, 1, 8),
+    darkSteel, [-4.52, -3.17, -1.8, -0.44].map(z =>
+      [-6.52, 13.12, z, 0, 0, 0, 1, 2.05, 1]));
+  windbreakPoles.name = 'op-bravo-command-windbreak-poles';
+  const commandTerminal = instanced(scene, unitBox, darkSteel, [
+    [-2.92, 13.32, -0.73, 0, 0, -0.08, 0.14, 0.58, 0.72],
+    [-3.06, 13.05, -0.73, 0, 0, 0, 0.36, 0.08, 0.5],
+  ]);
+  commandTerminal.name = 'op-bravo-command-terminal';
+  const commandScreen = instanced(scene, unitBox, screen, [
+    [-2.84, 13.33, -0.73, 0, 0, -0.08, 0.022, 0.4, 0.52],
+  ], false);
+  commandScreen.name = 'op-bravo-command-screen';
+
+  // Rooftop services occupy the otherwise dead east edge and form hard cover silhouettes
+  // without entering the stair or drone-launch routes.
+  const serviceBodies = instanced(scene, unitBox, steel, [
+    [5.75, 12.62, -7.65, 0, 0.08, 0, 2.25, 1.12, 1.5],
+    [5.45, 12.48, 0.05, 0, -0.04, 0, 1.7, 0.84, 1.2],
+  ]);
+  serviceBodies.name = 'op-bravo-roof-service-units';
+  const serviceVents = [];
+  for (const [x, y, z, yaw, width] of [
+    [5.75, 12.62, -6.88, 0.08, 1.62],
+    [5.45, 12.48, 0.67, -0.04, 1.18],
+  ]) {
+    for (let i = -3; i <= 3; i++) {
+      serviceVents.push([x + i * width / 7, y, z, 0, yaw, 0, width / 8, 0.055, 0.035]);
+    }
+  }
+  const vents = instanced(scene, unitBox, darkSteel, serviceVents, false);
+  vents.name = 'op-bravo-roof-service-vents';
+  const duct = instanced(scene, unitBox, steel, [
+    [4.25, 12.43, -7.65, 0, 0.08, 0, 0.72, 0.68, 0.76],
+    [3.7, 12.28, -7.65, 0, 0.08, 0, 0.48, 0.38, 0.48],
+  ]);
+  duct.name = 'op-bravo-roof-service-duct';
+
+  // Each storey keeps the same collision floor but receives a tiled field-office surface,
+  // rubber circulation strip, protected lower wall and an overhead cable route. Repetition
+  // gives the tower construction logic; floor-specific equipment below gives navigation cues.
+  const floorTilesA = [];
+  const floorTilesB = [];
+  const runners = [];
+  const wallPanels = [];
+  const panelRails = [];
+  const cableRails = [];
+  const cableRungs = [];
+  const conduits = [];
+  for (let floor = 0; floor < 4; floor++) {
+    const y = floor * 3;
+    for (let zi = 0; zi < 3; zi++) {
+      for (let xi = 0; xi < 4; xi++) {
+        const entry = [
+          -3.45 + xi * 3.45, y + 0.065, -8.7 + zi * 3.35,
+          0, ((xi + zi + floor) % 2 ? 0.006 : -0.006), 0,
+          3.32, 0.035, 3.2,
+        ];
+        ((xi + zi + floor) % 2 ? floorTilesA : floorTilesB).push(entry);
+      }
+    }
+    runners.push([0.15, y + 0.09, -4, 0, 0, 0, 1.45, 0.025, 10.4]);
+    for (const z of [-9.1, -6.2, -3.3, -0.4]) {
+      wallPanels.push([7.83, y + 0.62, z, 0, 0, 0, 0.07, 1.18, 2.55]);
+      panelRails.push([7.77, y + 1.24, z, 0, 0, 0, 0.08, 0.055, 2.62]);
+    }
+    cableRails.push(
+      [4.9, y + 2.7, -4, 0, 0, 0, 0.055, 0.055, 11.2],
+      [5.55, y + 2.7, -4, 0, 0, 0, 0.055, 0.055, 11.2],
+    );
+    for (let i = 0; i < 19; i++) {
+      cableRungs.push([5.225, y + 2.7, -9.1 + i * 0.57, 0, 0, 0, 0.7, 0.035, 0.04]);
+    }
+    conduits.push(
+      [7.7, y + 2.05, -4.4, Math.PI / 2, 0, 0, 0.035, 9.3, 0.035],
+      [7.7, y + 1.62, -4.4, Math.PI / 2, 0, 0, 0.025, 9.3, 0.025],
+    );
+  }
+  const tilesA = instanced(scene, unitBox, frontline.concrete, floorTilesA, false);
+  tilesA.name = 'op-bravo-floor-tiles-a';
+  const tilesB = instanced(scene, unitBox, frontline.concreteDark, floorTilesB, false);
+  tilesB.name = 'op-bravo-floor-tiles-b';
+  const runnerBatch = instanced(scene, unitBox, rubber, runners, false);
+  runnerBatch.name = 'op-bravo-floor-runners';
+  const wallPanelBatch = instanced(scene, unitBox, steel, wallPanels);
+  wallPanelBatch.name = 'op-bravo-lower-wall-panels';
+  const railBatch = instanced(scene, unitBox, darkSteel, panelRails);
+  railBatch.name = 'op-bravo-lower-wall-rails';
+  const cableRailBatch = instanced(scene, unitBox, darkSteel, cableRails, false);
+  cableRailBatch.name = 'op-bravo-cable-tray-rails';
+  const cableRungBatch = instanced(scene, unitBox, darkSteel, cableRungs, false);
+  cableRungBatch.name = 'op-bravo-cable-tray-rungs';
+  const conduitBatch = instanced(
+    scene, new THREE.CylinderGeometry(0.5, 0.5, 1, 7),
+    frontline.rebar, conduits, false);
+  conduitBatch.name = 'op-bravo-wall-conduits';
+
+  // A continuous handrail finally explains the open west-side stairwell and makes the
+  // top-to-bottom route readable from every landing.
+  const stairRails = [];
+  const stairPosts = [];
+  const slope = Math.atan2(3.4, 3);
+  for (let floor = 0; floor < 4; floor++) {
+    const even = floor % 2 === 0;
+    const y = floor * 3;
+    const zMid = even ? -8.2 : 0.2;
+    stairRails.push([
+      -5.72, y + 1.65, zMid,
+      even ? -slope : slope, 0, 0, 1, 4.54, 1,
+    ]);
+    for (const [py, pz] of even
+      ? [[y + 0.72, -6.5], [y + 3.72, -9.9]]
+      : [[y + 0.72, -1.5], [y + 3.72, 1.9]]) {
+      stairPosts.push([-5.72, py, pz, 0, 0, 0, 1, 1.35, 1]);
+    }
+  }
+  const stairRailBatch = instanced(
+    scene, new THREE.CylinderGeometry(0.035, 0.035, 1, 8),
+    darkSteel, stairRails);
+  stairRailBatch.name = 'op-bravo-stair-handrails';
+  const stairPostBatch = instanced(
+    scene, new THREE.CylinderGeometry(0.03, 0.03, 1, 8),
+    darkSteel, stairPosts);
+  stairPostBatch.name = 'op-bravo-stair-posts';
+
+  // Top floor: signals cell and observation briefing station.
+  const signalRacks = instanced(scene, EQUIPMENT_CASE_GEO, frontline.equipment, [
+    [6.7, 9.78, -8.6, 0, 0, 0, 1.15, 1.65, 0.88],
+    [6.7, 9.78, -7.15, 0, 0, 0, 1.15, 1.65, 0.88],
+  ]);
+  signalRacks.name = 'op-bravo-signals-racks';
+  const rackFaces = instanced(scene, unitBox, darkSteel, [
+    [6.12, 9.8, -8.6, 0, 0, 0, 0.04, 1.35, 0.68],
+    [6.12, 9.8, -7.15, 0, 0, 0, 0.04, 1.35, 0.68],
+  ], false);
+  rackFaces.name = 'op-bravo-signals-rack-faces';
+  const rackLeds = [];
+  for (const z of [-8.6, -7.15]) {
+    for (let i = 0; i < 6; i++) {
+      rackLeds.push([6.085, 9.4 + i * 0.18, z - 0.22 + (i % 2) * 0.34,
+        0, 0, 0, 0.025, 0.035, 0.055]);
+    }
+  }
+  const leds = instanced(scene, unitBox, screen, rackLeds, false);
+  leds.name = 'op-bravo-signals-leds';
+  addFieldTable(scene, 2.6, 9.86, -7.2, Math.PI / 2, 2.2, 0.84);
+  addEquipmentCases(scene, [
+    [4.25, 9.3, -8.8, 0, 0.15, 0, 1.0, 0.8, 0.86],
+    [5.15, 9.25, -9.0, 0, -0.08, 0, 0.82, 0.7, 0.8],
+  ]);
+
+  // Third floor: hostage holding area, with field cots and rolled blankets against the east
+  // wall. Their cloth shapes break up the repeated office furniture without narrowing lanes.
+  const cots = instanced(scene, unitBox, rubber, [
+    [6.15, 6.34, -8.2, 0, 0, 0, 2.7, 0.18, 0.82],
+    [6.15, 6.34, -4.7, 0, 0, 0, 2.7, 0.18, 0.82],
+    [6.15, 6.34, -1.2, 0, 0, 0, 2.7, 0.18, 0.82],
+  ], false);
+  cots.name = 'op-bravo-field-cots';
+  const cotFrames = instanced(scene, unitBox, steel, [
+    [6.15, 6.18, -8.2, 0, 0, 0, 2.82, 0.07, 0.92],
+    [6.15, 6.18, -4.7, 0, 0, 0, 2.82, 0.07, 0.92],
+    [6.15, 6.18, -1.2, 0, 0, 0, 2.82, 0.07, 0.92],
+  ]);
+  cotFrames.name = 'op-bravo-field-cot-frames';
+  const blankets = instanced(
+    scene, new THREE.CylinderGeometry(0.13, 0.13, 0.68, 12),
+    frontline.sandbag, [
+      [5.2, 6.55, -8.2, Math.PI / 2, 0, 0, 1, 1, 1],
+      [5.2, 6.55, -4.7, Math.PI / 2, 0, 0, 1, 1, 1],
+      [5.2, 6.55, -1.2, Math.PI / 2, 0, 0, 1, 1, 1],
+    ], false);
+  blankets.name = 'op-bravo-rolled-blankets';
+
+  // Second floor: assault staging and ammunition redistribution.
+  addEquipmentCases(scene, [
+    [6.5, 3.34, -8.7, 0, 0.04, 0, 1.1, 0.9, 0.95],
+    [5.35, 3.28, -8.65, 0, -0.1, 0, 0.9, 0.76, 0.84],
+    [6.4, 3.3, -7.55, 0, 0.12, 0, 0.92, 0.78, 0.84],
+    [5.4, 3.26, -7.6, 0, -0.06, 0, 0.78, 0.68, 0.78],
+  ]);
+  const ammoShelf = instanced(scene, unitBox, steel, [
+    [6.85, 4.05, -2.5, 0, 0, 0, 1.45, 0.08, 2.4],
+    [6.85, 3.45, -2.5, 0, 0, 0, 1.45, 0.08, 2.4],
+    [6.85, 4.65, -2.5, 0, 0, 0, 1.45, 0.08, 2.4],
+  ]);
+  ammoShelf.name = 'op-bravo-ammunition-shelves';
+  const ammoBoxes = [];
+  for (const y of [3.62, 4.22]) {
+    for (const z of [-3.2, -2.5, -1.8]) {
+      ammoBoxes.push([6.65, y, z, 0, 0, 0, 0.92, 0.45, 0.52]);
+    }
+  }
+  const ammo = instanced(scene, EQUIPMENT_CASE_GEO, frontline.equipment, ammoBoxes);
+  ammo.name = 'op-bravo-ammunition-cases';
+
+  // Ground floor: a hardened checkpoint and a street-facing entrance canopy. The retained
+  // 1.6m doorway stays fully open; every defensive prop sits to its side.
+  const lobbyBags = [];
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 4; i++) {
+      lobbyBags.push([
+        side * (1.45 + i * 0.48), 0.23, 1.9,
+        0, 0, Math.PI / 2, 0.9, 0.94, 0.9,
+      ]);
+    }
+  }
+  sandbagInstances(scene, 'op-bravo-lobby-sandbags', lobbyBags);
+  const canopy = instanced(scene, unitBox, darkSteel, [
+    [0, 2.72, 3.48, 0, 0, -0.025, 4.8, 0.14, 1.28],
+    [-2.2, 1.37, 3.65, 0, 0, 0.02, 0.1, 2.68, 0.1],
+    [2.2, 1.37, 3.65, 0, 0, -0.02, 0.1, 2.68, 0.1],
+    [0, 3.55, 3.22, 0, 0, 0, 3.55, 1.3, 0.12],
+  ]);
+  canopy.name = 'op-bravo-entry-canopy';
+  const canopyLens = new THREE.MeshStandardMaterial({
+    color: 0xd3d6cd,
+    emissive: 0xd8e9df,
+    emissiveIntensity: 0.38,
+    roughness: 0.7,
+    metalness: 0.04,
+  });
+  const entryLight = instanced(scene, unitBox, canopyLens, [
+    [0, 2.63, 3.62, 0, 0, 0, 1.2, 0.04, 0.24],
+  ], false);
+  entryLight.name = 'op-bravo-entry-light';
+  const signMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: opBravoSignTexture(),
+    roughness: 0.74,
+    metalness: 0.1,
+  });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 1.1), signMaterial);
+  sign.name = 'op-bravo-entry-sign';
+  sign.position.set(0, 3.55, 3.29);
+  scene.add(sign);
+  const drainpipes = instanced(
+    scene, new THREE.CylinderGeometry(0.07, 0.07, 1, 8),
+    darkSteel, [
+      [-7.45, 6, 3.09, 0, 0, 0, 1, 11.8, 1],
+      [7.45, 6, 3.09, 0, 0, 0, 1, 11.8, 1],
+    ]);
+  drainpipes.name = 'op-bravo-facade-drainpipes';
+  addHescoPositions(scene, 'op-bravo-street-hesco', [
+    [-5.9, 0.55, 5.2, 0, 0.05, 0, 1.35, 1.05, 0.9],
+    [5.9, 0.55, 5.2, 0, -0.05, 0, 1.35, 1.05, 0.9],
+  ]);
+
+  const damageRubble = [[], [], []];
+  for (let i = 0; i < 42; i++) {
+    const side = i % 2 ? -1 : 1;
+    damageRubble[i % 3].push([
+      side * (6.7 + R() * 2.5), 0.08 + R() * 0.16, 3.8 + R() * 2.8,
+      R() * Math.PI, R() * Math.PI, R() * Math.PI,
+      0.5 + R() * 0.8, 0.5 + R() * 0.7, 0.5 + R() * 0.75,
+    ]);
+  }
+  for (let i = 0; i < damageRubble.length; i++) {
+    const rubble = instanced(
+      scene, RUBBLE_GEOMETRIES[i],
+      i === 1 ? frontline.brick : frontline.concrete,
+      damageRubble[i], false);
+    rubble.name = `op-bravo-entry-rubble-${i}`;
+  }
+}
+
 function addRelayRooftop(scene) {
   const frontline = frontlineMaterials();
   const R = rng(66017);
@@ -1643,7 +2061,7 @@ export function addFrontlineMissionArt(scene, levelId) {
     addObservationPost(scene, -4, 24.2, 60, 0, { bags: false });
     addRelayRooftop(scene);
   }
-  if (levelId === 7) addObservationPost(scene, -3, 12.25, -2, Math.PI / 2);
+  if (levelId === 7) addOpBravoTower(scene);
 
   if (levelId === 4) {
     // Parking structure at the end of the pursuit. The gameplay slab and pillars remain
