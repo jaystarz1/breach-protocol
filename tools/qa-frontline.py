@@ -128,7 +128,9 @@ def main():
         drone_path = output_path.with_name(f"{output_path.stem}-drone{output_path.suffix}")
         page.screenshot(path=str(drone_path))
         page.evaluate("""() => {
-          for (const target of BP.world.drone.targets) target.marked = true;
+          for (const target of BP.world.drone.targets) {
+            BP.world.drone.markReconTarget(target);
+          }
         }""")
         page.wait_for_function("() => BP.world.objectiveIdx === 3", timeout=5000)
         drone_finished = page.evaluate("""() => ({
@@ -136,6 +138,10 @@ def main():
           playerRestored: !BP.player.locked,
           overlayRemoved: !document.querySelector('.drone-frame'),
           mode: BP.mode,
+          intelRoutes: BP.world.staticMesh.parent.userData.reconIntel?.length || 0,
+          response: BP.world.reconResponse,
+          liveResponse: BP.world.enemies.filter(enemy => !enemy.dead).length,
+          objective: BP.world.level.objectives[BP.world.objectiveIdx].text,
         })""")
 
         output = {
@@ -193,6 +199,14 @@ def main():
         assert field_equipment["caseRelief"]
         assert drone_started["active"] and drone_started["locked"]
         assert drone_finished["controllerDisposed"] and drone_finished["playerRestored"]
+        assert drone_finished["intelRoutes"] == 3
+        assert drone_finished["response"] == {
+            "label": "CENTRAL/WEST LANES CUT — EAST SCOUTS THROUGH",
+            "lane": "EAST",
+            "spawned": 3,
+        }
+        assert drone_finished["liveResponse"] == 3
+        assert drone_finished["objective"] == "INTERCEPT THE SURVIVING ASSAULT ELEMENT"
         browser.close()
 
 

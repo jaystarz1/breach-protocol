@@ -119,6 +119,20 @@ def main():
                     withinZone: target.distance <= radius + nav.cell,
                   };
                 });
+              const reconResponses = BP.world.level.objectives
+                .flatMap(objective => objective.groundResponses || [])
+                .map(response => ({
+                  lane: response.lane,
+                  enemies: response.enemies.map(enemy => {
+                    const target = nearest(...enemy.pos);
+                    return {
+                      pos: enemy.pos,
+                      node: target.node,
+                      distance: +target.distance.toFixed(2),
+                      reachable: target.node >= 0 && !!visited[target.node],
+                    };
+                  }),
+                }));
               return {
                 variant: BP.world.missionVariant,
                 enemySignature: BP.world.enemies.map(enemy => [
@@ -141,6 +155,7 @@ def main():
                   actors,
                   reinforcements,
                   reachObjectives,
+                  reconResponses,
                 },
               };
             }""")
@@ -195,6 +210,18 @@ def main():
                     objective["reachable"] and objective["withinZone"]
                     for objective in row["nav"]["reachObjectives"]
                 ), (level, row)
+                if level == "2":
+                    responses = row["nav"]["reconResponses"]
+                    assert [response["lane"] for response in responses] == [
+                        "EAST", "CENTRAL", "WEST"
+                    ], row
+                    assert all(
+                        enemy["node"] >= 0
+                        and enemy["distance"] < 2.8
+                        and enemy["reachable"]
+                        for response in responses
+                        for enemy in response["enemies"]
+                    ), row
 
         if "2" in results:
             street = results["2"]

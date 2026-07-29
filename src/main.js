@@ -801,6 +801,49 @@ function reinforcements(dt) {
   world.combatHeat = Math.max(world.combatHeat, 4);
 }
 
+// Recon is not a map-click minigame: the uploaded lanes drive an authored ground response.
+// Two approaches are suppressed off-screen by the fire mission; one bounded variant survives
+// and enters through the lane the player just identified. That produces a visible, playable
+// consequence without procedural surprise spawns or an expensive simulation behind the map.
+function spawnReconGroundResponse(obj) {
+  const responses = obj.groundResponses;
+  if (!responses?.length || world.reconResponse) return 0;
+  const response = responses[
+    world.missionVariant % responses.length
+  ];
+  const authored = response.enemies || [];
+  const desired = Math.max(1, Math.min(
+    authored.length,
+    Math.round((response.baseCount ?? authored.length) * world.diff.enemyCountMul),
+  ));
+  let made = 0;
+  for (let index = 0; index < desired; index++) {
+    const def = authored[index];
+    const enemy = new Enemy(scene, {
+      ...def,
+      aggro: true,
+      range: Math.min(def.range ?? 68, world.darkRange ?? 1e9),
+      _seed: world.level.id * 810001
+        + world.missionVariant * 7919 + index * 83,
+    }, world.diff);
+    enemy.state = 'alert';
+    enemy.lastKnown = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
+    world.enemies.push(enemy);
+    made++;
+  }
+  world.reconResponse = {
+    label: response.label,
+    lane: response.lane,
+    spawned: made,
+  };
+  if (world.reinf) world.reinf.sent = world.reinf.max;
+  hud.feed(response.label, '#ffbf86');
+  hud.reinf(`${response.lane} LANE — ${made} SURVIVORS`);
+  sfx.contact(player.pos);
+  world.combatHeat = Math.max(world.combatHeat, 5);
+  return made;
+}
+
 function spawnDefenseWave(obj, wave, waveIndex) {
   const authored = wave.enemies || [];
   if (!authored.length) return 0;
@@ -1171,6 +1214,7 @@ function checkObjectives(dt = 0) {
   }
   if (done) {
     if (obj.type === 'drone' && world.drone) {
+      spawnReconGroundResponse(obj);
       world.drone.dispose();
       world.drone = null;
       player.locked = !!world.level.lockPlayer;
