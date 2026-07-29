@@ -4,22 +4,12 @@ import {
 } from './levelgen.js';
 import { groundHeight, hasLOS, resolveXZ } from './physics.js';
 import { findPath, nearestNode } from './navgrid.js';
+import { seededRandom } from './mission-variants.js';
 import { sfx } from './audio.js';
 
 // Matches DUCK_DROP in enemies.js and the apron height in windowBay(): the distance a window
 // occupant sinks to be genuinely hidden by geometry rather than switched off.
 const WIN_DROP = 1.72;
-
-function seededRandom(seed) {
-  let state = (seed || 1) >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let value = state;
-    value = Math.imul(value ^ value >>> 15, value | 1);
-    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
-    return ((value ^ value >>> 14) >>> 0) / 4294967296;
-  };
-}
 
 // No-shoot actors. Their reactions are varied but mission-seeded: repeating a mission variant
 // produces the same rushers, lane-crossers, delays and hostage behavior rather than dice-roll

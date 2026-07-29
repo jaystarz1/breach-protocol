@@ -5,6 +5,7 @@ import {
 } from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { findPath, nearestNode } from './navgrid.js';
+import { seededRandom } from './mission-variants.js';
 import { sfx } from './audio.js';
 
 const EYE = 1.5;
@@ -29,6 +30,10 @@ const DUCK_DROP = 1.72;
 
 export class Enemy {
   constructor(scene, def, diff) {
+    // Everything this actor decides—from initial stance through burst cadence—comes from his
+    // mission-authored seed. Replaying the same validated layout therefore reproduces the same
+    // pressure, while the next layout still receives a distinct tactical sequence.
+    this.random = seededRandom(def._seed);
     this.concealed = !!def.concealed;
     this.bastion = !!def.bastion;
     this.mesh = makeCharacter({
@@ -55,14 +60,14 @@ export class Enemy {
     this.reactTimer = 0;
     this.burstTimer = 0;
     this.burstShots = 0;
-    this.repositionTimer = 2 + Math.random() * 3;
-    this.strafeDir = Math.random() < 0.5 ? 1 : -1;
-    this.speed = 2.0 + Math.random() * 0.6;
-    this.yaw = def.yaw ? def.yaw * Math.PI / 180 : Math.random() * Math.PI * 2;
+    this.repositionTimer = 2 + this.random() * 3;
+    this.strafeDir = this.random() < 0.5 ? 1 : -1;
+    this.speed = 2.0 + this.random() * 0.6;
+    this.yaw = def.yaw ? def.yaw * Math.PI / 180 : this.random() * Math.PI * 2;
     this.lastKnown = null;
     this.aggro = def.aggro || false;
     this.range = def.range || 55;
-    this.walkPhase = Math.random() * 6;
+    this.walkPhase = this.random() * 6;
     this.moving = false;
     this.inactiveTime = 0;
     this.flinch = 0;
@@ -75,10 +80,10 @@ export class Enemy {
     this.coverTimer = 0;
     this.calledOut = false;
     this.tgtAlly = null;      // which friendly this man has picked, null = the player
-    this.tgtTimer = Math.random() * 1.5;
+    this.tgtTimer = this.random() * 1.5;
     this.blocked = 0;         // seconds spent pushing into geometry and getting nowhere
     this.progress = 0;        // metres actually covered this frame, post-collision
-    this.standoff = 7 + Math.random() * 5;   // how close this man is willing to close
+    this.standoff = 7 + this.random() * 5;   // how close this man is willing to close
     // Tactical variation is mission-seeded, not rolled every engagement. One man in four is
     // allowed to work laterally while the rest hold pressure or break contact. This creates
     // readable manoeuvre without turning every contact into random pathfinding churn.
@@ -113,7 +118,7 @@ export class Enemy {
     this.targetPlayer = !!def.targetPlayer;
     this.teamOnly = !!def.teamOnly;
     this.single = !!def.single;     // aimed single rounds instead of bursts
-    this.peekTimer = def.firstPeek ?? (2 + Math.random() * 3);
+    this.peekTimer = def.firstPeek ?? (2 + this.random() * 3);
     this.dmgMul = def.dmgMul ?? 1;
     this.accMul = def.accMul ?? 1;
     if (this.perches) {
@@ -405,7 +410,7 @@ export class Enemy {
     if (this.teamOnly && allies && allies.length) {
       if (this.tgtAlly && this.tgtAlly.dead) this.tgtAlly = null;
       if (this.tgtAlly && this.tgtTimer > 0) return this.tgtAlly.pos;
-      this.tgtTimer = 1.5 + Math.random();
+      this.tgtTimer = 1.5 + this.random();
       let near = null, nd = Infinity;
       for (const a of allies) {
         if (a.dead) continue;
@@ -418,7 +423,7 @@ export class Enemy {
     if (!allies || !allies.length) { this.tgtAlly = null; return world.playerPos; }
     if (this.tgtAlly && this.tgtAlly.dead) { this.tgtAlly = null; this.tgtTimer = 0; }
     if (this.tgtTimer > 0) return this.tgtAlly ? this.tgtAlly.pos : world.playerPos;
-    this.tgtTimer = 1.5 + Math.random();
+    this.tgtTimer = 1.5 + this.random();
     const p = this.pos;
     let best = null;
     let bestD = Math.hypot(world.playerPos.x - p.x, world.playerPos.z - p.z) * 0.72;
@@ -438,7 +443,9 @@ export class Enemy {
   // hole is a shooter you can pre-aim, and pre-aiming is the entire thing this defeats.
   takePerch() {
     let i = this.perchIdx;
-    for (let n = 0; n < 10 && i === this.perchIdx; n++) i = Math.floor(Math.random() * this.perches.length);
+    for (let n = 0; n < 10 && i === this.perchIdx; n++) {
+      i = Math.floor(this.random() * this.perches.length);
+    }
     this.perchIdx = i;
     const p = this.perches[i];
     this.perchY = p[1];
@@ -449,7 +456,7 @@ export class Enemy {
     // Time in the opening. A man who leaves on a shot count needs long enough to actually
     // FIRE that many rounds, or the timer wins every time and "moves after two shots" quietly
     // becomes "moves after one" — the timer is only his backstop for a target he never gets.
-    this.peekTimer = (this.moveEvery ? 10 : 4.0) + Math.random() * 3;
+    this.peekTimer = (this.moveEvery ? 10 : 4.0) + this.random() * 3;
     this.reactTimer = 1.1;    // the beat the player has to spot him and react in
     this.burstShots = 0;
     this.burstTimer = 0.5;
@@ -506,7 +513,7 @@ export class Enemy {
     const worked = this.moveEvery > 0 && this.shotsHere >= this.moveEvery;
     if (this.peekTimer <= 0 || worked) {
       this.up = false;
-      this.peekTimer = (worked ? 2.2 : 3.2) + Math.random() * 3;
+      this.peekTimer = (worked ? 2.2 : 3.2) + this.random() * 3;
     }
   }
 
@@ -574,7 +581,7 @@ export class Enemy {
       if (seesTarget && inCone) {
         this.revealWeapon();
         this.state = 'alert';
-        this.reactTimer = this.diff.enemyReaction * (0.7 + Math.random() * 0.6);
+        this.reactTimer = this.diff.enemyReaction * (0.7 + this.random() * 0.6);
         this.lastKnown = { x: target.x, y: target.y, z: target.z };
         this.alertNearby(world);
       } else {
@@ -635,7 +642,7 @@ export class Enemy {
           if (this.state === 'alert') {
             // A short local sidestep remains the fallback when no validated flank socket can
             // be reached inside the shared path budget.
-            this.repositionTimer = 1.6 + Math.random() * 2.2;
+            this.repositionTimer = 1.6 + this.random() * 2.2;
             this.strafeDir *= -1;
           }
         } else if (dist > 7) {
@@ -661,7 +668,7 @@ export class Enemy {
           this.blocked = 0;
         } else {
           if (this.repathTimer <= 0) {
-            this.repathTimer = 1.5 + Math.random();
+            this.repathTimer = 1.5 + this.random();
             this.setPath(world, lk.x, lk.y ?? p.y, lk.z);
           }
           if (!this.followPath(dt, world, this.speed)) this.moveToward(lk.x, lk.z, dt, world, this.speed * 0.8);
@@ -736,7 +743,7 @@ export class Enemy {
       return;
     }
     if ((!this.path || !this.pathGoal || Math.hypot(this.pathGoal.x - wp.x, this.pathGoal.z - wp.z) > 1) && this.repathTimer <= 0) {
-      this.repathTimer = 2 + Math.random();
+      this.repathTimer = 2 + this.random();
       this.setPath(world, wp.x, p.y, wp.z);
     }
     if (!this.followPath(dt, world, this.speed * 0.55)) this.moveToward(wp.x, wp.z, dt, world, this.speed * 0.55);
@@ -765,16 +772,16 @@ export class Enemy {
     this.burstTimer -= dt;
     if (this.burstTimer > 0) return;
     if (this.burstShots <= 0) {
-      const normalBurst = 3 + Math.floor(Math.random() * 3);
+      const normalBurst = 3 + Math.floor(this.random() * 3);
       this.burstShots = this.single
         ? 1 : Math.max(1, Math.round(normalBurst * (1 - this.suppression * 0.62)));
       this.burstTimer = this.single
-        ? 0.9 + Math.random() * 0.5
-        : 0.7 + Math.random() * 0.8 + this.suppression * 0.7;
+        ? 0.9 + this.random() * 0.5
+        : 0.7 + this.random() * 0.8 + this.suppression * 0.7;
       return;
     }
     this.burstShots--;
-    this.burstTimer = this.single ? 1.7 + Math.random() : 0.11;
+    this.burstTimer = this.single ? 1.7 + this.random() : 0.11;
     this.shotsHere++;
     this.shotPoseTimer = 0.2;
     sfx.enemyShot(this.pos);
@@ -795,7 +802,7 @@ export class Enemy {
       if (world.playerCrouched) acc *= 0.65;   // crouching is real cover now
       if (world.playerAds) acc *= 1.1;
     }
-    if (Math.random() < acc) {
+    if (this.random() < acc) {
       if (this.targetPlayer) world.damagePlayer(this.diff.enemyDamage * this.dmgMul, this.pos);
       else if (world.sniperTeam && !world.sniperTeam.dead) world.damageTeam(this.diff.enemyDamage);
       else if (this.tgtAlly && !this.tgtAlly.dead) this.tgtAlly.damage(this.diff.enemyDamage * this.dmgMul, world);

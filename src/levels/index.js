@@ -794,6 +794,19 @@ export const LEVELS = [
       { pos: [-9, 0, 28], rush: true }, { pos: [9, 0, 28] },
       { pos: [-30, 0, 18] }, { pos: [30, 0, 18] },
     ],
+    // Difficulty-scaled crowd additions use these authored aisle sockets instead of jittering
+    // an existing civilian into a stall, facade, or another person. All stay between the four
+    // market rows and inside the perimeter gates.
+    crowdSpawns: [
+      [-25, 0, 30], [-17, 0, 30], [-1, 0, 30], [4, 0, 29],
+      [16, 0, 30], [24, 0, 29],
+      [-31, 0, 12], [-16, 0, 12], [-1, 0, 12], [5, 0, 10],
+      [16, 0, 8], [31, 0, 9],
+      [-30, 0, -2], [-18, 0, -1], [-4, 0, 2], [9, 0, -1],
+      [24, 0, -2], [31, 0, -7],
+      [-30, 0, -20], [-17, 0, -22], [-1, 0, -18], [10, 0, -27],
+      [18, 0, -29], [30, 0, -28],
+    ],
     reinforce: { every: 26, first: 30, max: 6, group: 2, range: 60,
       at: [[0, 0, 34], [-30, 0, -34], [30, 0, -34]],
       atVariants: [

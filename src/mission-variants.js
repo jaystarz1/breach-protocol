@@ -1,6 +1,17 @@
 // Bounded replay variation selected once at mission load. Every option is an authored socket:
 // no runtime procedural generation, no unconstrained offsets, and no objective geometry moves.
 
+export function seededRandom(seed) {
+  let state = (seed || 1) >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ value >>> 15, value | 1);
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+    return ((value ^ value >>> 14) >>> 0) / 4294967296;
+  };
+}
+
 export const STREET_SHOP_LAYOUTS = Object.freeze([
   Object.freeze([
     Object.freeze({ x: 11, z: 20, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 0 }),

@@ -38,6 +38,7 @@ import { DroneController, dronePrewarmGroup } from './drone.js';
 import {
   resolveActorVariant,
   resolveReinforcementVariant,
+  seededRandom,
 } from './mission-variants.js';
 
 const $ = id => document.getElementById(id);
@@ -446,6 +447,7 @@ function startLevel(id) {
 
   world = {
     level: L, diff, solids, doors, nav, staticMesh, litMesh, missionVariant,
+    random: seededRandom(L.id * 910003 + missionVariant * 9151 + diff.id * 271),
     enemies: [], civilians: [], allies: [], grenades: [], effects: [],
     playerPos: player.pos, playerYaw: player.yaw, playerSpeed: 0, playerAds: false, playerCrouched: false,
     combatHeat: 0, slowmo: 0, blind: 0,
@@ -498,9 +500,9 @@ function startLevel(id) {
     allyTracer(a, t) {
       const from = new THREE.Vector3(a.pos.x, a.pos.y + 1.35, a.pos.z);
       const to = new THREE.Vector3(
-        t.pos.x + (Math.random() - 0.5) * 1.2,
-        t.pos.y + 1.1 + (Math.random() - 0.5) * 0.9,
-        t.pos.z + (Math.random() - 0.5) * 1.2);
+        t.pos.x + (a.random() - 0.5) * 1.2,
+        t.pos.y + 1.1 + (a.random() - 0.5) * 0.9,
+        t.pos.z + (a.random() - 0.5) * 1.2);
       tracer(from, to, 0x9fd0ff, 8);
       this.registerFriendlyFire(from, to, t, 62);
     },
@@ -543,9 +545,9 @@ function startLevel(id) {
     enemyTracer(e, target) {
       const a = new THREE.Vector3(e.pos.x, e.pos.y + 1.35, e.pos.z);
       const b = new THREE.Vector3(
-        target.x + (Math.random() - 0.5) * 1.6,
-        target.y + 1.0 + (Math.random() - 0.5) * 1.2,
-        target.z + (Math.random() - 0.5) * 1.6);
+        target.x + (e.random() - 0.5) * 1.6,
+        target.y + 1.0 + (e.random() - 0.5) * 1.2,
+        target.z + (e.random() - 0.5) * 1.6);
       tracer(a, b, 0xffb060, 7);
     },
   };
@@ -554,14 +556,18 @@ function startLevel(id) {
   // Retries rotate only between authored-safe positions. No unconstrained random offset may
   // put an actor inside a wall, outside the nav graph, or on the wrong side of a breach.
   let defs = L.enemies.map(d => resolveActorVariant(d, missionVariant));
+  const encounterRandom = seededRandom(
+    L.id * 920009 + missionVariant * 9209 + diff.id * 277);
   const mul = diff.enemyCountMul;
   if (mul < 1) {
     const keep = Math.max(1, Math.round(defs.length * mul));
-    while (defs.length > keep) defs.splice(Math.floor(Math.random() * defs.length), 1);
+    while (defs.length > keep) {
+      defs.splice(Math.floor(encounterRandom() * defs.length), 1);
+    }
   } else if (mul > 1) {
     const extra = Math.round(defs.length * (mul - 1));
     for (let i = 0; i < extra; i++) {
-      const src = defs[Math.floor(Math.random() * defs.length)];
+      const src = defs[Math.floor(encounterRandom() * defs.length)];
       // spawn at the source's exact position — collision separates them; an offset can clip into walls
       defs.push({ ...src, pos: [...src.pos] });
     }
@@ -590,9 +596,25 @@ function startLevel(id) {
   const free = cdefs.filter(c => !c.hostage);
   if (cmul > 1 && free.length) {
     const extra = Math.round(free.length * (cmul - 1));
+    const crowdSockets = L.crowdSpawns || [];
+    const crowdOffset = crowdSockets.length
+      ? Math.floor(encounterRandom() * crowdSockets.length) : 0;
     for (let i = 0; i < extra; i++) {
-      const src = free[Math.floor(Math.random() * free.length)];
-      cdefs.push({ ...src, pos: [src.pos[0] + (Math.random() * 4 - 2), src.pos[1], src.pos[2] + (Math.random() * 4 - 2)] });
+      const src = free[Math.floor(encounterRandom() * free.length)];
+      // Difficulty may increase crowd density, but it may not invent a coordinate. Prefer a
+      // different validated socket authored on this civilian; if none exists, duplicate the
+      // known-safe socket and let the actors' distinct seeded reactions separate them once
+      // contact begins. A free ±2m offset can put a no-shoot inside a facade or collider.
+      const safeSockets = src.positions || [];
+      const safe = crowdSockets.length
+        ? crowdSockets[(crowdOffset + missionVariant * 7 + i) % crowdSockets.length]
+        : safeSockets.length
+          ? safeSockets[(missionVariant + i + 1) % safeSockets.length]
+          : src.pos;
+      cdefs.push({
+        ...src,
+        pos: [...safe],
+      });
     }
   } else if (cmul < 1) {
     let drop = Math.round(free.length * (1 - cmul));
@@ -607,7 +629,10 @@ function startLevel(id) {
   // team he is covering is already down at the fountain — a stick standing on the roof with
   // him would contradict the entire premise of the level.
   if (L.squad && !L.lockPlayer) {
-    world.allies = spawnSquad(scene, L.squad, L.start, solids);
+    world.allies = spawnSquad(
+      scene, L.squad, L.start, solids,
+      L.id * 400009 + missionVariant * 4001,
+    );
     hud.feed(`${world.allies.length} FRIENDLIES ON YOU`, '#8fd0ff');
   }
 
@@ -616,7 +641,10 @@ function startLevel(id) {
   // them, which is what makes the mission a shoot / no-shoot problem rather than target
   // practice — every silhouette crossing the scope has to be identified before it is engaged.
   if (L.ctTeam) {
-    world.allies = spawnRouteTeam(scene, L.ctTeam.count, L.ctTeam.at, L.ctTeam.route, solids, L.ctTeam.health);
+    world.allies = spawnRouteTeam(
+      scene, L.ctTeam.count, L.ctTeam.at, L.ctTeam.route, solids, L.ctTeam.health,
+      L.id * 600011 + missionVariant * 6007,
+    );
     world.ctMission = true;
     input.ads = true;
   } else {
@@ -663,6 +691,12 @@ function startLevel(id) {
   const droneWarmup = dronePrewarmGroup(
     L.objectives.find(objective => objective.type === 'drone' && objective.mode === 'strike'),
   );
+  const combatWarmup = combatPrewarmGroup();
+  warmScene.add(combatWarmup);
+  // Retaining these material owners is as important as compiling them. Three releases a
+  // program when its last material disappears; keeping one hidden line/flash/explosion
+  // instance alive prevents the first live tracer or impact from rebuilding that shader.
+  warmScene.userData.combatWarmup = combatWarmup;
   if (droneWarmup) {
     warmScene.add(droneWarmup);
     // Keep these invisible material owners alive until the next mission. Disposing them here
@@ -671,6 +705,7 @@ function startLevel(id) {
     warmScene.userData.droneWarmup = droneWarmup;
   }
   renderPipeline.prewarm(scene, camera).then(async firstResult => {
+    combatWarmup.visible = false;
     if (droneWarmup) droneWarmup.visible = false;
     if (loadId !== levelLoadId || world !== warmWorld) return;
     setObjective();
@@ -853,10 +888,17 @@ function reinforcements(dt) {
   let made = 0;
   for (let i = 0; i < group; i++) {
     const s = pool[(r.sent + i) % pool.length];
+    const spawnIndex = r.sent + i;
     const e = new Enemy(scene, {
-      pos: [s[0] + (Math.random() - 0.5) * 2, s[1], s[2] + (Math.random() - 0.5) * 2],
+      pos: [
+        s[0] + (world.random() - 0.5) * 2,
+        s[1],
+        s[2] + (world.random() - 0.5) * 2,
+      ],
       aggro: true, range: Math.min(r.range ?? 70, world.darkRange ?? 1e9),
       patrol: r.patrol || null, hold: !r.patrol,
+      _seed: world.level.id * 930011
+        + world.missionVariant * 9311 + spawnIndex * 197,
     }, world.diff);
     // They arrive already looking for you — a reinforcement that stands around defeats
     // the entire point of putting a clock on the mission.
@@ -1170,6 +1212,39 @@ function tracer(a, b, color = 0xffe0a0, fade = 4, opacity = 0.85) {
 }
 
 const COMBAT_FLASH_GEO = new THREE.SphereGeometry(0.13, 8, 6);
+function combatPrewarmGroup() {
+  const group = new THREE.Group();
+  group.name = 'combat-transient-material-prewarm';
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1),
+    ]),
+    new THREE.LineBasicMaterial({
+      color: 0xffe0a0, transparent: true, opacity: 0.85,
+    }),
+  );
+  const flash = new THREE.Mesh(
+    COMBAT_FLASH_GEO,
+    new THREE.MeshBasicMaterial({
+      color: 0xffd090, transparent: true, opacity: 0.88,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+  );
+  const blast = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 10, 8),
+    new THREE.MeshBasicMaterial({
+      color: 0xffbb55, transparent: true, opacity: 0.9,
+    }),
+  );
+  // The loading pass disables frustum culling, so these can sit outside ordinary view while
+  // still forcing the exact live-combat shader variants through the compiler.
+  line.position.set(0, -1000, 0);
+  flash.position.set(0, -1000, 0);
+  blast.position.set(0, -1000, 0);
+  group.add(line, flash, blast);
+  return group;
+}
+
 function flashAt(p, color) {
   const mat = new THREE.MeshBasicMaterial({
     color, transparent: true, opacity: 0.88,

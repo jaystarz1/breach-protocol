@@ -224,7 +224,10 @@ const WINDOW_INTERIOR_GEOS = Array.from({ length: 4 }, (_, tile) => {
 });
 const STALL_POST = new THREE.CylinderGeometry(0.045, 0.045, 3.05, 10);
 const STALL_CABBAGE = (() => {
-  const geometry = new THREE.DodecahedronGeometry(0.13, 1);
+  // Produce is repeated hundreds of times and never fills enough pixels to justify a
+  // subdivided polyhedron. This low-segment sphere keeps a rounded silhouette while
+  // spending less geometry than the former 144-triangle dodecahedron.
+  const geometry = new THREE.SphereGeometry(0.13, 8, 5);
   geometry.scale(1.05, 0.82, 1);
   return geometry;
 })();
@@ -234,7 +237,7 @@ const STALL_SQUASH = (() => {
   return geometry;
 })();
 const STALL_LOAF = (() => {
-  const geometry = new THREE.CapsuleGeometry(0.085, 0.2, 4, 9);
+  const geometry = new THREE.CapsuleGeometry(0.085, 0.2, 2, 6);
   geometry.rotateZ(Math.PI / 2);
   return geometry;
 })();

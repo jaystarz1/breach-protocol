@@ -16,6 +16,7 @@ import {
 } from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { claimPath, findPathFor } from './enemies.js';
+import { seededRandom } from './mission-variants.js';
 import { sfx } from './audio.js';
 
 const EYE = 1.5;
@@ -54,6 +55,7 @@ export function slotWorld(px, pz, yaw, off) {
 
 export class Ally {
   constructor(scene, pos, idx, opts = {}) {
+    this.random = seededRandom(opts.seed ?? (400009 + idx * 193));
     this.mesh = makeCharacter({ friendly: true, black: !!opts.black, variant: idx });
     this.mesh.position.set(pos[0], pos[1], pos[2]);
     scene.add(this.mesh);
@@ -73,7 +75,7 @@ export class Ally {
     this.deathAnim = 0;
     this.yaw = 0;
     this.speed = 4.2;              // slightly faster than the player so they can catch up
-    this.walkPhase = Math.random() * 6;
+    this.walkPhase = this.random() * 6;
     this.moving = false;
     this.flinch = 0;
     this.shotPoseTimer = 0;
@@ -82,11 +84,11 @@ export class Ally {
     this.pathIdx = 0;
     this.repathTimer = 0;
     this.target = null;
-    this.acquireTimer = Math.random() * 0.3;
+    this.acquireTimer = this.random() * 0.3;
     this.burstShots = 0;
     this.burstTimer = 0;
-    this.strafeDir = Math.random() < 0.5 ? 1 : -1;
-    this.strafeTimer = 1 + Math.random() * 2;
+    this.strafeDir = this.random() < 0.5 ? 1 : -1;
+    this.strafeTimer = 1 + this.random() * 2;
     this.calloutTimer = 0;
     this.blocked = 0;        // seconds spent trying to move and getting nowhere
     this.forcePath = 0;      // seconds during which A* is mandatory, not optional
@@ -254,7 +256,7 @@ export class Ally {
       this.acquireTimer = 0.35;
       this.target = this.acquire(world);
       if (this.target && this.calloutTimer <= 0) {
-        this.calloutTimer = 6 + Math.random() * 6;
+        this.calloutTimer = 6 + this.random() * 6;
         sfx.contact(this.pos);
       }
     }
@@ -319,7 +321,10 @@ export class Ally {
         const tx = wp[0] + this.routeOff[0], tz = wp[1] + this.routeOff[1];
         // keep pushing unless the contact is close enough to be worth stopping for
         if (dist > 26 && Math.hypot(tx - p.x, tz - p.z) > 2.4) this.goTo(dt, world, tx, p.y, tz, this.speed * 0.55);
-        else if (this.strafeTimer <= 0) { this.strafeTimer = 1.4 + Math.random() * 1.8; this.strafeDir *= -1; }
+        else if (this.strafeTimer <= 0) {
+          this.strafeTimer = 1.4 + this.random() * 1.8;
+          this.strafeDir *= -1;
+        }
       }
       // The player's squad does NOT manoeuvre on contact. It used to advance on targets and
       // strafe, which is why they ended up wandering the map and getting in front of him.
@@ -422,8 +427,8 @@ export class Ally {
     if (this.burstShots <= 0) {
       // The pause between bursts is the balance dial: longer than a hostile's, so a firefight
       // stays yours to win. Doubling it is how you make the squad feel supportive not decisive.
-      this.burstShots = 2 + Math.floor(Math.random() * 3);
-      this.burstTimer = 1.1 + Math.random() * 1.1;
+      this.burstShots = 2 + Math.floor(this.random() * 3);
+      this.burstTimer = 1.1 + this.random() * 1.1;
       return;
     }
     if (!this.lineIsClear(world, t)) { this.burstShots = 0; this.burstTimer = 0.5; return; }
@@ -436,7 +441,7 @@ export class Ally {
     // Falls off hard with range and is capped well under the player's, so allies chip at
     // hostiles and finish stragglers rather than clearing rooms before you enter them.
     const acc = 0.3 * Math.min(1, 16 / Math.max(6, dist));
-    if (Math.random() < acc) t.damage(22, world, false, true);
+    if (this.random() < acc) t.damage(22, world, false, true);
   }
 
   settle(dt, world) {
@@ -482,14 +487,17 @@ function normAng(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
 function lerpAng(a, b, t) { return a + normAng(b - a) * t; }
 
 // Spawn a stick behind the player's start position, on the ground, spread across the slots.
-export function spawnSquad(scene, count, start, solids) {
+export function spawnSquad(scene, count, start, solids, seedBase = 400009) {
   const out = [];
   const yaw = (start[3] || 0) * Math.PI / 180;
   for (let i = 0; i < count; i++) {
     const sl = slotWorld(start[0], start[2], yaw, SLOTS[i % SLOTS.length]);
     const x = sl.x, z = sl.z;
     const g = groundHeight(solids, x, z, 0.35, start[1] + 1.2);
-    out.push(new Ally(scene, [x, g === -Infinity ? start[1] : g, z], i, { black: true }));
+    out.push(new Ally(scene, [x, g === -Infinity ? start[1] : g, z], i, {
+      black: true,
+      seed: seedBase + i * 193,
+    }));
   }
   return out;
 }
@@ -497,14 +505,16 @@ export function spawnSquad(scene, count, start, solids) {
 // A CT element in black that works a route instead of following the player. Spread in a
 // shallow wedge so the player can tell four men apart through a scope at a hundred metres.
 const WEDGE = [[-1.6, 1.2], [1.6, 1.2], [-3.2, 3.0], [3.2, 3.0]];
-export function spawnRouteTeam(scene, count, at, route, solids, health = 180) {
+export function spawnRouteTeam(
+  scene, count, at, route, solids, health = 180, seedBase = 600011,
+) {
   const out = [];
   for (let i = 0; i < count; i++) {
     const off = WEDGE[i % WEDGE.length];
     const x = at[0] + off[0], z = at[2] + off[1];
     const g = groundHeight(solids, x, z, 0.35, at[1] + 1.2);
     out.push(new Ally(scene, [x, g === -Infinity ? at[1] : g, z], i,
-      { black: true, route, routeOff: off, health }));
+      { black: true, route, routeOff: off, health, seed: seedBase + i * 193 }));
   }
   return out;
 }
