@@ -115,6 +115,48 @@ def main():
           };
         }""")
 
+        formation = page.evaluate("""() => {
+          const hostages = BP.world.civilians.filter(actor => actor.wasHostage);
+          hostages.forEach((civilian, index) => {
+            if (!civilian.rescued) civilian.rescue('you', index);
+            civilian.escortSlot = index;
+            civilian.escortSide = index % 2 === 0 ? -1 : 1;
+            civilian.setEscortCommand('follow');
+            civilian.pos.set((index - 1) * 0.2, 0, 30 + index * 0.15);
+            civilian.baseY = 0;
+          });
+          BP.player.pos.set(0, 0, 32);
+          BP.world.playerYaw = 0;
+          BP.world.combatHeat = 0;
+          for (let frame = 0; frame < 240; frame++) {
+            for (const civilian of hostages) {
+              civilian.updateEscort(1 / 60, BP.world);
+            }
+          }
+          const positions = hostages.map(civilian => ({
+            slot: civilian.escortSlot,
+            side: civilian.escortSide,
+            x: +civilian.pos.x.toFixed(2),
+            z: +civilian.pos.z.toFixed(2),
+            distance: +Math.hypot(
+              civilian.pos.x - BP.player.pos.x,
+              civilian.pos.z - BP.player.pos.z).toFixed(2),
+          }));
+          let minimumSeparation = Infinity;
+          for (let a = 0; a < hostages.length; a++) {
+            for (let b = a + 1; b < hostages.length; b++) {
+              minimumSeparation = Math.min(minimumSeparation,
+                Math.hypot(
+                  hostages[a].pos.x - hostages[b].pos.x,
+                  hostages[a].pos.z - hostages[b].pos.z));
+            }
+          }
+          return {
+            positions,
+            minimumSeparation: +minimumSeparation.toFixed(2),
+          };
+        }""")
+
         stay_delta = (
             (stayed["position"][0] - stay["position"][0]) ** 2
             + (stayed["position"][1] - stay["position"][1]) ** 2
@@ -126,6 +168,7 @@ def main():
             "down": down,
             "follow": follow,
             "blockedDoorway": blocked,
+            "formation": formation,
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
@@ -144,6 +187,10 @@ def main():
         assert follow["prone"] == 0
         assert follow["distance"] < 3.4
         assert blocked["freeze"] > 0.5
+        assert [actor["slot"] for actor in formation["positions"]] == [0, 1, 2]
+        assert [actor["side"] for actor in formation["positions"]] == [-1, 1, -1]
+        assert formation["minimumSeparation"] > 0.75
+        assert all(actor["distance"] < 3.2 for actor in formation["positions"])
         browser.close()
 
 

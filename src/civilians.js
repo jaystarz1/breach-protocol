@@ -64,6 +64,7 @@ export class Civilian {
     this.rushDone = false;
     this.escort = false;
     this.rescuer = null;
+    this.escortSlot = 0;
     this.escortCommand = 'follow';
     this.escortAnchor = null;
     this.escortSide = this.random() < 0.5 ? -1 : 1;
@@ -116,7 +117,7 @@ export class Civilian {
   }
 
   // cut loose: the bound man stands up and stops being scenery
-  rescue(by = 'you') {
+  rescue(by = 'you', escortSlot = 0) {
     if (this.rescued || this.dead) return false;
     this.rescued = true;
     releaseHostageRig(this.mesh);
@@ -125,6 +126,8 @@ export class Civilian {
     this.panic = by !== 'you';
     this.escort = by === 'you';
     this.rescuer = by;
+    this.escortSlot = Math.max(0, escortSlot | 0);
+    if (this.escort) this.escortSide = this.escortSlot % 2 === 0 ? -1 : 1;
     this.escortCommand = 'follow';
     this.rush = false;         // never convert a freed hostage into a muzzle-rushing civilian
     return true;
@@ -363,9 +366,14 @@ export class Civilian {
     const cos = Math.cos(world.playerYaw);
     // Close enough to enter the sight picture when the player turns or backs through a door.
     // That is deliberate escort pressure; the offset still keeps the hostage off the exact
-    // camera centre in a straight corridor.
-    const tx = world.playerPos.x + sin * 1.28 + cos * this.escortSide * 0.48;
-    const tz = world.playerPos.z + cos * 1.28 - sin * this.escortSide * 0.48;
+    // camera centre in a straight corridor. Multiple evacuees form two staggered columns
+    // instead of clipping into one actor: every extra pair occupies another metre of doorway
+    // and retreat space, which is exactly the escort complication the player must manage.
+    const rank = Math.floor(this.escortSlot / 2);
+    const trail = 1.22 + rank * 0.92;
+    const lateral = 0.58 + rank * 0.12;
+    const tx = world.playerPos.x + sin * trail + cos * this.escortSide * lateral;
+    const tz = world.playerPos.z + cos * trail - sin * this.escortSide * lateral;
     const distance = Math.hypot(tx - this.pos.x, tz - this.pos.z);
     if (world.combatHeat > 0) {
       this.escortHeat += dt;

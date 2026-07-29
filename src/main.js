@@ -1517,7 +1517,12 @@ function frame() {
       const man = world.allies.find(a => !a.dead && a.pos.distanceTo(c.pos) < 3.0 && Math.abs(a.pos.y - c.pos.y) < 2.2);
       if (man) by = man.name;
     }
-    if (by && c.rescue(by)) {
+    const escortSlot = by === 'you'
+      ? world.civilians.filter(civilian =>
+        civilian !== c && civilian.rescuer === 'you'
+        && civilian.rescued && !civilian.dead).length
+      : 0;
+    if (by && c.rescue(by, escortSlot)) {
       if (by === 'you') c.setEscortCommand(world.hostageCommand);
       world.stats.rescued++;
       world.stats.score += 150;
