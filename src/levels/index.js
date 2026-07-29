@@ -306,8 +306,12 @@ export const LEVELS = [
       // reads as occupied instead of as two long grey fences
       g.push(...wall(-16, 55, -16, -55, 9, C.building));
       g.push(...wall(16, 55, 16, -55, 9, C.building, []));
-      g.push(...facade(-16, -55, -16, 55, 0, 9, 201, { away: [-30, 0], step: 3.2 }));
-      g.push(...facade(16, -55, 16, 55, 0, 9, 202, { away: [30, 0], step: 3.2 }));
+      g.push(...facade(-16, -55, -16, 55, 0, 9, 201, {
+        away: [-30, 0], step: 3.2, finish: 'brick',
+      }));
+      g.push(...facade(16, -55, 16, 55, 0, 9, 202, {
+        away: [30, 0], step: 3.2, finish: 'plaster',
+      }));
       // roofline clutter along both sides
       for (const [ax, az] of [[-18.5, 34], [-18.5, 6], [-18.5, -30], [18.5, 22], [18.5, -8], [18.5, -42]]) {
         g.push(...lift(acUnit(ax, 9, az, 1.1), 0));

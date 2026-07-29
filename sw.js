@@ -1,10 +1,11 @@
-const CACHE = 'breach-protocol-v95-seeded-mission-variants';
+const CACHE = 'breach-protocol-v96-photographic-facades';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
   'src/main.js', 'src/input.js', 'src/player.js', 'src/weapons.js', 'src/enemies.js',
   'src/civilians.js', 'src/breach.js', 'src/hud.js', 'src/audio.js', 'src/physics.js',
   'src/levelgen.js', 'src/difficulty.js', 'src/save.js', 'src/levels/index.js', 'src/navgrid.js',
+  'src/mission-variants.js',
   'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js', 'src/street-sweep-art.js',
   'src/visual-kit.js', 'src/character-assets.js', 'src/interior-mission-art.js',
   'src/frontline-art.js',

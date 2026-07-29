@@ -62,6 +62,22 @@ def main():
                     ].map(value => +value.toFixed(3)),
                   };
                 });
+              const windowSizes = new Set();
+              let glassOpacity = null;
+              BP.world.staticMesh.parent.traverse(object => {
+                if (object.name === 'pane-architectural') {
+                  const values = object.instanceMatrix.array;
+                  for (let i = 0; i < object.count; i++) {
+                    const offset = i * 16;
+                    const width = Math.hypot(
+                      values[offset], values[offset + 1], values[offset + 2]);
+                    const height = Math.hypot(
+                      values[offset + 4], values[offset + 5], values[offset + 6]);
+                    windowSizes.add(`${width.toFixed(2)}x${height.toFixed(2)}`);
+                  }
+                  glassOpacity = object.material.opacity;
+                }
+              });
               return {
                 counts,
                 windows,
@@ -75,6 +91,8 @@ def main():
                   ((counts['window-boards'] || 0) / 3
                     + (counts['window-bent-frames'] || 0)) / windows
                 ).toFixed(2),
+                windowSizes: [...windowSizes].sort(),
+                glassOpacity,
                 calls: BP.performance.render.calls,
               };
             }""")
@@ -152,6 +170,7 @@ def main():
         assert counts.get("window-curtains", 0) > 0
         assert counts.get("window-blinds", 0) > 0
         assert counts.get("window-interior-furniture", 0) > 0
+        assert counts.get("facade-lot-skins", 0) >= 20
         assert counts.get("facade-soot", 0) > 0
         assert counts.get("facade-parapets", 0) > 0
         assert counts.get("facade-parapets-damaged", 0) > 0
@@ -174,6 +193,8 @@ def main():
         assert first["revealsPerWindow"] == 4
         assert 0.02 <= first["litRatio"] <= 0.2
         assert first["visiblySecuredOrDestroyed"] >= 0.2
+        assert len(first["windowSizes"]) >= 4
+        assert 0.18 <= first["glassOpacity"] <= 0.28
         browser.close()
 
 

@@ -168,6 +168,17 @@ const FACADE_PANEL_GEO = (() => {
   uv.needsUpdate = true;
   return geometry;
 })();
+const FACADE_SKIN_GEO = (() => {
+  const geometry = new THREE.PlaneGeometry(1, 1);
+  const uv = geometry.attributes.uv;
+  // Each property gets several repeats of the photographed surface rather than one image
+  // stretched across an entire 8–13 metre elevation.
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, uv.getX(i) * 4, uv.getY(i) * 3);
+  }
+  uv.needsUpdate = true;
+  return geometry;
+})();
 const UNIT_PLANE = new THREE.PlaneGeometry(1, 1);
 const FACADE_BREACH_GEO = (() => {
   // An asymmetric blown-out wall section. A larger masonry copy sits behind the dark copy,
@@ -1383,14 +1394,14 @@ function addFacade(batcher, def) {
     if (nx * mx + nz * mz < 0) { nx = -nx; nz = -nz; }
   }
   const yaw = Math.atan2(nx, nz);
-  const frameMat = standard('window-frame', 0x343b41, 0.56, 0.34);
+  const frameMat = standard('window-frame', 0x2d3438, 0.68, 0.26);
   const recessMat = standard('window-recess', 0x05080b, 0.96, 0);
   const glassDark = material('architectural-glass', () => {
     const out = new THREE.MeshPhysicalMaterial({
       name: 'architectural-layered-glass',
-      color: 0x283b45, roughness: 0.22, metalness: 0.1,
-      transparent: true, opacity: 0.38, clearcoat: 1,
-      clearcoatRoughness: 0.12, envMapIntensity: 1.28,
+      color: 0x21323a, roughness: 0.28, metalness: 0.06,
+      transparent: true, opacity: 0.24, clearcoat: 0.82,
+      clearcoatRoughness: 0.2, envMapIntensity: 0.78,
     });
     out.onBeforeCompile = shader => {
       shader.vertexShader = shader.vertexShader
@@ -1444,7 +1455,7 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
 #include <opaque_fragment>`,
         );
     };
-    out.customProgramCacheKey = () => 'bp-architectural-layered-glass-v1';
+    out.customProgramCacheKey = () => 'bp-architectural-layered-glass-v2';
     return out;
   });
   const floorH = def.floorH ?? 3;
@@ -1469,36 +1480,37 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
         map: frontlineInteriorAtlas,
         emissive: 0xffffff,
         emissiveMap: frontlineInteriorAtlas,
-        emissiveIntensity: [0.13, 0.11, 0.018, 0.012][tile],
+        emissiveIntensity: [0.18, 0.15, 0.035, 0.025][tile],
         roughness: 0.96,
         metalness: 0,
       }),
     ))
     : null;
-  const sillMat = standard('window-sill', 0x8f969a, 0.82, 0.02);
+  const sillMat = standard('window-sill', 0x626a6d, 0.88, 0.02);
   const blindMat = standard('blind', 0xb9ae9d, 0.9, 0);
   const revealMat = standard('window-reveal', 0x555b5d, 0.95, 0.01);
   const curtainMat = standard('window-curtain', 0x554941, 0.98, 0);
   const interiorMat = standard('window-interior-silhouette', 0x141719, 0.92, 0.02);
   const boardMat = standard('window-boards', 0x5a4533, 0.94, 0);
   const sootMat = material('facade-soot', () => new THREE.MeshBasicMaterial({
-    color: 0x0a0b0b, transparent: true, opacity: 0.66,
+    color: 0x181716, transparent: true, opacity: 0.32,
     depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
   }));
   const shardMat = material('window-shards', () => new THREE.MeshPhysicalMaterial({
-    color: 0x3d5968, roughness: 0.22, metalness: 0.06,
-    transparent: true, opacity: 0.34, side: THREE.DoubleSide,
+    color: 0x79909a, roughness: 0.28, metalness: 0.04,
+    transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide,
   }));
   const utilityMat = standard('facade-utility', 0x394043, 0.7, 0.48);
   const acMat = standard('facade-ac', 0x596166, 0.82, 0.28);
-  const shellMat = material('facade-shell-photo', () => {
-    const photo = photoSurfaces()?.plaster;
+  const shellFinish = def.finish === 'brick' ? 'brick' : 'plaster';
+  const shellMat = material(`facade-shell-photo-${shellFinish}`, () => {
+    const photo = photoSurfaces()?.[shellFinish];
     return new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: photo?.map || null,
       bumpMap: photo?.height || null,
-      bumpScale: photo?.height ? 0.026 : 0,
-      roughness: 0.92,
+      bumpScale: photo?.height ? (shellFinish === 'brick' ? 0.045 : 0.026) : 0,
+      roughness: shellFinish === 'brick' ? 0.96 : 0.92,
       metalness: 0.01,
     });
   });
@@ -1516,7 +1528,7 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
       metalness: 0,
     });
   });
-  const breachMat = standard('facade-breach-dark', 0x070809, 1, 0);
+  const breachMat = standard('facade-breach-dark', 0x222526, 1, 0);
   const rebarMat = standard('facade-breach-rebar', 0x242728, 0.7, 0.56);
   const breachInteriorMat = material('facade-breach-interior-photo', () => {
     const photo = photoSurfaces()?.plaster;
@@ -1563,13 +1575,20 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
     const width = remaining < preferred + 4 ? remaining : preferred;
     const rise = 0.52 + R() * 1.08;
     const damaged = R() < damageChance * 0.62;
+    const windowStyle = Math.floor(R() * 4);
     lots.push({
       start: lotStart,
       width,
       rise,
       damaged,
       breached: damaged && def.height >= 5.8 && width > 7 && breachRoll() < 0.58,
-      tone: R() < 0.42 ? 0x697174 : R() < 0.72 ? 0x858681 : 0x6e6861,
+      windowWidth: [1.58, 1.82, 2.12, 1.72][windowStyle],
+      windowHeight: [1.38, 1.58, 1.48, 1.72][windowStyle],
+      windowLift: [-0.1, 0.02, 0.12, -0.02][windowStyle],
+      frameStyle: windowStyle,
+      tone: shellFinish === 'brick'
+        ? (R() < 0.42 ? 0x8f8178 : R() < 0.72 ? 0xa18d7f : 0x7f7771)
+        : (R() < 0.42 ? 0x8a9292 : R() < 0.72 ? 0x9d9b92 : 0x817c75),
     });
     lotStart += width;
   }
@@ -1578,6 +1597,14 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
     const lot = lots[i];
     const centre = lot.start + lot.width / 2;
     const capWidth = Math.max(0.8, lot.width - 0.14);
+    // A continuous collision wall can still read as individual properties. Shallow,
+    // photographed skins give each lot its own construction tone and reset the texture
+    // repeat at the party wall; every lot shares one instanced draw.
+    batcher.add('facade-lot-skins', FACADE_SKIN_GEO, shellMat,
+      instanceMatrix(facadeParent, centre, def.height / 2, -0.012,
+        capWidth, def.height - 0.05, 1),
+      false,
+      lot.tone);
     const capGeometry = lot.damaged ? DAMAGED_PARAPET_GEO : FACADE_PANEL_GEO;
     batcher.add(
       lot.damaged ? 'facade-parapets-damaged' : 'facade-parapets',
@@ -1779,7 +1806,12 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
     for (let s = 1.8; s < len - 1.8; s += step) {
       if ((def.skip || []).some(g => s > g.from - 1.2 && s < g.to + 1.2)) continue;
       const localX = s - len / 2;
-      const localY = fy + 0.74 - def.yBase;
+      const lot = lots.find(candidate =>
+        localX >= candidate.start && localX < candidate.start + candidate.width);
+      const windowW = Math.min(step - 0.38, lot?.windowWidth ?? 1.82);
+      const windowH = lot?.windowHeight ?? 1.56;
+      const windowY = fy + 0.74 + (lot?.windowLift ?? 0);
+      const localY = windowY - def.yBase;
       if (breaches.some(breach =>
         Math.abs(localX - breach.x) < breach.width * 0.43
         && localY > breach.bottom - 0.35
@@ -1787,7 +1819,7 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
       const parent = new THREE.Matrix4().compose(
         new THREE.Vector3(
         def.x1 + ux * s + nx * (def.out ?? 0.2),
-        fy + 0.74,
+        windowY,
         def.z1 + uz * s + nz * (def.out ?? 0.2),
         ),
         new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
@@ -1809,64 +1841,89 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
         ? (lit ? (warm ? warmRoom : coolRoom) : recessMat)
         : photoRooms[roomTile];
       const roomGeometry = roomTile == null ? UNIT_PLANE : WINDOW_INTERIOR_GEOS[roomTile];
+      const innerW = windowW - 0.2;
+      const innerH = windowH - 0.18;
+      const halfW = windowW / 2;
+      const halfH = windowH / 2;
       batcher.add(
         roomTile == null
           ? (lit ? (warm ? 'recess-warm' : 'recess-cool') : 'recess-dark')
           : `window-room-photo-${roomTile}`,
-        roomGeometry, roomMat, instanceMatrix(parent, 0, 0, -0.03, 1.96, 1.74, 1));
+        roomGeometry, roomMat, instanceMatrix(parent, 0, 0, 0.02, innerW, innerH, 1));
       // Four shallow plaster returns make the 30cm bay legible at an oblique street angle.
       // They sit inside the non-solid facade overlay, so bullets and navigation still use the
       // original wall/collision definitions.
       for (const [w, h, x, y] of [
-        [0.12, 1.72, -0.92, 0], [0.12, 1.72, 0.92, 0],
-        [1.72, 0.1, 0, -0.78], [1.72, 0.1, 0, 0.78],
+        [0.095, windowH, -halfW + 0.05, 0],
+        [0.095, windowH, halfW - 0.05, 0],
+        [innerW, 0.085, 0, -halfH + 0.05],
+        [innerW, 0.085, 0, halfH - 0.05],
       ]) {
         batcher.add('window-reveals', UNIT_BOX, revealMat,
           instanceMatrix(parent, x, y, 0.1, w, h, 0.28));
       }
       if (!boarded && !destroyed) {
         batcher.add('pane-architectural', UNIT_PLANE, glassDark,
-          instanceMatrix(parent, 0, 0, 0.235, 1.68, 1.45, 1));
+          instanceMatrix(parent, 0, 0, 0.235, innerW - 0.06, innerH - 0.06, 1));
       }
+      const frameThickness = 0.058;
       const frameParts = [
-        [1.98, 0.09, 0, -0.81], [1.98, 0.09, 0, 0.81],
-        [0.09, 1.7, -0.94, 0], [0.09, 1.7, 0.94, 0],
+        [windowW, frameThickness, 0, -halfH],
+        [windowW, frameThickness, 0, halfH],
+        [frameThickness, windowH, -halfW, 0],
+        [frameThickness, windowH, halfW, 0],
       ];
       if (!destroyed && !boarded) {
-        const frameStyle = Math.floor(R() * 3);
-        if (frameStyle !== 1) frameParts.push([0.065, 1.52, 0, 0]);
-        if (frameStyle !== 2) frameParts.push([1.78, 0.055, 0, frameStyle ? 0 : 0.18]);
+        // Frame language belongs to the property, not to a dice roll on every opening.
+        // Alternating one detail by floor avoids a cloned grid while preserving a coherent
+        // renovation history for each lot.
+        const floorIndex = Math.round((fy - def.yBase - 1.2) / floorH);
+        const frameStyle = ((lot?.frameStyle ?? 0) + floorIndex) % 4;
+        if (frameStyle !== 1) {
+          const mullionX = frameStyle === 3 ? -innerW * 0.18 : 0;
+          frameParts.push([0.046, innerH, mullionX, 0]);
+        }
+        if (frameStyle !== 2) {
+          frameParts.push([innerW, 0.043, 0, frameStyle === 0 ? innerH * 0.12 : 0]);
+        }
       }
       for (const [w, h, x, y] of frameParts) {
         batcher.add('window-frames', UNIT_BOX, frameMat,
-          instanceMatrix(parent, x, y, 0.3, w, h, 0.09));
+          instanceMatrix(parent, x, y, 0.3, w, h, 0.065));
       }
       batcher.add('window-sills', UNIT_BOX, sillMat,
-        instanceMatrix(parent, 0, -0.88, 0.31, 2.16, 0.11, 0.32));
+        instanceMatrix(parent, 0, -halfH - 0.055, 0.29,
+          windowW + 0.14, 0.075, 0.26));
       if (boarded) {
-        for (const [offset, angle] of [[-0.42, 0.1], [0, -0.06], [0.42, 0.14]]) {
+        for (const [offset, angle] of [
+          [-windowH * 0.27, 0.1], [0, -0.06], [windowH * 0.27, 0.14],
+        ]) {
           batcher.add('window-boards', UNIT_BOX, boardMat,
-            instanceMatrix(parent, 0, offset, 0.35, 1.88, 0.14, 0.09,
+            instanceMatrix(parent, 0, offset, 0.35, windowW - 0.1, 0.12, 0.075,
               0, 0, angle));
         }
       } else if (destroyed || cracked) {
-        for (const [x, y, rz, sx] of [
-          [-0.54, -0.45, 0.18, 0.55], [0.5, -0.52, -0.12, 0.62], [0.56, 0.45, 0.2, 0.42],
+        for (const [px, py, rz, sx] of [
+          [-0.29, -0.3, 0.18, 0.55], [0.28, -0.34, -0.12, 0.62],
+          [0.31, 0.29, 0.2, 0.42],
         ]) {
-          if (cracked && x > 0) continue;
+          if (cracked && px > 0) continue;
           batcher.add('window-shards', SHARD_GEO, shardMat,
-            instanceMatrix(parent, x, y, 0.33, sx * 0.72, 0.29, 1, 0, 0, rz));
+            instanceMatrix(parent, px * windowW, py * windowH, 0.33,
+              sx * windowW * 0.36, windowH * 0.17, 1, 0, 0, rz));
         }
         if (destroyed) {
           // One bent mullion and a soot bloom stop a blown opening from reading as the same
           // pristine kit with its glass material merely switched to black.
           batcher.add('window-bent-frames', UNIT_BOX, frameMat,
-            instanceMatrix(parent, -0.2, 0.12, 0.33, 0.065, 1.28, 0.09,
+            instanceMatrix(parent, -windowW * 0.1, windowH * 0.08, 0.33,
+              0.05, windowH * 0.76, 0.065,
               0, 0, -0.24));
           if (R() < 0.74) {
             batcher.add('facade-soot', FACADE_SCAR_GEO, sootMat,
-              instanceMatrix(parent, R() * 0.34 - 0.17, 0.95, 0.012,
-                1.15 + R() * 0.5, 0.82 + R() * 0.46, 1, 0, 0, R() * 0.4 - 0.2));
+              instanceMatrix(parent, R() * 0.34 - 0.17, halfH + 0.24, 0.012,
+                windowW * (0.62 + R() * 0.2), windowH * (0.5 + R() * 0.22),
+                1, 0, 0, R() * 0.4 - 0.2));
           }
         }
       } else {
@@ -1876,24 +1933,24 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
           // replacing the pane with another featureless rectangle.
           const gap = 0.2 + R() * 0.22;
           for (const side of [-1, 1]) {
-            const width = 0.56 - gap * 0.25;
+            const width = innerW * (0.34 - gap * 0.08);
             batcher.add('window-curtains', UNIT_PLANE, curtainMat,
-              instanceMatrix(parent, side * (0.52 + gap * 0.25), 0.02, 0.12,
-                width, 1.34, 1, 0, 0, side * 0.025));
+              instanceMatrix(parent, side * innerW * (0.29 + gap * 0.04), 0.02, 0.12,
+                width, innerH * 0.88, 1, 0, 0, side * 0.025));
           }
         } else if (dressing < 0.48) {
           const partial = R() < 0.5;
           batcher.add('window-blinds', UNIT_PLANE, blindMat,
-            instanceMatrix(parent, partial ? -0.47 : 0, 0.37, 0.13,
-              partial ? 0.68 : 1.58, 0.65, 1));
+            instanceMatrix(parent, partial ? -innerW * 0.27 : 0, innerH * 0.24, 0.13,
+              partial ? innerW * 0.42 : innerW * 0.9, innerH * 0.43, 1));
         }
         if (lit && R() < 0.62) {
           // A cabinet/radiator silhouette creates parallax against the back wall without
           // pretending every window contains a fully modelled room.
           const side = R() < 0.5 ? -1 : 1;
           batcher.add('window-interior-furniture', UNIT_BOX, interiorMat,
-            instanceMatrix(parent, side * 0.48, -0.48, 0.035,
-              0.48 + R() * 0.18, 0.46 + R() * 0.22, 0.08));
+            instanceMatrix(parent, side * innerW * 0.28, -innerH * 0.32, 0.035,
+              innerW * (0.26 + R() * 0.1), innerH * (0.28 + R() * 0.12), 0.08));
         }
       }
     }
