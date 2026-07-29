@@ -2578,6 +2578,105 @@ export function addFrontlineMissionArt(scene, levelId) {
       [16.4, 1.0, 35.1, 0, -0.22, 0, 1, 1, 1],
     ]);
 
+    // The tower roof is the district fire-control node, not an empty boss arena. Keep the
+    // equipment against the east and north parapets so the player retains a clean fighting
+    // lane while the launch bench, aircraft, cases and antenna explain what is being held.
+    const commandParts = [];
+    const commandPart = (source, matrix, color) => {
+      const geometry = source.index ? source.toNonIndexed() : source.clone();
+      geometry.applyMatrix4(matrix);
+      const values = new Float32Array(geometry.attributes.position.count * 3);
+      const tint = new THREE.Color(color);
+      for (let i = 0; i < geometry.attributes.position.count; i++) {
+        values[i * 3] = tint.r;
+        values[i * 3 + 1] = tint.g;
+        values[i * 3 + 2] = tint.b;
+      }
+      geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+      commandParts.push(geometry);
+    };
+    const commandMatrix = (
+      x, y, z, rx, ry, rz, sx, sy, sz,
+    ) => new THREE.Matrix4().compose(
+      new THREE.Vector3(x, y, z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)),
+      new THREE.Vector3(sx, sy, sz),
+    );
+    const commandBox = new THREE.BoxGeometry(1, 1, 1);
+    for (const row of [
+      [3.7, 6.78, -13.5, 0, 0, 0, 2.5, 0.12, 1.15],
+      [2.65, 6.38, -13.5, 0, 0, 0, 0.11, 0.78, 1.0],
+      [4.75, 6.38, -13.5, 0, 0, 0, 0.11, 0.78, 1.0],
+    ]) commandPart(commandBox, commandMatrix(...row), 0x6a4d32);
+    for (const row of [
+      [5.65, 6.34, -12.7, 0, 0.18, 0, 0.9, 0.82, 0.86],
+      [5.72, 6.34, -14.0, 0, -0.12, 0, 0.9, 0.82, 0.86],
+      [2.15, 6.28, -15.5, 0, 0.08, 0, 0.78, 0.72, 0.76],
+    ]) commandPart(EQUIPMENT_CASE_GEO, commandMatrix(...row), 0x252a27);
+    const commandDrone = droneModel();
+    commandDrone.position.set(3.65, 6.92, -13.45);
+    commandDrone.rotation.y = -0.34;
+    commandDrone.updateMatrixWorld(true);
+    let droneSourceMeshes = 0;
+    commandDrone.traverse(object => {
+      if (!object.isMesh) return;
+      commandPart(
+        object.geometry,
+        object.matrixWorld,
+        object.material?.color || 0x252a27,
+      );
+      droneSourceMeshes++;
+    });
+    const mastGeometry = new THREE.CylinderGeometry(0.045, 0.065, 4.4, 8);
+    commandPart(
+      mastGeometry,
+      commandMatrix(6.25, 8.2, -6.1, 0, 0, 0, 1, 1, 1),
+      0x4f5758,
+    );
+    commandPart(
+      commandBox,
+      commandMatrix(6.25, 9.7, -6.1, 0, 0.42, 0, 0.13, 1.45, 0.52),
+      0x252a27,
+    );
+    const commandGeometry = mergeGeometries(commandParts, false);
+    for (const geometry of commandParts) geometry.dispose();
+    commandBox.dispose();
+    mastGeometry.dispose();
+    commandDrone.traverse(object => {
+      object.geometry?.dispose();
+      if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
+      else object.material?.dispose();
+    });
+    commandGeometry.computeBoundingBox();
+    commandGeometry.computeBoundingSphere();
+    commandGeometry.userData.components = 3 + 3 + droneSourceMeshes + 2;
+    commandGeometry.userData.droneSourceMeshes = droneSourceMeshes;
+    const commandEquipment = new THREE.Mesh(
+      commandGeometry,
+      new THREE.MeshStandardMaterial({
+        name: 'final-fire-control-layered-equipment',
+        vertexColors: true,
+        roughness: 0.76,
+        metalness: 0.16,
+      }));
+    commandEquipment.name = 'final-fire-control-equipment-merged';
+    commandEquipment.castShadow = commandEquipment.receiveShadow = quality.shadows;
+    scene.add(commandEquipment);
+    const commandCablePoints = [];
+    for (let i = 0; i < 18; i++) {
+      const t = i / 17;
+      commandCablePoints.push(new THREE.Vector3(
+        6.25 - t * 0.75,
+        7.45 * (1 - t) + 6.08 * t - Math.sin(t * Math.PI) * 0.28,
+        -6.1 - t * 6.4,
+      ));
+    }
+    const commandCable = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(commandCablePoints),
+      new THREE.LineBasicMaterial({ color: 0x111315 }));
+    commandCable.name = 'final-fire-control-signal-cable';
+    scene.add(commandCable);
+
     // The compound's old municipal wall has been converted into a fighting position. These
     // silhouettes sit above the collision shell and turn the blank slab into a defended gate.
     const timber = frontline.timber.clone();

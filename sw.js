@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v97-character-lighting';
+const CACHE = 'breach-protocol-v98-final-defense';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

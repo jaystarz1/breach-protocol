@@ -671,6 +671,7 @@ function clearObjectiveMarker() {
 function setObjective() {
   const obj = world.level.objectives[world.objectiveIdx];
   hud.objective(obj ? obj.text : 'MISSION COMPLETE');
+  world.objectiveState = null;
   world.objStuckTime = 0;
   world.lastIntelCallout = 0;
   if (world.markers) { for (const { m } of world.markers) scene.remove(m); world.markers = null; }
@@ -690,6 +691,25 @@ function setObjective() {
     world.markLive = 'rescue';
     world.markZone = obj.zone || null;
   } else { world.markLive = null; world.markZone = null; }
+  if (obj && obj.type === 'defend') {
+    // The authored defense phase owns its pressure. Stop the generic reinforcement clock,
+    // then fold any surface attackers already in play into this objective so entering the
+    // drone view can never leave a rifleman shooting an immobile player.
+    if (world.reinf) world.reinf.sent = world.reinf.max;
+    for (const enemy of world.enemies) {
+      if (!enemy.dead && enemy.pos.y >= -1 && !enemy.hvt) {
+        enemy.defenseObjective = world.objectiveIdx;
+      }
+    }
+    world.objectiveState = {
+      type: 'defend',
+      elapsed: 0,
+      remaining: obj.duration,
+      nextWave: 0,
+      wavesSent: 0,
+      spawned: 0,
+    };
+  }
   if (obj && obj.type === 'reach') {
     const [zx, zz, , zy] = obj.zone;
     const marker = new THREE.Group();
@@ -746,6 +766,7 @@ function blackoutTrigger() {
 function reinforcements(dt) {
   const r = world.reinf;
   if (!r || world.over) return;
+  if (world.level.objectives[world.objectiveIdx]?.type === 'defend') return;
   const last = world.objectiveIdx >= world.level.objectives.length - 1;
   if (r.sent >= r.max || last) { hud.reinf(''); return; }
   r.timer -= dt;
@@ -777,6 +798,74 @@ function reinforcements(dt) {
   hud.feed(`${made} HOSTILE${made > 1 ? 'S' : ''} REINFORCING`, '#ffab91');
   sfx.contact(player.pos);
   world.combatHeat = Math.max(world.combatHeat, 4);
+}
+
+function spawnDefenseWave(obj, wave, waveIndex) {
+  const authored = wave.enemies || [];
+  if (!authored.length) return 0;
+  const desired = Math.max(1, Math.min(
+    authored.length,
+    Math.round((wave.baseCount ?? authored.length) * world.diff.enemyCountMul),
+  ));
+  let made = 0;
+  for (let i = 0; i < desired; i++) {
+    const def = authored[i];
+    const enemy = new Enemy(scene, {
+      ...def,
+      aggro: true,
+      range: Math.min(def.range ?? 72, world.darkRange ?? 1e9),
+      _seed: world.level.id * 700001
+        + world.missionVariant * 7013 + waveIndex * 977 + i * 61,
+    }, world.diff);
+    enemy.state = 'alert';
+    enemy.lastKnown = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
+    enemy.defenseObjective = world.objectiveIdx;
+    world.enemies.push(enemy);
+    made++;
+  }
+  if (made) {
+    hud.feed(`ASSAULT WAVE ${waveIndex + 1} — ${made} HOSTILES`, '#ffab91');
+    sfx.contact(player.pos);
+    world.combatHeat = Math.max(world.combatHeat, 5);
+  }
+  return made;
+}
+
+function updateDefenseObjective(obj, dt) {
+  const state = world.objectiveState;
+  if (!state || state.type !== 'defend') return false;
+  const atPost = !obj.zone || inZone(player.pos, obj.zone);
+  state.atPost = atPost;
+  if (atPost) state.elapsed += dt;
+  state.remaining = Math.max(0, obj.duration - state.elapsed);
+  while (state.nextWave < (obj.waves?.length || 0)
+      && state.elapsed >= obj.waves[state.nextWave].at) {
+    state.spawned += spawnDefenseWave(
+      obj, obj.waves[state.nextWave], state.nextWave,
+    );
+    state.nextWave++;
+    state.wavesSent++;
+  }
+  const threats = world.enemies.filter(enemy =>
+    !enemy.dead && enemy.defenseObjective === world.objectiveIdx);
+  const seconds = Math.ceil(state.remaining);
+  if (!atPost) {
+    const distance = Math.round(Math.hypot(
+      player.pos.x - obj.zone[0], player.pos.z - obj.zone[1]));
+    hud.objective(`RETURN TO FIRE-CONTROL TOWER — ${distance}m`);
+    hud.reinf('DRONE LINK PAUSED — POSITION ABANDONED');
+  } else {
+    hud.objective(state.remaining > 0
+      ? `${obj.text} — ${seconds}s`
+      : `${obj.text} — CLEAR ${threats.length} REMAINING`);
+    hud.reinf(state.nextWave < (obj.waves?.length || 0)
+      ? `NEXT ASSAULT ${Math.max(0, Math.ceil(
+        obj.waves[state.nextWave].at - state.elapsed))}s`
+      : threats.length ? 'OBSERVATION LINK CONTESTED' : 'OBSERVATION LINK SECURE');
+  }
+  return state.remaining <= 0
+    && state.nextWave >= (obj.waves?.length || 0)
+    && threats.length === 0;
 }
 
 // Deadlock failsafe: an enemy that hasn't moved or fired for 90s while a clear
@@ -1046,7 +1135,7 @@ function inZone(pos, zone) {
   return Math.hypot(pos.x - zx, pos.z - zz) <= zr;
 }
 
-function checkObjectives() {
+function checkObjectives(dt = 0) {
   const obj = world.level.objectives[world.objectiveIdx];
   if (!obj) return;
   let done = false;
@@ -1076,6 +1165,8 @@ function checkObjectives() {
     done = Math.hypot(player.pos.x - zx, player.pos.z - zz) < zr && dy < 2.5;
   } else if (obj.type === 'drone') {
     done = !!world.drone?.complete;
+  } else if (obj.type === 'defend') {
+    done = updateDefenseObjective(obj, dt);
   }
   if (done) {
     if (obj.type === 'drone' && world.drone) {
@@ -1393,7 +1484,7 @@ function frame() {
   }
 
   // objectives + HUD
-  if (!world.over) { checkObjectives(); objectiveWatchdog(dt); reinforcements(dt); blackoutTrigger(); }
+  if (!world.over) { checkObjectives(dt); objectiveWatchdog(dt); reinforcements(dt); blackoutTrigger(); }
   // Ground marker pulse + live distance readout on reach objectives.
   if (world.beacon) {
     const pulse = Math.sin(performance.now() / 420);

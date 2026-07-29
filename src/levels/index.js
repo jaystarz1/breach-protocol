@@ -1060,7 +1060,7 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 10
   {
     id: 10, name: 'HOLD DISTRICT',
-    brief: 'The main assault has begun. Breach the forward compound, take the fire-control tower, and clear the bunker coordinating repeated waves into the launch district. BASTION is using detained civilians as a last screen. Hold the corridor and isolate his command.',
+    brief: 'The main assault has begun. Breach the forward compound and hold its fire-control tower through three assault waves so OP Alpha, OP Bravo and the captured relay can rebuild the drone link. Use that network to break the armour, guns and jammer supporting the attack, then clear BASTION’s bunker. He is using detained civilians as a last screen.',
     weapons: ['pistol', 'm4'], grenades: 4, flashes: 4, squad: 3,
     sky: 0x1e2835, fog: [0x1e2835, 40, 170], ambient: 0.85, sun: 1.15,
     start: [0, 0, 42, 0],
@@ -1140,6 +1140,58 @@ export const LEVELS = [
     objectives: [
       { type: 'clear', zone: [0, 10, 34], text: 'TAKE THE COURTYARD' },
       { type: 'clear', zone: [0, -10, 14, 8], text: 'CLEAR THE TOWER' },
+      {
+        type: 'defend',
+        text: 'HOLD FIRE-CONTROL TOWER — KEEP THE DRONE LINK ONLINE',
+        zone: [0, -10, 10, 6],
+        duration: 32,
+        waves: [
+          {
+            at: 0,
+            baseCount: 3,
+            enemies: [
+              { pos: [-24, 0, 26], patrol: [[-24, 26], [-8, 14]] },
+              { pos: [24, 0, 26], patrol: [[24, 26], [8, 14]] },
+              { pos: [0, 0, 28], patrol: [[0, 28], [0, 12]] },
+              { pos: [-18, 0, 28], patrol: [[-18, 28], [-4, 10]] },
+            ],
+          },
+          {
+            at: 11,
+            baseCount: 3,
+            enemies: [
+              { pos: [-29, 0, 16], patrol: [[-29, 16], [-12, 2]] },
+              { pos: [29, 0, 14], patrol: [[29, 14], [12, 0]] },
+              { pos: [0, 0, 29], patrol: [[0, 29], [6, 8]] },
+              { pos: [22, 0, 27], patrol: [[22, 27], [4, 4]] },
+            ],
+          },
+          {
+            at: 22,
+            baseCount: 3,
+            enemies: [
+              { pos: [-26, 0, 25], patrol: [[-26, 25], [-6, -2]] },
+              { pos: [26, 0, 24], patrol: [[26, 24], [8, -2]] },
+              { pos: [-4, 0, 29], patrol: [[-4, 29], [0, -4]] },
+              { pos: [16, 0, 29], patrol: [[16, 29], [5, -5]] },
+            ],
+          },
+        ],
+      },
+      {
+        type: 'drone',
+        mode: 'strike',
+        persistWrecks: true,
+        label: 'VEKTOR OBSERVATION NETWORK',
+        text: 'NETWORK ONLINE — BREAK THE SUPPORT GROUP',
+        launch: [0, 6.45, -10],
+        yaw: Math.PI,
+        targets: [
+          { pos: [-18, 0.1, 47], kind: 'armor', label: 'ASSAULT ARMOUR', yaw: 0.15 },
+          { pos: [0, 0.1, 52], kind: 'artillery', label: 'FIRE SUPPORT', yaw: -0.18 },
+          { pos: [19, 0.1, 46], kind: 'ew', label: 'MOBILE JAMMER', yaw: 0.32 },
+        ],
+      },
       { type: 'clear', zone: null, text: 'THE BUNKER — HUMAN SHIELDS. SURGICAL.' },
       { type: 'target', text: 'BASTION — END HIS COMMAND' },
       { type: 'rescue', zone: [22, -34, 16, -5], text: 'CUT THE SHIELDS LOOSE AND GET THEM OUT' },
