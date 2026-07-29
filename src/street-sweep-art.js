@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { quality } from './quality.js';
 import { rng } from './world.js';
+import { makeBox } from './physics.js';
 
 const ROOT = './assets/street-sweep/';
 let kit = null;
@@ -123,6 +124,27 @@ function materials() {
   kit.storefrontMetal = new THREE.MeshStandardMaterial({
     color: 0x33383a, roughness: 0.68, metalness: 0.48,
   });
+  kit.shopFloor = new THREE.MeshStandardMaterial({
+    color: 0x575955, roughness: 0.97, metalness: 0,
+  });
+  kit.shopFurnishing = new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: 0.82, metalness: 0.12,
+  });
+  kit.shopStock = new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: 0.84, metalness: 0.01,
+  });
+  kit.shopDark = new THREE.MeshStandardMaterial({
+    color: 0x0d1011, roughness: 0.99, metalness: 0,
+  });
+  kit.shopLight = new THREE.MeshStandardMaterial({
+    color: 0xd8d1bd, emissive: 0xffe1a8, emissiveIntensity: 0.42,
+    roughness: 0.66, metalness: 0.03,
+  });
+  kit.shopGlass = new THREE.MeshPhysicalMaterial({
+    color: 0x3a515b, roughness: 0.28, metalness: 0.04,
+    transparent: true, opacity: 0.34, clearcoat: 0.9,
+    clearcoatRoughness: 0.18, side: THREE.DoubleSide,
+  });
   return kit;
 }
 
@@ -204,6 +226,8 @@ function wallBatch(scene, name, items, material, sourceRepeat = [1, 1]) {
 function instanceBatch(scene, name, geometry, material, items, shadows = true) {
   const out = new THREE.InstancedMesh(geometry, material, items.length);
   const dummy = new THREE.Object3D();
+  const tint = new THREE.Color();
+  let hasColors = false;
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     dummy.position.set(item.x, item.y, item.z);
@@ -211,8 +235,13 @@ function instanceBatch(scene, name, geometry, material, items, shadows = true) {
     dummy.scale.set(item.w || 1, item.h || 1, item.d || 1);
     dummy.updateMatrix();
     out.setMatrixAt(i, dummy.matrix);
+    if (item.color != null) {
+      out.setColorAt(i, tint.setHex(item.color));
+      hasColors = true;
+    }
   }
   out.instanceMatrix.needsUpdate = true;
+  if (hasColors) out.instanceColor.needsUpdate = true;
   out.name = name;
   out.userData.instanceCount = items.length;
   out.castShadow = shadows && quality.shadows;
@@ -221,7 +250,7 @@ function instanceBatch(scene, name, geometry, material, items, shadows = true) {
   return out;
 }
 
-function storefronts(scene) {
+function storefronts(scene, solids) {
   const m = materials();
   const shops = [
     { x: 11, z: 20, w: 9, d: 7, face: 'w', finish: 'plaster', damage: 0 },
@@ -230,6 +259,8 @@ function storefronts(scene) {
   ];
   const plaster = [], brick = [], interiors = [];
   const frames = [], shutters = [], thresholds = [], bollards = [];
+  const floors = [], ceilings = [], fixtures = [], counters = [], shelves = [];
+  const stock = [], backDoors = [], glass = [], debris = [], tyres = [];
   let slatCount = 0;
 
   const worldPart = (shop, cx, cz, yaw, lx, y, lz, w, h, d, extra = {}) => {
@@ -240,6 +271,11 @@ function storefronts(scene) {
       z: cz - sin * lx + cos * lz,
       w, h, d, ry: yaw, ...extra,
     };
+  };
+  const solidPart = part => {
+    if (!solids) return;
+    // All three shops face east or west, so local width/depth swap in the world AABB.
+    solids.push(makeBox(part.x, part.y, part.z, part.d, part.h, part.w));
   };
 
   for (const shop of shops) {
@@ -300,6 +336,107 @@ function storefronts(scene) {
       const part = worldPart(shop, cx, cz, yaw, lx, 0.42, 0.72, 1, 1, 1);
       bollards.push({ ...part, w: 1, h: 1, d: 1 });
     }
+
+    // The original shop was an empty rectangular tunnel. Build a shallow but real interior
+    // volume behind the breach: a different floor and ceiling, a back-room doorway, practical
+    // lighting, wall shelving, and a counter that changes position between businesses.
+    floors.push(worldPart(shop, cx, cz, yaw, 0, 0.19, -4.15, 4.78, 0.07, 7.6));
+    ceilings.push(worldPart(shop, cx, cz, yaw, 0, 2.9, -4.15, 4.78, 0.08, 7.6));
+    const rearDoor = worldPart(shop, cx, cz, yaw,
+      shop.damage === 1 ? -1.0 : 0.85, 1.22, -8.32, 1.22, 2.18, 0.1);
+    backDoors.push(rearDoor);
+    for (const [lx, y, w, h] of [
+      [-0.68, 1.22, 0.1, 2.34], [0.68, 1.22, 0.1, 2.34], [0, 2.36, 1.46, 0.1],
+    ]) {
+      frames.push(worldPart(
+        shop, rearDoor.x, rearDoor.z, yaw, lx, y, 0.055, w, h, 0.12));
+    }
+    for (const lz of [-2.15, -5.75]) {
+      fixtures.push(worldPart(shop, cx, cz, yaw,
+        shop.damage === 1 ? 0.18 : -0.22, 2.81, lz, 1.35, 0.055, 0.24,
+        { rz: shop.damage === 1 && lz < -4 ? -0.12 : 0 }));
+    }
+
+    // Every frontage keeps a clear 1.35 m entry lane, but display panes and mullions stop the
+    // five-metre opening reading like a garage made from one Boolean subtraction.
+    const doorwaySide = shop.damage === 2 ? -1 : 1;
+    for (const lx of [-1.62, 0, 1.62]) {
+      if (Math.sign(lx || doorwaySide) === doorwaySide && Math.abs(lx) > 1) continue;
+      frames.push(worldPart(shop, cx, cz, yaw, lx, 1.34, -0.035, 0.075, 2.55, 0.1,
+        { rz: shop.damage === 1 && lx === 0 ? -0.08 : 0 }));
+    }
+    if (shop.damage !== 1) {
+      const paneX = doorwaySide > 0 ? -1.16 : 1.16;
+      glass.push(worldPart(shop, cx, cz, yaw, paneX, 1.34, -0.08, 2.08, 2.34, 0.025));
+    }
+
+    const counter = worldPart(
+      shop, cx, cz, yaw,
+      shop.damage === 0 ? -1.38 : shop.damage === 1 ? 1.34 : 0.8,
+      0.62,
+      shop.damage === 0 ? -5.65 : shop.damage === 1 ? -3.95 : -5.25,
+      shop.damage === 2 ? 2.75 : 1.75,
+      0.9,
+      0.72,
+      { rz: shop.damage === 1 ? -0.09 : 0 },
+    );
+    counters.push(counter);
+    solidPart(counter);
+
+    // Side-wall bays share a single instanced batch. Product boxes use instance colours, so
+    // the shelving reads as stocked without multiplying materials or draw calls.
+    for (const side of [-1, 1]) {
+      if (shop.damage === 0 && side < 0) continue;
+      for (const lz of [-2.65, -5.15]) {
+        const upright = worldPart(shop, cx, cz, yaw, side * 2.12, 1.05, lz,
+          0.24, 1.9, 2.05);
+        shelves.push(upright);
+        solidPart(upright);
+        for (const y of [0.42, 1.0, 1.58]) {
+          shelves.push(worldPart(shop, cx, cz, yaw, side * 1.96, y, lz,
+            0.55, 0.08, 2.0));
+          for (let row = -1; row <= 1; row++) {
+            const palette = shop.damage === 2
+              ? [0x92785f, 0x687d71, 0x9a9a82]
+              : [0x726754, 0x5e6d73, 0x77714f];
+            stock.push(worldPart(shop, cx, cz, yaw,
+              side * 1.74, y + 0.14, lz + row * 0.5,
+              0.22, 0.22 + ((row + shop.damage) % 2) * 0.08, 0.28,
+              { color: palette[(row + 3 + shop.damage) % palette.length] }));
+          }
+        }
+      }
+    }
+
+    // The service shop gets workshop mass instead of retail shelves: two tyre pairs and a
+    // battered bench. The attacked shop gets a fallen rack and masonry chunks in the entry.
+    if (shop.damage === 0) {
+      const bench = worldPart(shop, cx, cz, yaw, -1.45, 0.58, -2.75, 1.35, 0.82, 0.68);
+      counters.push(bench);
+      solidPart(bench);
+      for (const lx of [-1.85, -1.25]) {
+        for (const y of [0.48, 0.9]) {
+          tyres.push(worldPart(shop, cx, cz, yaw, lx, y, -6.95, 1, 1, 1,
+            { rx: 0, ry: yaw }));
+        }
+      }
+    } else if (shop.damage === 1) {
+      const fallen = worldPart(shop, cx, cz, yaw, -1.0, 0.42, -2.45,
+        1.8, 0.28, 0.62, { rz: 0.28 });
+      shelves.push(fallen);
+      solidPart(fallen);
+      for (let i = 0; i < 11; i++) {
+        debris.push(worldPart(shop, cx, cz, yaw,
+          -1.8 + (i % 4) * 0.82,
+          0.24 + (i % 3) * 0.04,
+          -0.85 - Math.floor(i / 4) * 0.72,
+          0.22 + (i % 3) * 0.09,
+          0.17 + (i % 2) * 0.08,
+          0.28 + ((i + 1) % 3) * 0.08,
+          { rx: i * 0.31, ry: yaw + i * 0.19, rz: i * 0.27,
+            color: i % 3 === 0 ? 0x493f37 : 0x6a6861 }));
+      }
+    }
   }
 
   wallBatch(scene, 'storefront-plaster-shells', plaster, m.plaster, [17, 2.4]);
@@ -313,6 +450,25 @@ function storefronts(scene) {
     m.stone, thresholds, false);
   instanceBatch(scene, 'storefront-bollards', new THREE.CylinderGeometry(0.075, 0.095, 0.84, 10),
     m.storefrontMetal, bollards);
+  instanceBatch(scene, 'storefront-interior-shells', new THREE.BoxGeometry(1, 1, 1),
+    m.shopFloor, [...floors, ...ceilings], false);
+  instanceBatch(scene, 'storefront-interior-fixtures', new THREE.BoxGeometry(1, 1, 1),
+    m.shopLight, fixtures, false);
+  instanceBatch(scene, 'storefront-furnishings', new THREE.BoxGeometry(1, 1, 1),
+    m.shopFurnishing, [
+      ...counters.map(part => ({ ...part, color: 0x514235 })),
+      ...shelves.map(part => ({ ...part, color: 0x292e30 })),
+    ]);
+  instanceBatch(scene, 'storefront-stock', new THREE.BoxGeometry(1, 1, 1),
+    m.shopStock, stock, false);
+  instanceBatch(scene, 'storefront-back-doors', new THREE.BoxGeometry(1, 1, 1),
+    m.shopDark, backDoors, false);
+  instanceBatch(scene, 'storefront-display-glass', new THREE.PlaneGeometry(1, 1),
+    m.shopGlass, glass, false);
+  instanceBatch(scene, 'storefront-entry-debris',
+    new THREE.DodecahedronGeometry(0.5, 0), m.shopStock, debris);
+  instanceBatch(scene, 'storefront-workshop-tyres',
+    new THREE.TorusGeometry(0.28, 0.095, 8, 16), m.shopDark, tyres);
   scene.userData.storefrontStats = {
     shops: shops.length,
     shellPanels: plaster.length + brick.length,
@@ -321,6 +477,18 @@ function storefronts(scene) {
     shutters: shutters.length,
     slats: slatCount,
     bollards: bollards.length,
+    floors: floors.length,
+    ceilings: ceilings.length,
+    fixtures: fixtures.length,
+    counters: counters.length,
+    shelves: shelves.length,
+    stock: stock.length,
+    backDoors: backDoors.length,
+    displayGlass: glass.length,
+    debris: debris.length,
+    tyres: tyres.length,
+    solidFixtures: counters.length
+      + shelves.filter(part => part.h > 0.25).length,
   };
 }
 
@@ -440,7 +608,7 @@ function streetLights(scene) {
   }
 }
 
-export function addStreetSweepArt(scene) {
+export function addStreetSweepArt(scene, solids) {
   if (!quality.pbr) return;
   const m = materials();
   const facadeBatches = { stone: [], trim: [] };
@@ -455,7 +623,7 @@ export function addStreetSweepArt(scene) {
     m.stone, facadeBatches.stone);
   instanceBatch(scene, 'facade-pilasters', new THREE.BoxGeometry(1, 1, 1),
     m.trim, facadeBatches.trim);
-  storefronts(scene);
+  storefronts(scene, solids);
   roadDamage(scene);
   roadMarkings(scene);
   wetAndContact(scene);

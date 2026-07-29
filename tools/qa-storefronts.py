@@ -63,6 +63,13 @@ def main():
         }""")
         page.wait_for_timeout(220)
         page.screenshot(path=str(output / "east-storefront.png"))
+        page.evaluate("""() => {
+          BP.player.pos.set(0, 0, -5);
+          BP.player.yaw = -Math.PI / 2;
+          BP.player.pitch = 0.02;
+        }""")
+        page.wait_for_timeout(220)
+        page.screenshot(path=str(output / "damaged-storefront.png"))
         repeat = capture()
 
         result = {
@@ -71,7 +78,10 @@ def main():
             and first["parts"] == repeat["parts"]
             and first["wallDecals"] == repeat["wallDecals"],
             "errors": errors[:8],
-            "screenshots": ["west-storefront.png", "east-storefront.png"],
+            "screenshots": [
+                "west-storefront.png", "east-storefront.png",
+                "damaged-storefront.png",
+            ],
         }
         print(json.dumps(result, indent=2))
 
@@ -79,19 +89,38 @@ def main():
             "shops": 3,
             "shellPanels": 18,
             "interiorBacks": 3,
-            "frames": 9,
+            "frames": 24,
             "shutters": 24,
             "slats": 21,
             "bollards": 6,
+            "floors": 3,
+            "ceilings": 3,
+            "fixtures": 6,
+            "counters": 4,
+            "shelves": 41,
+            "stock": 90,
+            "backDoors": 3,
+            "displayGlass": 2,
+            "debris": 11,
+            "tyres": 4,
+            "solidFixtures": 15,
         }
         expected_parts = {
             "storefront-plaster-shells": 12,
             "storefront-brick-shells": 6,
             "storefront-interior-backs": 3,
-            "storefront-frames": 9,
+            "storefront-frames": 24,
             "storefront-shutters": 24,
             "storefront-thresholds": 3,
             "storefront-bollards": 6,
+            "storefront-interior-shells": 6,
+            "storefront-interior-fixtures": 6,
+            "storefront-furnishings": 45,
+            "storefront-stock": 90,
+            "storefront-back-doors": 3,
+            "storefront-display-glass": 2,
+            "storefront-entry-debris": 11,
+            "storefront-workshop-tyres": 4,
         }
         assert not errors
         assert result["repeatStable"]
@@ -106,8 +135,13 @@ def main():
             for name in [
                 "storefront-frames", "storefront-shutters",
                 "storefront-thresholds", "storefront-bollards",
+                "storefront-interior-shells", "storefront-interior-fixtures",
+                "storefront-furnishings", "storefront-stock",
+                "storefront-back-doors", "storefront-display-glass",
+                "storefront-entry-debris", "storefront-workshop-tyres",
             ]
         )
+        assert first["stats"]["solidFixtures"] > 12
         assert first["wallDecals"]["decalCounts"]["shop-sign"] == 3
         assert first["calls"] <= 350
         assert first["triangles"] <= 650_000

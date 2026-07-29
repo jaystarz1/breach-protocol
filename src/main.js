@@ -382,7 +382,7 @@ function startLevel(id) {
   if (!indoor) addFrontlineAmbientArt(scene, L.id, bounds);
   addFrontlineMissionArt(scene, L.id);
   if (L.id === 2) {
-    addStreetSweepArt(scene);
+    addStreetSweepArt(scene, solids);
     addFrontlineStreetArt(scene);
   }
 
