@@ -101,6 +101,20 @@ def main():
               };
             }"""
         )
+        page.evaluate(
+            """() => {
+              const subject = BP.world.civilians.find(c =>
+                c.mesh.userData.rig?.panicStyle === 0 && !c.dead);
+              subject.pos.set(0, 0, 22);
+              subject.mesh.rotation.y = 0;
+              subject.update = () => {};
+              BP.player.pos.set(0, 0, 26);
+              BP.player.yaw = 0;
+              BP.player.pitch = Math.atan2(1.25 - 1.6, 4);
+            }"""
+        )
+        page.wait_for_timeout(120)
+        page.screenshot(path=str(output / "market-panic-close.png"))
         rig_coverage = page.evaluate(
             """() => BP.world.civilians.reduce((coverage, civilian) => {
               const rig = civilian.mesh.userData.rig;
@@ -253,7 +267,7 @@ def main():
             "escort": escort,
             "screenshots": [
                 "market-covert.png", "market-civilian-close.png",
-                "market-contact.png", "market-stall-close.png"
+                "market-contact.png", "market-panic-close.png", "market-stall-close.png"
             ],
             "errors": errors[:8],
         }

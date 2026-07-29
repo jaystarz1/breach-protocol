@@ -1173,7 +1173,7 @@ export function createCivilianCharacter({
     // At first-person distance that makes every surrender pose look like paddles attached to
     // pipe-cleaner arms. Keep the authored skinning, but bring the hands back toward human
     // proportion at the wrist bones.
-    for (const wrist of [wristL, wristR]) wrist?.scale.multiplyScalar(0.84);
+    for (const wrist of [wristL, wristR]) wrist?.scale.multiplyScalar(0.72);
     root.userData.rig.civilianStability = {
       head, neck,
       headRest: head?.quaternion.clone(),
