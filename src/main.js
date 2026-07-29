@@ -27,7 +27,7 @@ import { addVisualProps } from './visual-kit.js';
 import { addInteriorMissionArt } from './interior-mission-art.js';
 import { createRenderPipeline } from './renderer/render-pipeline.js';
 import { CAMPAIGN, briefingText, campaignSnapshot } from './campaign.js';
-import { DroneController } from './drone.js';
+import { DroneController, dronePrewarmGroup } from './drone.js';
 
 const $ = id => document.getElementById(id);
 
@@ -229,6 +229,17 @@ function startLevel(id) {
     world.drone = null;
   }
   clearObjectiveMarker();
+  // Strike wrecks deliberately survive the handoff back to infantry, but not the next mission.
+  // Explicitly release their geometries/materials before discarding the old Scene reference.
+  for (const wreck of (scene?.userData.droneWrecks || [])) {
+    scene.remove(wreck);
+    wreck.userData.dispose?.();
+  }
+  const oldDroneWarmup = scene?.userData.droneWarmup;
+  if (oldDroneWarmup) {
+    scene.remove(oldDroneWarmup);
+    oldDroneWarmup.userData.dispose?.();
+  }
   const loadId = ++levelLoadId;
   currentLevel = id;
   const L = LEVELS[id - 1];
@@ -591,10 +602,36 @@ function startLevel(id) {
   mode = 'loading';
   hud.objective('PREPARING TACTICAL SHADERS…');
   const warmWorld = world;
-  renderPipeline.prewarm(scene, camera).then(result => {
+  const warmScene = scene;
+  const droneWarmup = dronePrewarmGroup(
+    L.objectives.find(objective => objective.type === 'drone' && objective.mode === 'strike'),
+  );
+  if (droneWarmup) {
+    warmScene.add(droneWarmup);
+    // Keep these invisible material owners alive until the next mission. Disposing them here
+    // would let Three release the just-compiled programs, forcing the same variants to compile
+    // again on each impact.
+    warmScene.userData.droneWarmup = droneWarmup;
+  }
+  renderPipeline.prewarm(scene, camera).then(async firstResult => {
+    if (droneWarmup) droneWarmup.visible = false;
     if (loadId !== levelLoadId || world !== warmWorld) return;
-    world.prewarm = result;
     setObjective();
+    let result = firstResult;
+    // A first-objective drone creates its aircraft targets and changes the active camera only
+    // after the ground-scene prewarm. Run the same loading pass once more in the actual drone
+    // view so its full target set is resident before input and profiling begin.
+    if (world.drone) {
+      const droneResult = await renderPipeline.prewarm(scene, camera);
+      if (loadId !== levelLoadId || world !== warmWorld) return;
+      result = {
+        ...droneResult,
+        ms: +(firstResult.ms + droneResult.ms).toFixed(1),
+        programsBefore: firstResult.programsBefore,
+        compiled: firstResult.compiled + droneResult.compiled,
+      };
+    }
+    world.prewarm = result;
     mode = 'playing';
     sfx.objective();
   });

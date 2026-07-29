@@ -123,16 +123,49 @@ export function createRenderPipeline(canvas, settings) {
       const started = performance.now();
       const before = renderer.info.programs?.length || 0;
       const previousTarget = renderer.getRenderTarget();
+      const frustumStates = [];
       try {
+        // A compile pass prepares shader programs but does not upload textures belonging to
+        // offscreen objects. The first camera turn could therefore block on a large glTF or
+        // facade texture even with zero shader deltas. Initialize every scene-referenced map
+        // while the loading screen still owns the frame.
+        const textures = new Set();
+        const collectMaterialTextures = material => {
+          if (!material) return;
+          for (const value of Object.values(material)) {
+            if (value?.isTexture) textures.add(value);
+          }
+        };
+        scene.traverse(object => {
+          if (Array.isArray(object.material)) {
+            object.material.forEach(collectMaterialTextures);
+          } else {
+            collectMaterialTextures(object.material);
+          }
+        });
+        if (scene.environment?.isTexture) textures.add(scene.environment);
+        if (scene.background?.isTexture) textures.add(scene.background);
+        for (const texture of textures) renderer.initTexture(texture);
+
         if (target) renderer.setRenderTarget(target);
         if (typeof renderer.compileAsync === 'function') await renderer.compileAsync(scene, camera);
         else renderer.compile(scene, camera);
         // compileAsync does not force shadow-map and render-target variants on every browser.
         // One off-screen real render closes that gap before control is handed to the player.
+        // Disable frustum culling for this render so geometry initially behind the camera is
+        // uploaded now instead of stalling the first turn toward it.
+        scene.traverse(object => {
+          if (!(object.isMesh || object.isLine || object.isPoints)) return;
+          frustumStates.push([object, object.frustumCulled]);
+          object.frustumCulled = false;
+        });
         renderer.render(scene, camera);
       } catch {
         try { renderer.compile(scene, camera); } catch { /* gameplay may still continue */ }
       } finally {
+        for (const [object, frustumCulled] of frustumStates) {
+          object.frustumCulled = frustumCulled;
+        }
         renderer.setRenderTarget(previousTarget);
       }
       const after = renderer.info.programs?.length || 0;

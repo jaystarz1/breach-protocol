@@ -696,7 +696,7 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 7
   {
     id: 7, name: 'OP BRAVO',
-    brief: 'A rooftop insertion puts you above the tower selected for OP Bravo. Fight down four occupied floors, clear the street access, and reopen the roof for the next drone crew. The 37th knows the aircraft is coming, so flash every stairwell before committing.',
+    brief: 'A rooftop insertion puts you above the tower selected for OP Bravo. Before the ground assault, use the post’s strike drone to break three 37th support assets forming north of the tower. Then fight down four occupied floors and clear the street access. The 37th knows the aircraft is coming, so flash every stairwell before committing.',
     weapons: ['pistol', 'm4'], grenades: 3, flashes: 3, squad: 2,
     sky: 0x1d2734, fog: [0x1d2734, 40, 160], ambient: 0.85, sun: 1.1,
     start: [3, 12.3, -2, 180],
@@ -731,11 +731,17 @@ export const LEVELS = [
     objectives: [
       {
         type: 'drone',
-        label: 'OP BRAVO',
-        text: 'OP BRAVO ISR — MARK THE TOWER CORDON BEFORE INSERTION',
+        mode: 'strike',
+        persistWrecks: true,
+        label: 'OP BRAVO STRIKE',
+        text: 'OP BRAVO STRIKE — DESTROY THE ASSAULT SUPPORT GROUP',
         launch: [3, 12.55, -2],
         yaw: Math.PI,
-        targets: [[12, 0.1, 12], [-14, 0.1, 8], [0, 0.1, 14]],
+        targets: [
+          { pos: [22, 0.1, 20], kind: 'armor', label: 'IFV NORTH', yaw: -0.35 },
+          { pos: [-23, 0.1, 19], kind: 'artillery', label: 'FIRE SUPPORT', yaw: 0.25 },
+          { pos: [0, 0.1, 25], kind: 'ew', label: 'EW RELAY', yaw: -0.08 },
+        ],
       },
       { type: 'clear', zone: null, text: 'CLEAR THE TOWER TOP TO BOTTOM' },
       { type: 'reach', zone: [0, 14, 4], text: 'EXTRACT AT STREET LEVEL' },
