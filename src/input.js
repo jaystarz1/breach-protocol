@@ -31,9 +31,9 @@ let keyLookHeld = null;
 // Radians/sec at sensitivity 1. A key is binary, so a flat rate makes the smallest
 // possible tap a big fixed chunk you can't aim with. Start slow enough to nudge a
 // few degrees, then ramp to a fast turn so crossing the room stays quick.
-const KEY_YAW_TAP = 0.55, KEY_YAW_MAX = 2.6;
-const KEY_PITCH_TAP = 0.40, KEY_PITCH_MAX = 1.7;
-const KEY_RAMP = 0.5;   // seconds of holding to reach full speed
+const KEY_YAW_TAP = 0.32, KEY_YAW_MAX = 2.15;
+const KEY_PITCH_TAP = 0.24, KEY_PITCH_MAX = 1.35;
+const KEY_RAMP = 0.7;   // seconds of holding to reach full speed
 
 // Hold time per axis, reset on release or direction reversal so a flick back is
 // fine-grained again instead of inheriting the previous swing's momentum.
@@ -58,7 +58,9 @@ export function applyKeyLook(dt) {
   yawDir = yaw; pitchDir = pitch;
   if (!yaw && !pitch) return;
 
-  const s = dt * input.sensitivity * input.sensScale;
+  // The scope already narrows the FOV dramatically. Keep a small floor under its input
+  // scale so arrow taps remain consistent, deliberate sight nudges.
+  const s = dt * input.sensitivity * Math.max(0.42, input.sensScale);
   input.lookDelta.x += yaw * ramp(yawHeld, KEY_YAW_TAP, KEY_YAW_MAX) * s;
   input.lookDelta.y += pitch * ramp(pitchHeld, KEY_PITCH_TAP, KEY_PITCH_MAX) * s * (input.invertY ? -1 : 1);
 }
@@ -174,8 +176,14 @@ export function initInput() {
 
   // --- Desktop fallback ---
   const keys = {};
-  // Space and the arrows are gameplay keys here; stop the page from scrolling/activating on them.
-  const SWALLOW = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+  // Consume every held gameplay key. On macOS, leaving WASD unconsumed lets a long press
+  // invoke the system accent chooser over the canvas in the middle of play.
+  const SWALLOW = new Set([
+    'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyG', 'KeyX', 'KeyF', 'KeyH',
+    'KeyB', 'KeyN', 'KeyP', 'KeyZ', 'KeyC', 'KeyQ', 'KeyE',
+    'ShiftLeft', 'ControlLeft',
+  ]);
   window.addEventListener('keydown', e => {
     if (SWALLOW.has(e.code)) e.preventDefault();
     if (keys[e.code]) return;

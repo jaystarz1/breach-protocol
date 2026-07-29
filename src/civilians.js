@@ -1,5 +1,5 @@
 import {
-  makeCharacter, animateDeathRig, animateRig, deathPose, releaseHostageRig,
+  makeCharacter, animateDeathRig, animateRig, coverPoseRig, deathPose, releaseHostageRig,
 } from './levelgen.js';
 import { groundHeight, resolveXZ } from './physics.js';
 import { sfx } from './audio.js';
@@ -44,7 +44,7 @@ export class Civilian {
     this.reactionDelay = 0.18 + this.random() * 0.58;
     this.screamed = false;
     this.exhausted = 0;
-    this.prone = 0;                       // 0..1 blend into flat-on-the-floor
+    this.prone = 0;                       // 0..1 blend into a living kneel/cower
     // Some bound people flatten themselves; others freeze upright in a cower. Keeping a
     // hostage-sized obstruction in the target picture is intentional pressure, while the
     // split prevents every hostage encounter from behaving identically.
@@ -88,17 +88,25 @@ export class Civilian {
   get hitY() { return this.hostage ? 0.6 - this.prone * 0.35 : 1.0 - this.prone * 0.6; }
   get hitR() { return this.hostage ? 0.45 : 0.5; }
 
-  // Face-down, hands over the head. Called the moment rounds start flying.
-  goProne(dt) {
+  // Compact, hands-over-head cover response. Keep the actor root upright so this cannot be
+  // confused with the separate death animation.
+  takeCover(dt) {
     this.prone = Math.min(1, this.prone + dt * 2.6);
-    this.mesh.rotation.x = -1.32 * this.prone;
-    this.mesh.position.y = this.baseY + 0.34 * this.prone;
+    this.mesh.rotation.x = 0;
+    this.mesh.position.y = this.baseY;
+    animateRig(this.mesh, this.walkPhase, false);
+    coverPoseRig(this.mesh, this.prone);
   }
 
   standUp() {
     this.prone = 0;
     this.mesh.rotation.x = 0;
     this.mesh.position.y = this.baseY;
+    const rig = this.mesh.userData.rig;
+    if (rig?.authored) {
+      rig.visual.position.y = rig.baseVisualY;
+      rig.visual.rotation.x = 0;
+    }
   }
 
   // cut loose: the bound man stands up and stops being scenery
@@ -153,7 +161,7 @@ export class Civilian {
       if (world.combatHeat > 0) {
         this.reactionDelay -= dt;
         if (this.reactionDelay > 0) return;
-        if (this.duckOnFire) this.goProne(dt);
+        if (this.duckOnFire) this.takeCover(dt);
         else animateRig(this.mesh, this.walkPhase, false);
         if (!this.screamed && this.pos.distanceTo(world.playerPos) < 28) {
           this.screamed = true;
@@ -193,9 +201,9 @@ export class Civilian {
         return;
       }
     }
-    if (this.rushDone) { this.goProne(dt); animateRig(this.mesh, this.walkPhase, false); return; }
+    if (this.rushDone) { this.takeCover(dt); return; }
 
-    if (this.exhausted > 14) { this.goProne(dt); animateRig(this.mesh, this.walkPhase, false); return; } // spent, hits the deck
+    if (this.exhausted > 14) { this.takeCover(dt); return; }
 
     this.panicTimer -= dt;
     if (this.panicTimer <= 0) {
@@ -223,15 +231,14 @@ export class Civilian {
   // responsibility instead of instantly deleting that person from the encounter.
   updateEscort(dt, world) {
     if (this.escortCommand === 'down') {
-      this.goProne(dt);
-      animateRig(this.mesh, this.walkPhase, false);
+      this.takeCover(dt);
       return;
     }
 
     if (this.escortCommand === 'stay') {
       if (world.combatHeat > 0) {
         this.escortHeat += dt;
-        if (this.escortHeat >= this.reactionDelay) this.goProne(dt);
+        if (this.escortHeat >= this.reactionDelay) this.takeCover(dt);
       } else {
         this.escortHeat = 0;
         if (this.prone > 0) this.standUp();
@@ -253,8 +260,11 @@ export class Civilian {
 
     if (this.escortFreeze > 0) {
       this.escortFreeze -= dt;
-      if (world.combatHeat > 0 && this.escortFreeze < this.reactionDelay) this.goProne(dt);
-      animateRig(this.mesh, this.walkPhase, false);
+      if (world.combatHeat > 0 && this.escortFreeze < this.reactionDelay) {
+        this.takeCover(dt);
+      } else {
+        animateRig(this.mesh, this.walkPhase, false);
+      }
       return;
     }
 
@@ -274,8 +284,7 @@ export class Civilian {
           this.escortStep(dt, world, 2.8, distance);
         }
       } else {
-        this.goProne(dt);
-        animateRig(this.mesh, this.walkPhase, false);
+        this.takeCover(dt);
       }
       return;
     }

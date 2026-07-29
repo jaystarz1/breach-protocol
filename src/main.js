@@ -746,6 +746,7 @@ function setObjective() {
     world.drone = new DroneController(scene, camera, obj, () => {
       if (!world?.drone) return;
       world.drone.complete = true;
+      if (obj.result) hud.feed(obj.result, '#8cecff');
     });
   }
 }

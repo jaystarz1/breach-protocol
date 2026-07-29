@@ -8,7 +8,7 @@ import {
   createAuthoredCharacter,
   createCivilianCharacter,
   kneelAuthoredCharacter,
-  poseAuthoredCivilianPanic,
+  poseAuthoredCivilianPanic, poseAuthoredCivilianCover,
   releaseAuthoredHostage,
   stopAuthoredCharacter,
 } from './character-assets.js';
@@ -641,6 +641,25 @@ export function animateRig(
     if (r.torsoTilt !== undefined) g.rotation.x = -f * 0.16;
   }
   g.userData.bob = moving ? Math.abs(Math.sin(phase)) * 0.05 : 0;
+}
+
+export function coverPoseRig(g, amount = 1) {
+  const r = g.userData.rig;
+  if (!r) return;
+  if (r.authored) {
+    poseAuthoredCivilianCover(g, amount);
+    return;
+  }
+  const a = Math.max(0, Math.min(1, amount));
+  r.lLeg.rotation.x = -0.9 * a;
+  r.rLeg.rotation.x = -1.18 * a;
+  r.lLeg.userData.shin.rotation.x = 1.5 * a;
+  r.rLeg.userData.shin.rotation.x = 1.35 * a;
+  r.lArm.rotation.set(-1.25 * a, 0, 0.38 * a);
+  r.rArm.rotation.set(-1.25 * a, 0, -0.38 * a);
+  r.lArm.userData.fore.rotation.x = -1.0 * a;
+  r.rArm.userData.fore.rotation.x = -1.0 * a;
+  if (r.headG) r.headG.rotation.x = 0.22 * a;
 }
 
 // Drop to one knee in a firing position, blended 0..1. Call AFTER animateRig so it overrides

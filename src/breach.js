@@ -4,6 +4,39 @@ import { makeBox } from './physics.js';
 import { sfx } from './audio.js';
 import { hud } from './hud.js';
 
+const PORTAL_GEO = new THREE.BoxGeometry(1, 1, 1);
+const PORTAL_MAT = new THREE.MeshStandardMaterial({
+  name: 'breach-portal-frame', color: 0x30383c, roughness: 0.78, metalness: 0.34,
+});
+const PORTAL_STRIPE_MAT = new THREE.MeshStandardMaterial({
+  name: 'breach-portal-warning-stripe',
+  color: 0xc08b3e, emissive: 0x4b2608, emissiveIntensity: 0.24,
+  roughness: 0.72, metalness: 0.18,
+});
+for (const resource of [PORTAL_GEO, PORTAL_MAT, PORTAL_STRIPE_MAT]) {
+  resource.userData.bpPersistent = true;
+}
+
+function makePortalFrame(width, height) {
+  const root = new THREE.Group();
+  root.name = 'breach-portal-reveal';
+  const add = (name, material, x, y, z, sx, sy, sz) => {
+    const mesh = new THREE.Mesh(PORTAL_GEO, material);
+    mesh.name = name;
+    mesh.position.set(x, y, z);
+    mesh.scale.set(sx, sy, sz);
+    mesh.castShadow = mesh.receiveShadow = true;
+    root.add(mesh);
+  };
+  // A deep reveal is visible from either side and remains after the leaf has been breached.
+  add('portal-left-jamb', PORTAL_MAT, -width / 2 - 0.11, height / 2, 0, 0.22, height + 0.34, 0.42);
+  add('portal-right-jamb', PORTAL_MAT, width / 2 + 0.11, height / 2, 0, 0.22, height + 0.34, 0.42);
+  add('portal-lintel', PORTAL_MAT, 0, height + 0.11, 0, width + 0.44, 0.22, 0.42);
+  add('portal-warning-header', PORTAL_STRIPE_MAT, 0, height + 0.18, 0.225, width * 0.62, 0.09, 0.035);
+  add('portal-warning-header-rear', PORTAL_STRIPE_MAT, 0, height + 0.18, -0.225, width * 0.62, 0.09, 0.035);
+  return root;
+}
+
 // Breachable doors: block movement until breached; breach = blast + 1.5s slow-mo target window.
 export class DoorSystem {
   constructor(scene, defs) {
@@ -13,12 +46,16 @@ export class DoorSystem {
       mesh.position.set(d.pos[0], d.pos[1] ?? 0, d.pos[2]);
       mesh.rotation.y = (d.rot ?? 0) * Math.PI / 180;
       scene.add(mesh);
+      const frame = makePortalFrame(d.w ?? 1.4, d.h ?? 2.4);
+      frame.position.copy(mesh.position);
+      frame.rotation.y = mesh.rotation.y;
+      scene.add(frame);
       const along = ((d.rot ?? 0) % 180 === 0);
       const w = d.w ?? 1.4;
       const solid = along
         ? makeBox(d.pos[0], (d.pos[1] ?? 0) + 1.2, d.pos[2], w, 2.4, 0.15)
         : makeBox(d.pos[0], (d.pos[1] ?? 0) + 1.2, d.pos[2], 0.15, 2.4, w);
-      return { mesh, solid, breached: false, flyVel: null, def: d };
+      return { mesh, frame, solid, breached: false, flyVel: null, def: d };
     });
   }
 

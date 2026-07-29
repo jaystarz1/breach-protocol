@@ -45,6 +45,42 @@ function disposeObject(root) {
   });
 }
 
+function reconRouteModel(target) {
+  const points = (target.route?.length ? target.route : [
+    [target.pos.x, target.pos.y + 0.04, target.pos.z],
+    [target.pos.x, target.pos.y + 0.04, target.pos.z + 8],
+  ]).map(point => Array.isArray(point)
+    ? new THREE.Vector3(...point) : point.clone());
+  const root = new THREE.Group();
+  root.name = `recon-confirmed-route-${target.index + 1}`;
+  const material = new THREE.LineBasicMaterial({
+    name: 'recon-confirmed-route-line',
+    color: 0x63e6ff, transparent: true, opacity: 0.88,
+    depthTest: true, depthWrite: false,
+  });
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
+  line.name = 'recon-route-line';
+  root.add(line);
+  const markerMat = new THREE.MeshBasicMaterial({
+    name: 'recon-route-chevron', color: 0xa7f3ff,
+    transparent: true, opacity: 0.9, depthWrite: false,
+  });
+  for (let i = 0; i < points.length; i++) {
+    const marker = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.62, 3), markerMat);
+    marker.name = 'recon-route-chevron';
+    marker.position.copy(points[i]);
+    marker.position.y += 0.09;
+    marker.rotation.x = Math.PI / 2;
+    if (i < points.length - 1) {
+      const dx = points[i + 1].x - points[i].x;
+      const dz = points[i + 1].z - points[i].z;
+      marker.rotation.z = -Math.atan2(dx, dz);
+    }
+    root.add(marker);
+  }
+  return root;
+}
+
 function strikeTargetModel(target) {
   const root = new THREE.Group();
   root.name = `drone-strike-target-${target.kind || 'asset'}`;
@@ -202,6 +238,8 @@ export class DroneController {
     this.onComplete = onComplete;
     this.mode = definition.mode || 'recon';
     this.persistWrecks = !!definition.persistWrecks;
+    this.persistIntel = !!definition.persistIntel;
+    this.resultText = definition.result || 'ASSAULT ROUTES MAPPED';
     this.targets = (definition.targets || []).map((entry, index) => ({
       ...(Array.isArray(entry) ? {} : entry),
       pos: new THREE.Vector3(...(Array.isArray(entry) ? entry : entry.pos)),
@@ -239,6 +277,7 @@ export class DroneController {
     this.to = new THREE.Vector3();
     this.targetMeshes = [];
     this.targetModels = [];
+    this.routeModels = [];
     for (const target of this.targets) {
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(
@@ -273,6 +312,7 @@ export class DroneController {
       <div class="drone-frame"></div>
       <div class="drone-reticle"><i></i><b></b></div>
       <div class="drone-lock"></div>
+      <div class="drone-result"></div>
       <div class="drone-label">VEKTOR ISR // ${definition.label || 'TACTICAL UAS'}</div>
       <div class="drone-status"></div>
       <div class="drone-help">${this.mode === 'strike'
@@ -294,6 +334,7 @@ export class DroneController {
       .drone-reticle i{width:76px;height:1px;left:-10px;top:27px}
       .drone-reticle b{height:76px;width:1px;top:-10px;left:27px}
       .drone-lock{position:absolute;left:50%;top:calc(50% + 48px);transform:translateX(-50%);height:16px;letter-spacing:2px;color:#ffb28e}
+      .drone-result{position:absolute;left:50%;top:26%;transform:translateX(-50%);padding:9px 14px;border:1px solid rgba(120,235,255,.5);background:rgba(5,14,20,.78);letter-spacing:2px;opacity:0;transition:opacity .18s}
       .drone-label{position:absolute;left:34px;top:30px;letter-spacing:2px}
       .drone-status{position:absolute;right:34px;top:30px;text-align:right;white-space:pre}
       .drone-help{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);letter-spacing:1px}
@@ -302,6 +343,23 @@ export class DroneController {
     document.body.appendChild(this.overlay);
     this.status = this.overlay.querySelector('.drone-status');
     this.lock = this.overlay.querySelector('.drone-lock');
+    this.result = this.overlay.querySelector('.drone-result');
+  }
+
+  markReconTarget(target) {
+    if (!target || target.marked || this.mode === 'strike') return false;
+    target.marked = true;
+    this.targetMeshes[target.index].visible = false;
+    const route = reconRouteModel(target);
+    this.scene.add(route);
+    this.routeModels.push(route);
+    this.result.textContent = `ROUTE ${target.index + 1} CONFIRMED // ${target.label || 'ASSAULT AXIS'}`;
+    this.result.style.opacity = '1';
+    clearTimeout(this.resultTimer);
+    this.resultTimer = setTimeout(() => {
+      if (!this.complete) this.result.style.opacity = '0';
+    }, 900);
+    return true;
   }
 
   update(dt, input, solids) {
@@ -370,15 +428,12 @@ export class DroneController {
     }
     if (candidate && input.firePressed) {
       if (this.mode === 'strike') this.releaseMunition(candidate);
-      else {
-        candidate.marked = true;
-        this.targetMeshes[candidate.index].visible = false;
-      }
+      else this.markReconTarget(candidate);
     }
     this.lock.textContent = candidate
       ? this.mode === 'strike'
         ? `LOCK // ${candidate.label || `TARGET ${candidate.index + 1}`}`
-        : 'GRID READY'
+        : `MARK // ${candidate.label || `ROUTE ${candidate.index + 1}`}`
       : '';
     let marked = 0;
     for (const target of this.targets) if (target.marked) marked++;
@@ -391,6 +446,10 @@ export class DroneController {
     if (marked === this.targets.length && !this.complete) {
       this.complete = true;
       this.status.textContent += this.mode === 'strike' ? '\nSTRIKE COMPLETE' : '\nUPLOAD COMPLETE';
+      if (this.mode !== 'strike') {
+        this.result.textContent = this.resultText;
+        this.result.style.opacity = '1';
+      }
       this.completionTimer = setTimeout(() => this.onComplete?.(), 650);
     }
   }
@@ -525,6 +584,7 @@ export class DroneController {
   dispose() {
     this.active = false;
     if (this.completionTimer) clearTimeout(this.completionTimer);
+    if (this.resultTimer) clearTimeout(this.resultTimer);
     this.camera.fov = this.savedFov;
     this.camera.updateProjectionMatrix();
     for (const [child, visible] of this.childVisibility) child.visible = visible;
@@ -532,6 +592,16 @@ export class DroneController {
     for (const mesh of this.targetMeshes) {
       this.scene.remove(mesh);
       disposeObject(mesh);
+    }
+    for (const route of this.routeModels) {
+      if (this.persistIntel && this.complete) {
+        const intel = this.scene.userData.reconIntel || [];
+        if (!intel.includes(route)) intel.push(route);
+        this.scene.userData.reconIntel = intel;
+        continue;
+      }
+      this.scene.remove(route);
+      disposeObject(route);
     }
     for (let index = 0; index < this.targetModels.length; index++) {
       const model = this.targetModels[index];

@@ -1826,9 +1826,9 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
         new THREE.Vector3(1, 1, 1),
       );
       const damageRoll = R();
-      const destroyed = damageRoll < damageChance * 0.38;
-      const boarded = !destroyed && damageRoll < damageChance * 0.68;
-      const cracked = !destroyed && !boarded && damageRoll < damageChance;
+      const destroyed = !def.staticWindows && damageRoll < damageChance * 0.38;
+      const boarded = !def.staticWindows && !destroyed && damageRoll < damageChance * 0.68;
+      const cracked = !def.staticWindows && !destroyed && !boarded && damageRoll < damageChance;
       const lit = !destroyed && !boarded && R() < litChance;
       const warm = R() < 0.72;
       let roomTile = null;
@@ -1862,7 +1862,7 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
         batcher.add('window-reveals', UNIT_BOX, revealMat,
           instanceMatrix(parent, x, y, 0.1, w, h, 0.28));
       }
-      if (!boarded && !destroyed) {
+      if (!def.staticWindows && !boarded && !destroyed) {
         batcher.add('pane-architectural', UNIT_PLANE, glassDark,
           instanceMatrix(parent, 0, 0, 0.235, innerW - 0.06, innerH - 0.06, 1));
       }
@@ -1926,7 +1926,7 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
                 1, 0, 0, R() * 0.4 - 0.2));
           }
         }
-      } else {
+      } else if (!def.staticWindows) {
         const dressing = R();
         if (dressing < 0.28) {
           // Curtains live behind the glass and leave an irregular centre gap rather than

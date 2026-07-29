@@ -312,6 +312,14 @@ export const LEVELS = [
       g.push(...facade(16, -55, 16, 55, 0, 9, 202, {
         away: [30, 0], step: 3.2, finish: 'plaster',
       }));
+      // The street facade is now backed by real roof/depth mass. These sit just behind the
+      // collision walls, closing the dollhouse view exposed by the elevated recon drone.
+      for (const [x, z, d, h, color] of [
+        [-23.2, 31, 46, 10.4, C.building], [-23.2, -29, 48, 9.6, C.buildingB],
+        [23.2, 30, 48, 9.8, C.buildingB], [23.2, -30, 46, 10.8, C.building],
+      ]) {
+        g.push([x, h / 2, z, 14, h, d, color]);
+      }
       // roofline clutter along both sides
       for (const [ax, az] of [[-18.5, 34], [-18.5, 6], [-18.5, -30], [18.5, 22], [18.5, -8], [18.5, -42]]) {
         g.push(...lift(acUnit(ax, 9, az, 1.1), 0));
@@ -414,7 +422,13 @@ export const LEVELS = [
         text: 'RECON EASTERN APPROACHES — MARK THREE ASSAULT ROUTES',
         launch: [-11.2, 1.25, -41.6],
         yaw: Math.PI,
-        targets: [[-5, 0.1, -32], [8, 0.1, -19], [-9, 0.1, -5]],
+        persistIntel: true,
+        result: 'THREE ASSAULT LANES MAPPED — SOUTHERN EXIT NOW COVERED',
+        targets: [
+          { pos: [-5, 0.1, -32], label: 'EAST SERVICE LANE', route: [[-5, 0.12, -32], [-12, 0.12, -20], [-9, 0.12, -5]] },
+          { pos: [8, 0.1, -19], label: 'CENTRAL VEHICLE AXIS', route: [[8, 0.12, -19], [3, 0.12, -8], [0, 0.12, 4]] },
+          { pos: [-9, 0.1, -5], label: 'WEST INFILTRATION', route: [[-9, 0.12, -5], [-13, 0.12, 9], [-8, 0.12, 22]] },
+        ],
       },
       { type: 'reach', zone: [0, -52, 3], text: 'PUSH THROUGH THE BARRICADE' },
     ],
@@ -705,12 +719,21 @@ export const LEVELS = [
       g.push([-40, 7, -90, 30, 14, 20, C.building]);
       g.push([40, 7, -90, 30, 14, 20, C.buildingB]);
       g.push([0, 7, -110, 40, 14, 20, C.building]);
-      g.push(...facade(-55, -80, -25, -80, 0, 14, 611, { away: [-40, -90] }));
-      g.push(...facade(25, -80, 55, -80, 0, 14, 612, { away: [40, -90] }));
+      const skipA = BAY_A.map(([x]) => ({ from: x + 55 - 0.9, to: x + 55 + 0.9 }));
+      const skipB = BAY_B.map(([x]) => ({ from: x - 25 - 0.9, to: x - 25 + 0.9 }));
+      const skipC = BAY_C.map(([x]) => ({ from: x + 20 - 0.9, to: x + 20 + 0.9 }));
+      g.push(...facade(-55, -80, -25, -80, 0, 14, 611, {
+        away: [-40, -90], skip: skipA, staticWindows: true,
+      }));
+      g.push(...facade(25, -80, 55, -80, 0, 14, 612, {
+        away: [40, -90], skip: skipB, staticWindows: true,
+      }));
       // The centre block is the sniper's, so it gets no warm panes at all: a lit window is
       // exactly the thing that makes a dark one legible, and a facade of dark holes with a
       // silhouette in one of them is the whole picture the mission is built on.
-      g.push(...facade(-20, -100, 20, -100, 0, 14, 613, { away: [0, -110], lit: 0.06 }));
+      g.push(...facade(-20, -100, 20, -100, 0, 14, 613, {
+        away: [0, -110], lit: 0.06, skip: skipC, staticWindows: true,
+      }));
       for (const b of BAY_A) g.push(...windowBay(b[0], b[1], -80, 1));
       for (const b of BAY_B) g.push(...windowBay(b[0], b[1], -80, 1));
       // The sniper's rooms are the brightest interiors on the map, which sounds backwards

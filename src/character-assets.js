@@ -1003,6 +1003,15 @@ export function createCivilianCharacter({
     hostage,
     baseVisualY: visual.position.y,
   };
+  if (!hostage) {
+    const head = findRigObject(visual, 'Head');
+    const neck = findRigObject(visual, 'Neck');
+    root.userData.rig.civilianStability = {
+      head, neck,
+      headRest: head?.quaternion.clone(),
+      neckRest: neck?.quaternion.clone(),
+    };
+  }
   if (hostage) poseAuthoredHostage(root, root.userData.rig);
   root.userData.bob = 0;
   return root;
@@ -1045,6 +1054,13 @@ export function animateAuthoredCharacter(
   }
   rig.intent = intent;
   rig.mixer.update(dt);
+  // Some source locomotion clips carry exaggerated neck motion. At game scale it reads like
+  // a broken ragdoll, so preserve a little clip motion while stabilizing the head post-mixer.
+  if (rig.civilianStability && moving) {
+    const stable = rig.civilianStability;
+    if (stable.neck && stable.neckRest) stable.neck.quaternion.slerp(stable.neckRest, 0.72);
+    if (stable.head && stable.headRest) stable.head.quaternion.slerp(stable.headRest, 0.82);
+  }
   if (rig.combatant) poseAuthoredRifle(root, rig);
   if (!rig.lifeBones && rig.combatant) {
     rig.lifeBones = {
@@ -1106,6 +1122,36 @@ export function poseAuthoredCivilianPanic(root, phase = 0) {
     b.head.rotation.y += pulse * 0.08;
     b.head.rotation.z += (style - 1) * 0.035;
   }
+  return true;
+}
+
+// Upright, compact cover posture for living civilians. Rotating the entire character onto
+// the floor was visually identical to a death pose; this keeps the root vertical, drops the
+// torso and puts both hands over the head.
+export function poseAuthoredCivilianCover(root, amount = 1) {
+  const rig = root.userData.rig;
+  if (!rig?.authored || !rig.civilian) return false;
+  const a = Math.max(0, Math.min(1, amount));
+  if (!rig.coverBones) {
+    const node = name => findRigObject(rig.visual, name);
+    rig.coverBones = {
+      upperL: node('UpperArm.L'), lowerL: node('LowerArm.L'), wristL: node('Wrist.L'),
+      upperR: node('UpperArm.R'), lowerR: node('LowerArm.R'), wristR: node('Wrist.R'),
+      thighL: node('UpperLeg.L'), shinL: node('LowerLeg.L'), footL: node('Foot.L'),
+      thighR: node('UpperLeg.R'), shinR: node('LowerLeg.R'), footR: node('Foot.R'),
+      head: node('Head'), neck: node('Neck'), spine: node('Spine2') || node('Spine1'),
+    };
+  }
+  const b = rig.coverBones;
+  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(-0.34, 1.05, 0.16));
+  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(-0.18, 1.36, 0.03));
+  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(0.34, 1.05, 0.16));
+  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(0.18, 1.36, 0.03));
+  rig.visual.position.y = rig.baseVisualY - 0.52 * a;
+  rig.visual.rotation.x = -0.34 * a;
+  if (b.spine) b.spine.rotation.x -= 0.25 * a;
+  if (b.neck) b.neck.rotation.x += 0.18 * a;
+  if (b.head) b.head.rotation.x += 0.16 * a;
   return true;
 }
 
