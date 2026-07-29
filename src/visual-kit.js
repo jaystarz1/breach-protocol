@@ -1691,7 +1691,7 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
     // Real projecting balconies are sparse and deliberately asymmetric. A repeated window
     // grid remains useful for target reading; one damaged balcony every few lots breaks its
     // office-block cadence and gives the facade genuine first-person depth.
-    if (def.height >= 5.8 && lot.width > 6.4 && R() < 0.34) {
+    if (def.balconies !== false && def.height >= 5.8 && lot.width > 6.4 && R() < 0.34) {
       const balconyX = centre + (R() - 0.5) * Math.min(2, lot.width * 0.25);
       const balconyY = Math.min(def.height - 1.35, floorH + 0.08 + (R() < 0.24 ? floorH : 0));
       const balconyWidth = Math.min(3.25, Math.max(2.25, lot.width * 0.32));

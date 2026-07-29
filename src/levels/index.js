@@ -136,6 +136,7 @@ function tower(x, z, w, d, floors, opts = {}) {
     floorH: fh,
     lit: opts.windowLit ?? 0.16,
     damage: opts.facadeDamage ?? 0.5,
+    balconies: opts.balconies,
   };
   geo.push(...facade(x1, z2, x2, z2, 0, floors * fh, 30101 + floors * 17, {
     ...facadeOpts,
@@ -386,7 +387,15 @@ export const LEVELS = [
     geo: () => {
       const g = [];
       g.push(...GROUND(60, 60, C.concrete));
-      g.push(...tower(0, -4, 14, 12, 3));
+      g.push(...tower(0, -4, 14, 12, 3, {
+        facadeDamage: 0.74,
+        windowLit: 0.12,
+        balconies: false,
+      }));
+      // A residential block does not stand alone in a poured-concrete void. This abandoned
+      // car is authoritative cover at the edge of the approach; the desktop renderer replaces
+      // its inexpensive collision body with the authored damaged vehicle.
+      g.push(...car(-15.5, 8.5, true, null, { variant: 0, damage: 0 }));
       return g;
     },
     doors: [

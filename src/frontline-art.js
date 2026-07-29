@@ -980,7 +980,212 @@ export function addFrontlineMissionArt(scene, levelId) {
   const dark = new THREE.MeshStandardMaterial({ color: 0x2b302f, roughness: 0.86 });
   const steel = new THREE.MeshStandardMaterial({ color: 0x30373a, roughness: 0.58, metalness: 0.58 });
 
-  if (levelId === 3) addObservationPost(scene, -2, 9.2, -6, 0);
+  if (levelId === 3) {
+    addObservationPost(scene, -2, 9.2, -6, 0);
+
+    // OP Alpha is a residential courtyard, not a tower dropped onto an empty slab. A broken
+    // paving run leads from the insertion point to the entrance while leaving the actual
+    // ground plane and navigation authoritative.
+    const paving = [];
+    for (let i = 0; i < 7; i++) {
+      for (const side of [-1, 1]) {
+        paving.push([
+          side * (0.61 + (i % 3 - 1) * 0.025), 0.032, 15.1 - i * 2.02,
+          0, (i % 2 ? 0.012 : -0.018) + side * 0.004, 0,
+          1.15 - (i % 3) * 0.025, 0.055, 1.82 - (i % 2) * 0.08,
+        ]);
+      }
+    }
+    const pavingBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), frontline.concrete, paving, false);
+    pavingBatch.name = 'op-alpha-courtyard-pavers';
+
+    // An entrance canopy and its damaged support structure give the front elevation depth.
+    // Everything is above or beside the combat lane, so this visual layer cannot snag actors.
+    const canopyParts = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), frontline.barrierSteel,
+      [
+        [0, 2.78, 2.55, 0, 0, -0.035, 4.65, 0.12, 1.72],
+        [-2.08, 1.45, 2.62, 0, 0, 0.035, 0.1, 2.72, 0.1],
+        [2.08, 1.45, 2.62, 0, 0, -0.028, 0.1, 2.72, 0.1],
+        [0, 2.67, 3.38, 0, 0, 0, 4.5, 0.16, 0.12],
+      ]);
+    canopyParts.name = 'op-alpha-entry-canopy';
+    const canopySoffitMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd0c49d, emissive: 0xffd18a, emissiveIntensity: 0.32,
+      roughness: 0.86, metalness: 0.02,
+    });
+    const canopyLight = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), canopySoffitMaterial,
+      [[0, 2.69, 2.72, 0, 0, 0, 1.1, 0.035, 0.24]], false);
+    canopyLight.name = 'op-alpha-entry-light';
+
+    // A Soviet-era exterior fire escape breaks the east wall's cuboid silhouette and gives
+    // the player an immediate read on three occupied storeys.
+    const firePlatforms = [];
+    const fireRails = [];
+    const fireSideRails = [];
+    const fireBalusters = [];
+    for (const y of [3.35, 6.35]) {
+      for (let i = 0; i < 12; i++) {
+        firePlatforms.push([
+          7.32, y, -5.37 + i * 0.25,
+          0, 0, 0, 1.55, 0.055, 0.14,
+        ]);
+      }
+      fireRails.push([8.02, y + 1.12, -4, 0, 0, 0, 0.07, 0.055, 3.0]);
+      fireSideRails.push(
+        [7.32, y + 1.12, -5.43, 0, 0, 0, 1.45, 0.055, 0.055],
+        [7.32, y + 1.12, -2.57, 0, 0, 0, 1.45, 0.055, 0.055],
+      );
+      for (const z of [-5.25, -4.4, -3.55, -2.75]) {
+        fireBalusters.push([8.02, y + 0.61, z, 0, 0, 0, 0.045, 1.08, 0.045]);
+      }
+    }
+    const platformBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), frontline.barrierSteel, firePlatforms);
+    platformBatch.name = 'op-alpha-fire-escape-platforms';
+    const railBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), steel, fireRails);
+    railBatch.name = 'op-alpha-fire-escape-rails';
+    const sideRailBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), steel, fireSideRails);
+    sideRailBatch.name = 'op-alpha-fire-escape-side-rails';
+    const balusterBatch = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), steel, fireBalusters);
+    balusterBatch.name = 'op-alpha-fire-escape-balusters';
+    const ladder = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), steel,
+      [
+        [8.04, 4.84, -5.08, 0, 0, 0, 0.055, 3.05, 0.055],
+        [8.04, 4.84, -4.35, 0, 0, 0, 0.055, 3.05, 0.055],
+        ...Array.from({ length: 8 }, (_, i) =>
+          [8.04, 3.55 + i * 0.37, -4.715, Math.PI / 2, 0, 0, 0.045, 0.73, 0.045]),
+      ]);
+    ladder.name = 'op-alpha-fire-escape-ladder';
+    const fireBraces = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), steel,
+      [
+        [7.58, 2.94, -5.1, 0, 0, -0.72, 0.055, 1.18, 0.055],
+        [7.58, 2.94, -2.9, 0, 0, -0.72, 0.055, 1.18, 0.055],
+        [7.58, 5.94, -5.1, 0, 0, -0.72, 0.055, 1.18, 0.055],
+        [7.58, 5.94, -2.9, 0, 0, -0.72, 0.055, 1.18, 0.055],
+      ]);
+    fireBraces.name = 'op-alpha-fire-escape-braces';
+
+    // The courtyard's surviving clothes-line frames, blast-bent fence and burned-out play
+    // equipment provide human scale at the flanks without filling the assault route.
+    const courtyardPosts = instanced(
+      scene, new THREE.CylinderGeometry(0.045, 0.06, 2.5, 8), steel,
+      [
+        [-10.5, 1.25, 10.5, 0.02, 0, -0.035, 1, 1, 1],
+        [-10.5, 1.25, 3.8, -0.04, 0, 0.025, 1, 1, 1],
+        [11.5, 1.25, 11.5, 0.03, 0, 0.05, 1, 1, 1],
+        [11.5, 1.25, 5.2, -0.02, 0, -0.04, 1, 1, 1],
+      ]);
+    courtyardPosts.name = 'op-alpha-courtyard-posts';
+    const courtyardCrossbars = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), steel,
+      [
+        [-10.5, 2.42, 10.5, 0, 0, 0.03, 1.5, 0.07, 0.07],
+        [-10.5, 2.42, 3.8, 0, 0, -0.04, 1.5, 0.07, 0.07],
+        [11.5, 2.42, 11.5, 0, 0, -0.04, 1.5, 0.07, 0.07],
+        [11.5, 2.42, 5.2, 0, 0, 0.05, 1.5, 0.07, 0.07],
+      ]);
+    courtyardCrossbars.name = 'op-alpha-courtyard-crossbars';
+
+    const cableMaterial = new THREE.LineBasicMaterial({ color: 0x171918 });
+    for (const x of [-10.5, 11.5]) {
+      const z0 = x < 0 ? 10.5 : 11.5;
+      const z1 = x < 0 ? 3.8 : 5.2;
+      for (const offset of [-0.42, 0, 0.42]) {
+        const points = [];
+        for (let i = 0; i < 12; i++) {
+          const t = i / 11;
+          points.push(new THREE.Vector3(
+            x + offset,
+            2.42 - Math.sin(t * Math.PI) * 0.24,
+            z0 + (z1 - z0) * t,
+          ));
+        }
+        const line = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(points), cableMaterial);
+        line.name = 'op-alpha-clothes-lines';
+        scene.add(line);
+      }
+    }
+
+    const playFrame = instanced(
+      scene, new THREE.CylinderGeometry(0.055, 0.065, 2.8, 8), steel,
+      [
+        [12.7, 1.28, -3.2, 0, 0, 0.42, 1, 1, 1],
+        [15.0, 1.28, -3.2, 0, 0, -0.42, 1, 1, 1],
+        [12.7, 1.28, -6.3, 0, 0, 0.42, 1, 1, 1],
+        [15.0, 1.28, -6.3, 0, 0, -0.42, 1, 1, 1],
+        [13.85, 2.55, -4.75, Math.PI / 2, 0, 0, 1, 1.22, 1],
+      ]);
+    playFrame.name = 'op-alpha-play-frame';
+    const playSeats = instanced(
+      scene, new THREE.BoxGeometry(0.72, 0.08, 0.32), frontline.timber,
+      [
+        [13.2, 0.48, -4.7, 0.05, 0, -0.08, 1, 1, 1],
+        [14.55, 0.2, -5.1, 0.18, 0.12, 0.5, 1, 1, 1],
+      ], false);
+    playSeats.name = 'op-alpha-play-seats';
+
+    // Empty, battered planting beds retain domestic courtyard scale without introducing a
+    // stylized low-poly tree into an otherwise photographic material pass.
+    const treeBeds = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), frontline.concreteDark,
+      [
+        [-13.5, 0.22, -9.05, 0, 0, 0, 2.5, 0.42, 0.28],
+        [-13.5, 0.22, -6.55, 0, 0, 0, 2.5, 0.42, 0.28],
+        [-14.75, 0.22, -7.8, 0, 0, 0, 0.28, 0.42, 2.5],
+        [-12.25, 0.22, -7.8, 0, 0, 0, 0.28, 0.42, 2.5],
+        [14.2, 0.22, 6.55, 0, 0, 0, 2.5, 0.42, 0.28],
+        [14.2, 0.22, 9.05, 0, 0, 0, 2.5, 0.42, 0.28],
+        [12.95, 0.22, 7.8, 0, 0, 0, 0.28, 0.42, 2.5],
+        [15.45, 0.22, 7.8, 0, 0, 0, 0.28, 0.42, 2.5],
+      ]);
+    treeBeds.name = 'op-alpha-courtyard-planter-kerbs';
+    const planterEarth = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), frontline.earthFill,
+      [
+        [-13.5, 0.07, -7.8, 0, 0, 0, 2.18, 0.11, 2.18],
+        [14.2, 0.07, 7.8, 0, 0, 0, 2.18, 0.11, 2.18],
+      ], false);
+    planterEarth.name = 'op-alpha-courtyard-planter-earth';
+
+    // Localized masonry collapse collects against the east side instead of sprinkling the
+    // courtyard uniformly. Three instanced shapes keep the pile cheap.
+    const collapse = [[], [], []];
+    for (let i = 0; i < 36; i++) {
+      const row = Math.floor(i / 9);
+      collapse[i % 3].push([
+        7.8 + (i % 9) * 0.38, 0.08 + (i % 4) * 0.045, -8.8 - row * 0.42,
+        i * 0.17, i * 0.31, i * 0.23,
+        0.48 + (i % 4) * 0.1, 0.48 + (i % 3) * 0.12, 0.45 + (i % 5) * 0.08,
+      ]);
+    }
+    for (let i = 0; i < collapse.length; i++) {
+      const rubble = instanced(
+        scene, RUBBLE_GEOMETRIES[i],
+        i === 1 ? frontline.brick : frontline.concrete,
+        collapse[i], false);
+      rubble.name = `op-alpha-collapse-rubble-${i}`;
+    }
+
+    // A battered defensive corner implies why the observers selected this roof and connects
+    // the apartment mission to the frontline positions used by later levels.
+    addHescoPositions(scene, 'op-alpha-courtyard-hesco', [
+      [16.8, 0.53, 10.8, 0, 0.08, 0, 1.35, 1.02, 0.9],
+      [18.15, 0.53, 10.65, 0, -0.12, 0, 1.35, 1.02, 0.9],
+      [18.9, 0.53, 9.55, 0, Math.PI / 2 + 0.08, 0, 1.35, 1.02, 0.9],
+    ]);
+    addHedgehogs(scene, 'op-alpha-courtyard-hedgehog', [
+      [18.6, 0.92, 14.0, 0, 0.22, 0, 0.82, 0.82, 0.82],
+    ]);
+  }
   if (levelId === 6) addObservationPost(scene, -4, 24.2, 60, 0);
   if (levelId === 7) addObservationPost(scene, -3, 12.25, -2, Math.PI / 2);
 

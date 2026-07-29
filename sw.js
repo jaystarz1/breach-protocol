@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v86-pursuit-route';
+const CACHE = 'breach-protocol-v87-op-alpha-courtyard';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
