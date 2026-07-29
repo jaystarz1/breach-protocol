@@ -69,9 +69,22 @@ def main():
             timeout=90000,
         )
         page.wait_for_timeout(350)
+        page.evaluate("""() => {
+          BP.world.enemies.forEach(enemy => {
+            enemy.hold = true;
+            enemy.speed = 0;
+            enemy.reactTimer = 999;
+          });
+          BP.player.pos.set(22, -5, -26.5);
+          BP.player.yaw = 0;
+          BP.player.pitch = -0.03;
+        }""")
+        page.wait_for_timeout(220)
+        page.screenshot(path=str(output_dir / "command-bunker-approach.png"))
         bastion = page.evaluate("""() => {
           const targets = BP.world.enemies.filter(enemy => enemy.bastion);
           const enemy = targets[0];
+          const scene = BP.world.staticMesh.parent;
           const names = [];
           enemy?.mesh.traverse(object => {
             if (object.name) names.push(object.name);
@@ -86,6 +99,17 @@ def main():
             objective: BP.world.level.objectives.find(objective => objective.type === 'target')?.text,
             objectiveMarkers: BP.world.objMarkers?.length || 0,
             liveMarker: !!BP.world.markLive,
+            bunkerDrawCalls: BP.performance.render.calls,
+            bunkerTriangles: BP.performance.render.triangles,
+            bunkerArt: scene.userData.interiorMissionStats,
+            bunkerBatches: [
+              'bunker-dark-steel-boxes',
+              'bunker-ventilation-trunk',
+              'bunker-command-furniture',
+              'bunker-tactical-map-screen',
+              'bunker-wall-grime',
+              'bunker-floor-grime',
+            ].filter(name => !!scene.getObjectByName(name)),
           };
         }""")
 
@@ -167,6 +191,11 @@ def main():
         }.issubset(set(bastion["namedParts"])), bastion
         assert "BASTION" in bastion["objective"], bastion
         assert bastion["objectiveMarkers"] == 0 and not bastion["liveMarker"], bastion
+        assert bastion["bunkerArt"]["levelId"] == 10, bastion
+        assert bastion["bunkerArt"]["instances"] >= 140, bastion
+        assert len(bastion["bunkerBatches"]) == 6, bastion
+        assert bastion["bunkerDrawCalls"] < 380, bastion
+        assert bastion["bunkerTriangles"] < 750_000, bastion
         assert not errors, errors
         browser.close()
 

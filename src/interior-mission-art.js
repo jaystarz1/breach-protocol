@@ -117,6 +117,114 @@ function signTexture(title, subtitle, accent = '#d8b545') {
   return texture;
 }
 
+function grimeTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  const rng = (() => {
+    let state = 0x51a7d00d;
+    return () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 0xffffffff;
+    };
+  })();
+  ctx.clearRect(0, 0, 512, 512);
+  for (let i = 0; i < 90; i++) {
+    const x = rng() * 512;
+    const y = rng() * 512;
+    const radius = 8 + rng() * 64;
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    const warm = rng() > 0.56;
+    gradient.addColorStop(0, warm ? 'rgba(64,43,27,.2)' : 'rgba(17,24,24,.2)');
+    gradient.addColorStop(0.55, warm ? 'rgba(50,35,25,.08)' : 'rgba(12,18,18,.08)');
+    gradient.addColorStop(1, 'rgba(10,14,14,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+  for (let i = 0; i < 24; i++) {
+    ctx.strokeStyle = `rgba(18,22,21,${0.03 + rng() * 0.06})`;
+    ctx.lineWidth = 1 + rng() * 4;
+    const x = rng() * 512;
+    ctx.beginPath();
+    ctx.moveTo(x, rng() * 120);
+    ctx.bezierCurveTo(
+      x + (rng() - 0.5) * 34, 180,
+      x + (rng() - 0.5) * 54, 330,
+      x + (rng() - 0.5) * 70, 512,
+    );
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function tacticalMapTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 768;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#15201f';
+  ctx.fillRect(0, 0, 768, 512);
+  ctx.strokeStyle = 'rgba(114,151,136,.16)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= 768; x += 48) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 512); ctx.stroke();
+  }
+  for (let y = 0; y <= 512; y += 48) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(768, y); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(131,157,124,.4)';
+  ctx.lineWidth = 3;
+  for (let row = 0; row < 7; row++) {
+    ctx.beginPath();
+    for (let x = 0; x <= 768; x += 16) {
+      const y = 64 + row * 61
+        + Math.sin(x * 0.018 + row * 1.7) * (13 + row * 1.5)
+        + Math.sin(x * 0.043 - row) * 7;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#b44b3f';
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.moveTo(42, 410);
+  ctx.bezierCurveTo(190, 360, 300, 420, 430, 300);
+  ctx.bezierCurveTo(520, 220, 610, 246, 724, 108);
+  ctx.stroke();
+  ctx.strokeStyle = '#caa84d';
+  ctx.lineWidth = 4;
+  ctx.setLineDash([15, 10]);
+  ctx.beginPath();
+  ctx.moveTo(84, 74);
+  ctx.bezierCurveTo(244, 160, 360, 110, 494, 210);
+  ctx.bezierCurveTo(590, 278, 640, 340, 714, 440);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#d7ddd7';
+  ctx.font = '700 24px Arial, sans-serif';
+  ctx.fillText('SECTOR EAST // FIRE CONTROL', 28, 38);
+  ctx.fillStyle = '#849990';
+  ctx.font = '18px monospace';
+  ctx.fillText('DRONE CORRIDORS / BATTERY ROUTES', 29, 485);
+  for (const [x, y, color] of [
+    [170, 325, '#d9ad45'], [390, 286, '#d9ad45'], [555, 195, '#b94c43'],
+    [640, 320, '#b94c43'],
+  ]) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, 9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  return texture;
+}
+
 function addSign(scene, name, title, subtitle, position, rotationY = 0, width = 3.6,
   accent = '#d8b545') {
   const material = new THREE.MeshBasicMaterial({
@@ -507,11 +615,231 @@ function addMetro(scene) {
   return b.flush();
 }
 
+function addCommandBunker(scene) {
+  const b = new Batches(scene);
+  const grime = grimeTexture();
+  const mats = {
+    steel: standard(0x465054, 0.5, 0.62),
+    darkSteel: standard(0x20282b, 0.62, 0.54),
+    duct: standard(0x667174, 0.42, 0.7),
+    cable: standard(0x151a1c, 0.9, 0.04),
+    rubber: standard(0x111516, 0.96, 0),
+    console: standard(0x2d373a, 0.68, 0.34),
+    screen: new THREE.MeshStandardMaterial({
+      color: 0x102727, emissive: 0x1b6e63, emissiveIntensity: 0.48,
+      roughness: 0.34, metalness: 0.05,
+    }),
+    deadScreen: standard(0x101416, 0.82, 0.04),
+    amber: new THREE.MeshBasicMaterial({ color: 0xd89d45 }),
+    green: new THREE.MeshBasicMaterial({ color: 0x51c27c }),
+    red: new THREE.MeshBasicMaterial({ color: 0xa83830 }),
+    paper: standard(0xb9b5a5, 0.98, 0),
+    lampOn: new THREE.MeshStandardMaterial({
+      color: 0xd4dfd8,
+      emissive: 0xc1ddd2,
+      emissiveIntensity: 1.15,
+      roughness: 0.38,
+      metalness: 0.02,
+    }),
+    floorGrime: new THREE.MeshBasicMaterial({
+      color: 0x8a8c83,
+      map: grime,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    }),
+    wallGrime: new THREE.MeshBasicMaterial({
+      color: 0x858981,
+      map: grime,
+      transparent: true,
+      opacity: 0.68,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    }),
+    tacticalMap: new THREE.MeshBasicMaterial({ map: tacticalMapTexture() }),
+  };
+
+  // Five ceiling ribs, a real ventilation trunk and a runged cable tray break the concrete
+  // lid into human scale. They sit above head height and do not alter the bunker collision.
+  for (const z of [-26, -30, -34, -38, -42]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(22, -0.18, z, 15.4, 0.18, 0.22));
+  }
+  b.add('bunker-ventilation-trunk', UNIT_BOX, mats.duct,
+    matrix(16.05, -0.45, -34, 0.86, 0.56, 18.4));
+  for (const z of [-27, -31, -35, -39, -42]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(16.05, -0.45, z, 0.96, 0.63, 0.08));
+  }
+  b.add('bunker-galvanized-boxes', UNIT_BOX, mats.steel,
+    matrix(27.25, -0.36, -34, 0.72, 0.08, 18));
+  for (let z = -42; z <= -26; z += 1.25) {
+    b.add('bunker-galvanized-boxes', UNIT_BOX, mats.steel,
+      matrix(27.25, -0.42, z, 0.84, 0.035, 0.045));
+  }
+  for (const x of [26.98, 27.22, 27.46]) {
+    b.add('bunker-cables', CABLE, mats.cable,
+      matrix(x, -0.48, -34, 1, 17, 1, Math.PI / 2));
+  }
+
+  // Service pipes and electrical boxes make both sidewalls readable while remaining less
+  // than 35cm proud of the wall. Repetition is instanced; combat paths remain untouched.
+  for (const y of [-1.05, -1.32]) {
+    b.add('bunker-service-pipes-west', PIPE, mats.steel,
+      matrix(14.24, y, -34, 1, 18, 1, Math.PI / 2));
+  }
+  for (let z = -41.5; z <= -26.5; z += 3) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(14.22, -1.18, z, 0.16, 0.52, 0.08));
+  }
+  for (const [x, z, yaw] of [
+    [14.28, -28, Math.PI / 2], [14.28, -35, Math.PI / 2],
+    [29.72, -27.5, -Math.PI / 2], [29.72, -39.5, -Math.PI / 2],
+  ]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(x, -2.1, z, 0.18, 0.82, 0.62, 0, yaw));
+    b.add('bunker-galvanized-boxes', UNIT_BOX, mats.steel,
+      matrix(x + (x < 22 ? 0.105 : -0.105), -2.1, z,
+        0.025, 0.68, 0.5, 0, yaw));
+  }
+
+  // The east wall is the fire-control station. Consoles are shallow wall furniture, with
+  // alternating live/dead screens and separate physical controls rather than a flat decal.
+  b.add('bunker-command-furniture', UNIT_BOX, mats.console,
+    matrix(29.18, -3.54, -33.2, 0.92, 0.18, 6.8));
+  for (const z of [-30.8, -33.2, -35.6]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(29.25, -4.02, z, 0.12, 0.82, 0.12));
+  }
+  for (const [z, live] of [[-30.9, true], [-33.2, true], [-35.5, false]]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(29.05, -2.92, z, 0.13, 0.72, 1.2));
+    b.add(live ? 'bunker-monitor-live' : 'bunker-monitor-dead', UNIT_BOX,
+      live ? mats.screen : mats.deadScreen,
+      matrix(28.975, -2.92, z, 0.018, 0.58, 1.02));
+    for (let i = -2; i <= 2; i++) {
+      b.add('bunker-console-switches', UNIT_BOX, i === 2 ? mats.red : mats.amber,
+        matrix(28.68, -3.405, z + i * 0.16, 0.025, 0.028, 0.055));
+    }
+  }
+
+  // The rear wall is the heart of the command post. A continuous bench and framed tactical
+  // display fill the player's approach view without stealing floor space from BASTION's loop.
+  b.add('bunker-command-furniture', UNIT_BOX, mats.console,
+    matrix(22, -3.54, -43.12, 13.6, 0.18, 0.82));
+  for (const x of [16.2, 19.1, 22, 24.9, 27.8]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(x, -4.02, -43.16, 0.12, 0.82, 0.12));
+  }
+  for (const [x, live] of [[17.0, false], [22.0, true], [27.0, true]]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(x, -2.95, -42.78, 1.55, 0.72, 0.14));
+    b.add(live ? 'bunker-monitor-live' : 'bunker-monitor-dead', UNIT_BOX,
+      live ? mats.screen : mats.deadScreen,
+      matrix(x, -2.95, -42.695, 1.36, 0.58, 0.018));
+  }
+  b.add('bunker-tactical-map-screen', UNIT_BOX, mats.tacticalMap,
+    matrix(20.2, -1.66, -43.68, 5.4, 1.72, 0.035));
+  b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+    matrix(20.2, -0.77, -43.65, 5.72, 0.09, 0.1));
+  b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+    matrix(20.2, -2.55, -43.65, 5.72, 0.09, 0.1));
+  for (const x of [17.37, 23.03]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(x, -1.66, -43.65, 0.09, 1.86, 0.1));
+  }
+
+  // Radio racks occupy the dead strip along the west wall. Slot faces, handles and LEDs
+  // provide close-range material separation without adding unique draw calls per cabinet.
+  for (const z of [-30.2, -33.1, -36.0]) {
+    b.add('bunker-command-furniture', UNIT_BOX, mats.console,
+      matrix(14.62, -3.42, z, 0.72, 2.05, 1.18));
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(15.0, -3.42, z, 0.025, 1.88, 1.03));
+    for (let y = -4.15; y <= -2.72; y += 0.24) {
+      b.add('bunker-galvanized-boxes', UNIT_BOX, mats.steel,
+        matrix(15.02, y, z, 0.018, 0.035, 0.78));
+    }
+    for (const y of [-4.02, -3.54, -3.06]) {
+      b.add('bunker-radio-led-green', LED, mats.green,
+        matrix(15.06, y, z + 0.38));
+      b.add('bunker-radio-led-amber', LED, mats.amber,
+        matrix(15.06, y, z + 0.29));
+    }
+  }
+
+  // Papers and cable tails keep the workstation from reading as a pristine showroom.
+  for (const [x, z, r, s] of [
+    [28.72, -31.6, 0.2, 0.34], [28.7, -34.1, -0.35, 0.4],
+    [22.4, -28.2, 0.55, 0.48], [18.2, -40.9, -0.3, 0.38],
+  ]) {
+    b.add('bunker-map-sheets', PAPER, mats.paper,
+      matrix(x, x > 28 ? -3.41 : -4.46, z, s, s, s, -Math.PI / 2, 0, r));
+  }
+  for (const [x, z, length, rz] of [
+    [28.35, -31.6, 1.3, 0.35], [28.4, -34.3, 1.6, -0.42],
+    [15.3, -37.8, 1.2, 0.28],
+  ]) {
+    b.add('bunker-cables', CABLE, mats.cable,
+      matrix(x, -4.39, z, 1, length, 1, Math.PI / 2, 0, rz));
+  }
+
+  // Wall seepage and smoke are decal planes rather than more geometry. Their soft alpha
+  // removes the clean-room concrete read and their shared texture costs one upload.
+  const wallGrime = new THREE.PlaneGeometry(1, 1);
+  b.add('bunker-wall-grime', wallGrime, mats.wallGrime,
+    matrix(22, -2.22, -43.705, 14.8, 4.15, 1));
+  b.add('bunker-wall-grime', wallGrime, mats.wallGrime,
+    matrix(14.265, -2.28, -34, 17.8, 4.0, 1, 0, Math.PI / 2));
+  b.add('bunker-wall-grime', wallGrime, mats.wallGrime,
+    matrix(29.735, -2.18, -34, 17.8, 3.9, 1, 0, -Math.PI / 2));
+
+  // Layered grime sits millimetres above the floor. One material and four planes replace
+  // broad uniform concrete with damp traffic paths; transparent edges prevent hard decals.
+  const floorGrime = new THREE.PlaneGeometry(1, 1);
+  for (const [x, z, sx, sz, rz] of [
+    [19.2, -29.0, 4.5, 6.2, -0.12],
+    [24.8, -34.2, 6.6, 5.2, 0.08],
+    [18.6, -40.1, 3.8, 4.8, 0.2],
+    [27.1, -40.2, 3.4, 4.2, -0.18],
+  ]) {
+    b.add('bunker-floor-grime', floorGrime, mats.floorGrime,
+      matrix(x, -4.475, z, sx, sz, 1, -Math.PI / 2, 0, rz));
+  }
+
+  // Practical fluorescent strips establish alternating pools rather than flattening the
+  // whole room. Two non-shadowing lights are a stable shader key and are prewarmed at load.
+  for (const [x, z, live] of [[19.2, -29, true], [24.8, -34, true], [19.2, -39, false]]) {
+    b.add('bunker-dark-steel-boxes', UNIT_BOX, mats.darkSteel,
+      matrix(x, -0.22, z, 2.8, 0.13, 0.34));
+    b.add(live ? 'bunker-light-live' : 'bunker-light-dead', UNIT_BOX,
+      live ? mats.lampOn : mats.deadScreen,
+      matrix(x, -0.3, z, 2.45, 0.045, 0.22));
+    if (live) {
+      const light = new THREE.PointLight(0xb8d4c9, 1.2, 11, 2);
+      light.position.set(x, -0.62, z);
+      light.castShadow = false;
+      scene.add(light);
+    }
+  }
+
+  addSign(scene, 'bunker-command-status', '37TH ASSAULT', 'FIRE CONTROL / SECTOR EAST',
+    [26.25, -1.9, -43.73], 0, 3.2, '#a6463d');
+  addSign(scene, 'bunker-ew-status', 'EW NET', 'JAMMING / DRONE INTERCEPT',
+    [29.68, -1.82, -39], -Math.PI / 2, 2.5, '#bd8c3c');
+
+  return b.flush();
+}
+
 export function addInteriorMissionArt(scene, levelId) {
   if (!quality.desktop) return;
   let batches = null;
   if (levelId === 8) batches = addRecordsOffice(scene);
   if (levelId === 9) batches = addMetro(scene);
+  if (levelId === 10) batches = addCommandBunker(scene);
   if (batches) {
     scene.userData.interiorMissionStats = {
       levelId,
