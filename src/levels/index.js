@@ -906,6 +906,10 @@ export const LEVELS = [
       // yBase -1.22, not -1.2: at -1.2 this 58m rail caps out at exactly y=0, coplanar with
       // the platform slab it runs alongside, which strobes as a line down the whole platform.
       g.push(...wall(-13, 28, -13, -30, 1.2, C.metal, [], -1.22, 0.2));
+      // The disabled evacuation car is rendered by the desktop interior layer. A hidden
+      // collision hull prevents the track-side set piece from becoming something actors and
+      // bullets can pass through while preserving the platform combat route.
+      g.push([-17.15, 1.55, -4, 4.35, 3.1, 24, C.metal, true, false, false]);
       // tunnel south continues
       g.push(...wall(-22, -30, 22, -30, 5, C.tunnel, [{ off: 16, w: 6, h: 4 }]));
       g.push(...floorSlab(0, -45, 14, 30, 0, 1, C.tunnel));

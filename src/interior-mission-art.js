@@ -5,7 +5,7 @@
 // readable lighting that make those boxes feel like places rather than grey test chambers.
 import * as THREE from 'three';
 import { quality } from './quality.js';
-import { photoSurfaces } from './textures.js';
+import { photoSurfaces, surfaces } from './textures.js';
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const PIPE = new THREE.CylinderGeometry(0.065, 0.065, 1, 12);
@@ -17,6 +17,34 @@ const MONITOR_BASE = new THREE.CylinderGeometry(0.19, 0.23, 0.035, 16);
 const LED = new THREE.SphereGeometry(0.018, 8, 5);
 const PLATFORM_STUD = new THREE.CylinderGeometry(0.055, 0.055, 0.018, 10);
 const CABLE = new THREE.CylinderGeometry(0.018, 0.018, 1, 7);
+const TRAIN_SIDE_DECAL = new THREE.PlaneGeometry(1, 1);
+const METRO_WHEEL = new THREE.CylinderGeometry(0.38, 0.38, 0.18, 18);
+const METRO_CAR_SHELL = (() => {
+  // One softly bevelled extrusion replaces the usual stack of cuboids. The asymmetric
+  // shoulders and rolled roof are enough to read as a rail car even before the doors,
+  // glazing, bogies and route furniture are applied.
+  const profile = new THREE.Shape();
+  profile.moveTo(-2.08, -1.18);
+  profile.lineTo(2.08, -1.18);
+  profile.lineTo(2.12, 0.96);
+  profile.quadraticCurveTo(2.08, 1.4, 1.62, 1.66);
+  profile.quadraticCurveTo(0, 1.95, -1.62, 1.66);
+  profile.quadraticCurveTo(-2.08, 1.4, -2.12, 0.96);
+  profile.closePath();
+  const geometry = new THREE.ExtrudeGeometry(profile, {
+    depth: 24,
+    steps: 1,
+    bevelEnabled: true,
+    bevelSegments: 2,
+    bevelSize: 0.07,
+    bevelThickness: 0.07,
+    curveSegments: 6,
+  });
+  geometry.translate(0, 0, -12);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+})();
 const PAPER = (() => {
   const shape = new THREE.Shape();
   shape.moveTo(-0.48, -0.35);
@@ -634,6 +662,8 @@ function addMetroBench(b, x, z, yaw, mats) {
 
 function addMetro(scene) {
   const b = new Batches(scene);
+  const procedural = surfaces();
+  const trainGrime = grimeTexture();
   const mats = {
     concrete: concreteMaterial(0x6d706d),
     tile: standard(0x8c918d, 0.86, 0.03),
@@ -646,6 +676,51 @@ function addMetro(scene) {
     pipe: standard(0x6a7271, 0.5, 0.7),
     cable: standard(0x171b1c, 0.92, 0.02),
     bench: standard(0x3f5556, 0.62, 0.3),
+    trainBody: new THREE.MeshStandardMaterial({
+      color: 0x6f7776,
+      map: procedural.metal.map,
+      normalMap: procedural.metal.normalMap,
+      roughnessMap: procedural.metal.roughnessMap,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+      roughness: 0.64,
+      metalness: 0.48,
+    }),
+    trainLower: standard(0x343b3c, 0.72, 0.42),
+    trainAccent: standard(0x8f3e35, 0.72, 0.22),
+    trainGlass: new THREE.MeshPhysicalMaterial({
+      color: 0x17282c,
+      roughness: 0.24,
+      metalness: 0.12,
+      clearcoat: 0.42,
+      clearcoatRoughness: 0.18,
+    }),
+    trainInterior: new THREE.MeshStandardMaterial({
+      color: 0x9a947d,
+      emissive: 0x7a7258,
+      emissiveIntensity: 0.16,
+      roughness: 0.82,
+    }),
+    rust: standard(0x614139, 0.9, 0.28),
+    trainGrime: new THREE.MeshBasicMaterial({
+      color: 0x6d655a,
+      map: trainGrime,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    }),
+    stationGrime: new THREE.MeshBasicMaterial({
+      color: 0x4f514a,
+      map: trainGrime,
+      transparent: true,
+      opacity: 0.31,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    }),
+    hazard: standard(0x9e7c24, 0.82, 0.08),
+    paper: standard(0xa9a48f, 0.98, 0),
     lampOff: standard(0xabb2aa, 0.42, 0.08),
     lampOn: new THREE.MeshStandardMaterial({
       color: 0xc6c8b8, emissive: 0xd5d0a8, emissiveIntensity: 0.42,
@@ -688,8 +763,21 @@ function addMetro(scene) {
   }
   b.add('metro-stairwell-lintel', UNIT_BOX, mats.concrete,
     matrix(0, 4.75, 28.18, 4.6, 0.7, 0.34), true);
+  // Close the four-metre void above the underground opening. The collision wall ends at the
+  // station ceiling, but the entrance pavilion is almost four metres taller; without this
+  // bulkhead the spawn view looked through the stair portal into the renderer background.
+  b.add('metro-stairwell-upper-bulkhead', UNIT_BOX, mats.concrete,
+    matrix(0, 7.08, 28.18, 20.0, 3.95, 0.42), true);
+  b.add('metro-stairwell-upper-band', UNIT_BOX, mats.darkTile,
+    matrix(0, 5.22, 28.41, 19.8, 0.18, 0.055));
+  for (const x of [-7.8, -5.2, -2.6, 0, 2.6, 5.2, 7.8]) {
+    b.add('metro-stairwell-bulkhead-mullions', UNIT_BOX, mats.darkTile,
+      matrix(x, 7.08, 28.42, 0.1, 3.55, 0.055));
+  }
   addSign(scene, 'metro-stairwell-sign', 'PLATFORM 2', 'TRAINS / SERVICE TUNNEL',
     [0, 4.72, 28.37], 0, 2.4, '#bd3d35');
+  addSign(scene, 'metro-stairwell-bulkhead-sign', 'KORSAK EAST', 'DESCENT / PLATFORM 2',
+    [0, 6.82, 28.43], 0, 3.7, '#bd3d35');
   for (const x of [-4.2, 4.2]) {
     b.add('metro-entry-railings', PIPE, mats.darkMetal, matrix(x, 6.72, 35.9, 1, 1.35, 1));
     b.add('metro-entry-railings', PIPE, mats.darkMetal,
@@ -741,13 +829,15 @@ function addMetro(scene) {
 
   // Track hardware: real twin rails, sleepers and a tactile platform edge. These are close
   // to the player for most of the mission, so silhouettes matter more than extra textures.
+  b.add('metro-track-bed-surface', UNIT_BOX, mats.trainLower,
+    matrix(-17.15, 0.025, -1, 8.15, 0.045, 57));
   for (const x of [-19.2, -15.1]) {
     b.add('metro-running-rails', UNIT_BOX, mats.rail,
-      matrix(x, -0.9, -1, 0.12, 0.15, 58), true);
+      matrix(x, 0.14, -1, 0.12, 0.16, 58), true);
   }
   for (let z = 26; z >= -29; z -= 1.35) {
     b.add('metro-sleepers', UNIT_BOX, mats.sleeper,
-      matrix(-17.15, -1.06, z, 6.1, 0.14, 0.24));
+      matrix(-17.15, 0.075, z, 6.1, 0.08, 0.24));
   }
   b.add('metro-warning-strip', UNIT_BOX, mats.warning,
     matrix(-12.68, 0.04, -1, 0.42, 0.055, 57));
@@ -755,6 +845,87 @@ function addMetro(scene) {
     b.add('metro-platform-studs', PLATFORM_STUD, mats.warning,
       matrix(-12.66, 0.085, z, 1, 1, 1));
   }
+
+  // A disabled evacuation train gives the track trench a subject and supplies the scale that
+  // bare rails cannot. The shell is one bevelled extrusion; all repeated side details are
+  // instanced, so the 24-metre car costs fewer calls than a pile of decorative crates.
+  b.add('metro-train-shell', METRO_CAR_SHELL, mats.trainBody,
+    matrix(-17.15, 1.2, -4, 1, 1, 1), true);
+  b.add('metro-train-lower-skirt', UNIT_BOX, mats.trainLower,
+    matrix(-14.98, 0.5, -4, 0.11, 0.58, 23.3), true);
+  b.add('metro-train-accent-stripe', UNIT_BOX, mats.trainAccent,
+    matrix(-14.93, 1.54, -4, 0.055, 0.18, 23.1));
+
+  const trainWindows = [6.3, 0.9, -2.0, -4.9, -11.0, -13.8];
+  for (const [index, z] of trainWindows.entries()) {
+    // Two dark openings expose a little warm carriage interior while the others remain dead.
+    if (index === 1 || index === 4) {
+      b.add('metro-train-window-interiors', UNIT_BOX, mats.trainInterior,
+        matrix(-15.005, 2.21, z, 0.035, 0.62, 1.48));
+    }
+    b.add('metro-train-windows', UNIT_BOX, mats.trainGlass,
+      matrix(-14.955, 2.21, z, 0.035, 0.68, 1.55));
+    b.add('metro-train-window-sills', UNIT_BOX, mats.trainLower,
+      matrix(-14.91, 1.83, z, 0.055, 0.055, 1.68));
+    b.add('metro-train-window-frames', UNIT_BOX, mats.trainLower,
+      matrix(-14.905, 2.21, z - 0.81, 0.055, 0.82, 0.045));
+    b.add('metro-train-window-frames', UNIT_BOX, mats.trainLower,
+      matrix(-14.905, 2.21, z + 0.81, 0.055, 0.82, 0.045));
+    b.add('metro-train-window-frames', UNIT_BOX, mats.trainLower,
+      matrix(-14.905, 2.59, z, 0.055, 0.045, 1.66));
+  }
+  for (const z of [3.72, -8.05]) {
+    for (const offset of [-0.46, 0.46]) {
+      b.add('metro-train-door-panels', UNIT_BOX, mats.trainAccent,
+        matrix(-14.94, 1.74, z + offset, 0.065, 2.3, 0.86));
+      b.add('metro-train-door-windows', UNIT_BOX, mats.trainGlass,
+        matrix(-14.895, 2.23, z + offset, 0.035, 0.72, 0.62));
+    }
+    b.add('metro-train-door-seams', UNIT_BOX, mats.trainLower,
+      matrix(-14.89, 1.74, z, 0.025, 2.25, 0.035));
+    b.add('metro-train-door-frames', UNIT_BOX, mats.trainLower,
+      matrix(-14.885, 2.9, z, 0.04, 0.055, 2.02));
+    for (const offset of [-1.02, 1.02]) {
+      b.add('metro-train-door-frames', UNIT_BOX, mats.trainLower,
+        matrix(-14.885, 1.74, z + offset, 0.04, 2.35, 0.055));
+    }
+    b.add('metro-train-door-handles', SMALL_PIPE, mats.darkMetal,
+      matrix(-14.84, 1.76, z - 0.13, 1, 0.24, 1));
+  }
+  for (const z of [7.25, 5.35, 2.3, -0.55, -3.45, -6.4, -9.6, -12.5, -15.1]) {
+    b.add('metro-train-body-seams', UNIT_BOX, mats.trainLower,
+      matrix(-14.90, 1.58, z, 0.04, 2.82, 0.025));
+  }
+  for (let z = -14.2; z <= 6.2; z += 1.7) {
+    b.add('metro-train-lower-vents', UNIT_BOX, mats.rust,
+      matrix(-14.90, 0.52, z, 0.04, 0.055, 1.05));
+  }
+  b.add('metro-train-window-boards', UNIT_BOX, mats.rust,
+    matrix(-14.86, 2.21, -13.8, 0.035, 0.09, 1.62, 0.42, 0, 0));
+  b.add('metro-train-window-boards', UNIT_BOX, mats.rust,
+    matrix(-14.855, 2.21, -13.8, 0.035, 0.09, 1.62, -0.42, 0, 0));
+  b.add('metro-train-grime-decals', TRAIN_SIDE_DECAL, mats.trainGrime,
+    matrix(-14.82, 1.62, -9.2, 10.6, 2.75, 1, 0, Math.PI / 2, 0));
+  b.add('metro-train-grime-decals', TRAIN_SIDE_DECAL, mats.trainGrime,
+    matrix(-14.815, 1.62, 3.4, 8.8, 2.75, 1, 0, Math.PI / 2, 0));
+  for (const z of [-11.2, 3.1]) {
+    for (const x of [-19.12, -15.18]) {
+      b.add('metro-train-wheels', METRO_WHEEL, mats.darkMetal,
+        matrix(x, 0.36, z, 1, 1, 1, 0, 0, Math.PI / 2), true);
+    }
+    b.add('metro-train-bogies', UNIT_BOX, mats.trainLower,
+      matrix(-17.15, 0.4, z, 3.5, 0.42, 2.3), true);
+  }
+  for (const z of [-10.5, -3.8, 2.9]) {
+    b.add('metro-train-roof-vents', UNIT_BOX, mats.trainLower,
+      matrix(-17.15, 3.17, z, 1.25, 0.18, 1.5));
+    for (const offset of [-0.42, 0, 0.42]) {
+      b.add('metro-train-roof-vent-slats', UNIT_BOX, mats.rust,
+        matrix(-17.15 + offset, 3.27, z, 0.18, 0.035, 1.22));
+    }
+  }
+  addSign(scene, 'metro-train-route-board', 'EVACUATION 04', 'KORSAK / EAST SECTOR',
+    [-14.885, 2.64, -4.0], Math.PI / 2, 2.1, '#bd3d35');
 
   // Two pipe/cable runs lead the eye toward the south service tunnel.
   for (const [x, y, material] of [
@@ -775,6 +946,75 @@ function addMetro(scene) {
   addMetroBench(b, 15.4, 15, Math.PI / 2, mats);
   addMetroBench(b, 15.4, -8, Math.PI / 2, mats);
   addMetroBench(b, -5.2, -24, 0, mats);
+
+  // Platform identity and evacuation residue. These sit against the east wall or beneath
+  // benches, leaving the combat/navigation lane through the columns unchanged.
+  addSign(scene, 'metro-station-name-north', 'KORSAK EAST', 'PLATFORM 2 / ПЛАТФОРМА',
+    [21.66, 2.82, 11], -Math.PI / 2, 3.4, '#bd3d35');
+  addSign(scene, 'metro-station-name-south', 'KORSAK EAST', 'SOUTH SERVICE / SHELTER',
+    [21.66, 2.82, -13], -Math.PI / 2, 3.4, '#bd3d35');
+  addSign(scene, 'metro-hanging-direction', 'SOUTH TUNNEL', 'HOSTAGES / SERVICE ACCESS  ↓',
+    [10, 3.72, -2], 0, 2.8, '#b98f32');
+  for (const z of [5.5, -19.5]) {
+    b.add('metro-emergency-cabinets', UNIT_BOX, mats.trainAccent,
+      matrix(21.57, 1.28, z, 0.2, 1.55, 0.9));
+    b.add('metro-emergency-cabinet-doors', UNIT_BOX, mats.darkMetal,
+      matrix(21.44, 1.28, z, 0.045, 1.35, 0.72));
+    b.add('metro-emergency-cabinet-handles', SMALL_PIPE, mats.rail,
+      matrix(21.39, 1.2, z - 0.22, 1, 0.24, 1));
+  }
+  for (const [x, z, sx, sy, sz, color] of [
+    [17.6, 17.8, 0.72, 0.52, 0.42, mats.trainLower],
+    [18.4, 17.5, 0.46, 0.74, 0.34, mats.trainAccent],
+    [16.8, -8.9, 0.62, 0.44, 0.38, mats.trainLower],
+    [17.5, -9.2, 0.48, 0.66, 0.32, mats.trainAccent],
+    [19.8, -23.8, 0.72, 0.5, 0.4, mats.trainLower],
+  ]) {
+    b.add('metro-abandoned-luggage', UNIT_BOX, color,
+      matrix(x, sy / 2 + 0.03, z, sx, sy, sz));
+    b.add('metro-luggage-handles', SMALL_PIPE, mats.darkMetal,
+      matrix(x, sy + 0.12, z, 1, 0.22, 1));
+  }
+  for (const [x, z, rz, scale] of [
+    [11.2, 12.8, 0.2, 0.36], [18.5, 8.2, -0.5, 0.42],
+    [3.5, 3.8, 0.8, 0.32], [14.0, -1.6, -0.2, 0.44],
+    [6.2, -7.2, 0.4, 0.38], [18.2, -13.1, -0.8, 0.46],
+    [-1.2, -19.2, 0.6, 0.34], [11.4, -25.0, -0.3, 0.4],
+  ]) {
+    b.add('metro-floor-paper', PAPER, mats.paper,
+      matrix(x, 0.024, z, scale, scale, scale, -Math.PI / 2, 0, rz));
+  }
+  for (const [x, z, rx, rz] of [
+    [-3.5, 15, 0.07, -0.045], [12.2, 8, -0.08, 0.035],
+    [-4.8, -6, 0.11, -0.035], [12.8, -18, -0.09, 0.045],
+  ]) {
+    b.add('metro-damaged-ceiling-panels', UNIT_BOX, mats.concrete,
+      matrix(x, 4.51, z, 2.6, 0.07, 1.7, rx, 0, rz));
+  }
+  for (const [x, z, sx, sz, rz] of [
+    [8.5, 19, 4.6, 5.2, 0.12], [2, 7, 5.4, 6.2, -0.08],
+    [13.5, -4, 4.2, 5.6, 0.18], [4.5, -18, 5.8, 6.4, -0.12],
+    [1.8, -37, 4.4, 4.8, 0.1], [-2.4, -48, 4.6, 5.8, -0.16],
+  ]) {
+    b.add('metro-floor-grime-decals', TRAIN_SIDE_DECAL, mats.stationGrime,
+      matrix(x, 0.028, z, sx, sz, 1, -Math.PI / 2, 0, rz));
+  }
+  for (const [x, y, z, sy, sz, side] of [
+    [21.67, 1.7, 18, 2.6, 4.2, -1], [21.67, 1.55, -20, 2.3, 4.8, -1],
+    [-6.64, 1.55, -39, 2.4, 3.2, 1], [6.64, 1.6, -46, 2.6, 3.8, -1],
+    [-6.64, 1.5, -54, 2.2, 3.4, 1],
+  ]) {
+    b.add('metro-wall-grime-decals', TRAIN_SIDE_DECAL, mats.stationGrime,
+      matrix(x, y, z, sz, sy, 1, 0, side * Math.PI / 2, 0));
+  }
+  for (const [x, y, z, sy, sz] of [
+    [21.69, 1.18, 1, 0.72, 1.6], [21.69, 0.58, -6, 0.68, 2.2],
+    [21.69, 1.05, -24, 0.8, 1.5], [6.66, 0.75, -35, 0.7, 1.4],
+    [-6.66, 1.25, -45, 0.9, 1.8], [6.66, 1.0, -56, 0.75, 1.5],
+  ]) {
+    b.add('metro-missing-tile-patches', UNIT_BOX, mats.darkMetal,
+      matrix(x, y, z, 0.055, sy, sz));
+  }
 
   // Alternating live/dead fluorescent housings create a readable route without flattening
   // the whole underground level into uniform daylight.
@@ -814,6 +1054,34 @@ function addMetro(scene) {
   for (let z = -57; z <= -33; z += 4) {
     b.add('metro-tunnel-ceiling-ribs', UNIT_BOX, mats.darkMetal,
       matrix(0, 4.25, z, 13.4, 0.16, 0.22));
+    b.add('metro-tunnel-wall-pilasters', UNIT_BOX, mats.darkMetal,
+      matrix(-6.48, 2.2, z, 0.32, 4.3, 0.34));
+    b.add('metro-tunnel-wall-pilasters', UNIT_BOX, mats.darkMetal,
+      matrix(6.48, 2.2, z, 0.32, 4.3, 0.34));
+    if (z === -37 || z === -49) {
+      b.add('metro-tunnel-hazard-bands', UNIT_BOX, mats.hazard,
+        matrix(-6.29, 1.12, z, 0.06, 1.65, 0.16));
+      b.add('metro-tunnel-hazard-bands', UNIT_BOX, mats.hazard,
+        matrix(6.29, 1.12, z, 0.06, 1.65, 0.16));
+    }
+  }
+  b.add('metro-tunnel-drain-channel', UNIT_BOX, mats.darkMetal,
+    matrix(0, 0.025, -45, 0.55, 0.045, 28));
+  for (let z = -58; z <= -32; z += 0.82) {
+    b.add('metro-tunnel-drain-grates', UNIT_BOX, mats.rail,
+      matrix(0, 0.065, z, 0.48, 0.025, 0.055));
+  }
+  for (const z of [-39, -51]) {
+    b.add('metro-tunnel-service-doors', UNIT_BOX, mats.darkMetal,
+      matrix(6.58, 1.18, z, 0.12, 2.28, 1.5));
+    b.add('metro-tunnel-service-door-frames', UNIT_BOX, mats.rust,
+      matrix(6.48, 2.35, z, 0.16, 0.08, 1.7));
+    for (const dz of [-0.82, 0.82]) {
+      b.add('metro-tunnel-service-door-frames', UNIT_BOX, mats.rust,
+        matrix(6.48, 1.18, z + dz, 0.16, 2.35, 0.08));
+    }
+    b.add('metro-tunnel-service-door-handles', SMALL_PIPE, mats.rail,
+      matrix(6.39, 1.08, z - 0.45, 1, 0.22, 1));
   }
   for (const [side, z] of [[-1, -37], [1, -43], [-1, -49], [1, -55]]) {
     const x = side * 6.55;
