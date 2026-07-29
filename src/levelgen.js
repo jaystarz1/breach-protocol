@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from '../lib/BufferGeometryUtils.js';
-import { makeBox } from './physics.js';
+import { groundHeight, makeBox } from './physics.js';
 import { quality } from './quality.js';
 import { photoSurfaces, surfaces } from './textures.js';
 import {
@@ -726,6 +726,25 @@ export function animateDeathRig(g, dt) {
   g.rotation.x = motion.startX + (motion.targetX - motion.startX) * ease - settle;
   g.rotation.z = motion.startZ + (motion.targetZ - motion.startZ) * ease;
   return t;
+}
+
+// A root rotated from an upright pose can leave the torso suspended over the lower side of a
+// stair even though one boot still touches the tread where the actor died. Settle against the
+// surface under the fallen torso, not only the original standing point. This stays kinematic
+// and deterministic—no per-limb ragdoll cost—but removes the levitating stairwell bodies.
+export function settleDeathRig(g, solids, dt) {
+  const motion = g.userData.deathMotion;
+  if (!motion || motion.t < 0.34 || !solids?.length) return;
+  const bodyAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(g.quaternion);
+  const torsoDistance = 0.88;
+  const sampleX = g.position.x + bodyAxis.x * torsoDistance;
+  const sampleZ = g.position.z + bodyAxis.z * torsoDistance;
+  const support = groundHeight(
+    solids, sampleX, sampleZ, 0.16, g.position.y + 1.15);
+  if (support === -Infinity) return;
+  const targetY = support + 0.1 - bodyAxis.y * torsoDistance;
+  const settleBlend = Math.min(1, (motion.t - 0.34) / 0.66);
+  g.position.y += (targetY - g.position.y) * Math.min(1, dt * 14) * settleBlend;
 }
 
 const doorGeometryCache = new Map();

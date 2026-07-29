@@ -1,5 +1,6 @@
 import {
   makeCharacter, animateDeathRig, animateRig, coverPoseRig, deathPose, releaseHostageRig,
+  settleDeathRig,
 } from './levelgen.js';
 import { groundHeight, hasLOS, resolveXZ } from './physics.js';
 import { findPath, nearestNode } from './navgrid.js';
@@ -237,6 +238,7 @@ export class Civilian {
   update(dt, world) {
     if (this.dead) {
       this.deathAnim = animateDeathRig(this.mesh, dt);
+      settleDeathRig(this.mesh, world.solids, dt);
       return;
     }
     if (this.perch) { this.updateWindow(dt, world); return; }

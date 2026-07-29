@@ -81,6 +81,10 @@ def main():
           }
         }""")
         page.wait_for_function("() => BP.world.objectiveIdx === 1", timeout=5000)
+        transient_before = page.evaluate("""() => {
+          BP.weapons.onFire(0);
+          return BP.world.effects.filter(effect => effect.combatTransient).length;
+        }""")
         page.evaluate("""() => {
           const timer = setInterval(() => BP.player.pos.set(-11.2, 0.1, -41.6), 16);
           setTimeout(() => clearInterval(timer), 750);
@@ -100,8 +104,13 @@ def main():
             routes: drone.routeModels.length,
             routeParts: drone.routeModels[0]?.children.length || 0,
             resultVisible: +drone.result.style.opacity,
+            transientAfter: BP.world.effects.filter(effect => effect.combatTransient).length,
+            visibleGroundActors: [
+              ...BP.world.enemies, ...BP.world.civilians, ...BP.world.allies,
+            ].filter(actor => actor.mesh.visible).length,
           };
         }""")
+        recon["transientBefore"] = transient_before
         page.wait_for_timeout(100)
         page.screenshot(path=str(output / "recon-consequence.png"))
 
@@ -126,6 +135,32 @@ def main():
 
         page.evaluate("() => BP.startLevel(6)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
+        head = page.evaluate("""async () => {
+          const { animateRig, coverPoseRig } = await import('./src/levelgen.js');
+          const civilian = BP.world.civilians.find(actor => !actor.hostage);
+          for (const actor of [...BP.world.enemies, ...BP.world.allies, ...BP.world.civilians]) {
+            actor.update = () => {};
+          }
+          const rig = civilian.mesh.userData.rig;
+          let panicMax = 0;
+          for (let frame = 0; frame < 1800; frame++) {
+            animateRig(civilian.mesh, frame * 0.19, true, 0, true, 'flee');
+            const pose = rig.civilianFramePose;
+            panicMax = Math.max(panicMax, pose.head.quaternion.angleTo(pose.headBase));
+          }
+          let coverMax = 0;
+          for (let frame = 0; frame < 900; frame++) {
+            animateRig(civilian.mesh, frame * 0.11, false, 0, false, 'idle');
+            coverPoseRig(civilian.mesh, 1);
+            const pose = rig.civilianFramePose;
+            coverMax = Math.max(coverMax, pose.head.quaternion.angleTo(pose.headBase));
+          }
+          return {
+            panicMax: +panicMax.toFixed(4),
+            coverMax: +coverMax.toFixed(4),
+            finite: rig.civilianFramePose.head.quaternion.toArray().every(Number.isFinite),
+          };
+        }""")
         sniper = page.evaluate("""() => {
           const previous = window.__bpVisualProps;
           window.__bpVisualProps = [];
@@ -191,10 +226,48 @@ def main():
         }""")
         sniper["postProcess"] = page.evaluate("() => BP.performance.postProcess")
 
+        page.evaluate("() => BP.startLevel(10)")
+        page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
+        corpse = page.evaluate("""async () => {
+          const THREE = await import('./lib/three.module.js');
+          const { deathPose, animateDeathRig, settleDeathRig } =
+            await import('./src/levelgen.js');
+          const { groundHeight } = await import('./src/physics.js');
+          const enemy = BP.world.enemies[0];
+          for (const actor of [...BP.world.enemies, ...BP.world.allies, ...BP.world.civilians]) {
+            actor.update = () => {};
+            actor.mesh.visible = actor === enemy;
+          }
+          const x = 22, z = -20;
+          const ground = groundHeight(BP.world.solids, x, z, 0.16, 1);
+          enemy.mesh.position.set(x, ground, z);
+          enemy.mesh.rotation.set(0, 0, 0);
+          enemy.mesh.userData.rig.variant = 0;
+          deathPose(enemy.mesh);
+          for (let frame = 0; frame < 60; frame++) {
+            animateDeathRig(enemy.mesh, 1 / 60);
+            settleDeathRig(enemy.mesh, BP.world.solids, 1 / 60);
+          }
+          const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(enemy.mesh.quaternion);
+          const sx = enemy.pos.x + axis.x * 0.88;
+          const sz = enemy.pos.z + axis.z * 0.88;
+          const support = groundHeight(
+            BP.world.solids, sx, sz, 0.16, enemy.pos.y + 1.15);
+          const torsoY = enemy.pos.y + axis.y * 0.88;
+          return {
+            rootY: +enemy.pos.y.toFixed(3),
+            support: +support.toFixed(3),
+            torsoClearance: +(torsoY - support).toFixed(3),
+            complete: enemy.mesh.userData.deathMotion.t,
+          };
+        }""")
+
         result = {
             "correction": correction,
             "recon": recon,
             "doors": doors,
+            "head": head,
+            "corpse": corpse,
             "sniper": sniper,
             "errors": errors[:8],
             "screenshots": [
@@ -213,7 +286,11 @@ def main():
         assert recon["label"] == "EAST SERVICE LANE", result
         assert recon["routes"] == 1 and recon["routeParts"] >= 4, result
         assert recon["resultVisible"] == 1, result
+        assert recon["transientBefore"] > 0 and recon["transientAfter"] == 0, result
+        assert recon["visibleGroundActors"] == 0, result
         assert doors == {"count": 3, "framed": True, "persistentAfterLeaf": True}, result
+        assert head["finite"] and head["panicMax"] < 0.16 and head["coverMax"] < 0.24, result
+        assert corpse["complete"] == 1 and 0 <= corpse["torsoClearance"] < 0.24, result
         assert sniper["facades"] == 3 and sniper["allStatic"], result
         assert all(count > 0 for count in sniper["skipCounts"]), result
         assert sniper["farArchitecturalPanes"] == 0, result

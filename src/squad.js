@@ -12,7 +12,7 @@
 //     turn a squad from an asset into a babysitting objective.
 import * as THREE from 'three';
 import {
-  makeCharacter, animateDeathRig, animateRig, deathPose, kneelRig,
+  makeCharacter, animateDeathRig, animateRig, deathPose, kneelRig, settleDeathRig,
 } from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { claimPath, findPathFor } from './enemies.js';
@@ -232,6 +232,7 @@ export class Ally {
   update(dt, world) {
     if (this.dead) {
       this.deathAnim = animateDeathRig(this.mesh, dt);
+      settleDeathRig(this.mesh, world.solids, dt);
       return;
     }
     const p = this.pos;

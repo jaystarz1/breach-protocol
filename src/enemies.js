@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  makeCharacter, animateDeathRig, animateRig, deathPose, revealWeaponRig,
+  makeCharacter, animateDeathRig, animateRig, deathPose, revealWeaponRig, settleDeathRig,
 } from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { findPath, nearestNode } from './navgrid.js';
@@ -355,6 +355,7 @@ export class Enemy {
     if (this.perches) { this.updateSniper(dt, world); return; }
     if (this.dead) {
       this.deathAnim = animateDeathRig(this.mesh, dt);
+      settleDeathRig(this.mesh, world.solids, dt);
       return;
     }
     this.shotPoseTimer = Math.max(0, this.shotPoseTimer - dt);

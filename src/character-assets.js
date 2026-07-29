@@ -1214,6 +1214,15 @@ export function animateAuthoredCharacter(
     rig.currentAction = desired;
   }
   rig.intent = intent;
+  // Remove the previous frame's post-animation civilian reaction before advancing the
+  // mixer. Several source clips omit head/neck keys; without this restore the mixer leaves
+  // our last offset in place and the next frame adds another one.
+  if (rig.civilianFramePose) {
+    const pose = rig.civilianFramePose;
+    if (pose.head) pose.head.quaternion.copy(pose.headBase);
+    if (pose.neck) pose.neck.quaternion.copy(pose.neckBase);
+    if (pose.spine) pose.spine.quaternion.copy(pose.spineBase);
+  }
   rig.mixer.update(dt);
   // Some source locomotion clips carry exaggerated neck motion. At game scale it reads like
   // a broken ragdoll, so preserve a little clip motion while stabilizing the head post-mixer.
@@ -1221,6 +1230,27 @@ export function animateAuthoredCharacter(
     const stable = rig.civilianStability;
     if (stable.neck && stable.neckRest) stable.neck.quaternion.slerp(stable.neckRest, 0.72);
     if (stable.head && stable.headRest) stable.head.quaternion.slerp(stable.headRest, 0.82);
+  }
+  // Civilian reactions are a post-animation layer. Some Mixamo clips do not key the head,
+  // neck or upper spine on every frame; adding Euler angles to those bones therefore stores
+  // the previous reaction and eventually winds the head through the chest. Capture the
+  // mixer-owned pose every frame so panic and cover can be applied as bounded offsets.
+  if (rig.civilian) {
+    if (!rig.civilianFramePose) {
+      const node = name => findRigObject(rig.visual, name);
+      rig.civilianFramePose = {
+        head: node('Head'),
+        neck: node('Neck'),
+        spine: node('Spine2') || node('Spine1'),
+        headBase: new THREE.Quaternion(),
+        neckBase: new THREE.Quaternion(),
+        spineBase: new THREE.Quaternion(),
+      };
+    }
+    const pose = rig.civilianFramePose;
+    if (pose.head) pose.headBase.copy(pose.head.quaternion);
+    if (pose.neck) pose.neckBase.copy(pose.neck.quaternion);
+    if (pose.spine) pose.spineBase.copy(pose.spine.quaternion);
   }
   if (rig.combatant) poseAuthoredRifle(root, rig);
   if (!rig.lifeBones && rig.combatant) {
@@ -1280,8 +1310,10 @@ export function poseAuthoredCivilianPanic(root, phase = 0) {
   aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(...arms.right[0]));
   aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(...arms.right[1]));
   if (b.head) {
-    b.head.rotation.y += pulse * 0.08;
-    b.head.rotation.z += (style - 1) * 0.035;
+    const base = rig.civilianFramePose?.headBase;
+    if (base) b.head.quaternion.copy(base);
+    b.head.rotateY(pulse * 0.08);
+    b.head.rotateZ((style - 1) * 0.035);
   }
   return true;
 }
@@ -1310,9 +1342,19 @@ export function poseAuthoredCivilianCover(root, amount = 1) {
   aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(0.18, 1.36, 0.03));
   rig.visual.position.y = rig.baseVisualY - 0.52 * a;
   rig.visual.rotation.x = -0.34 * a;
-  if (b.spine) b.spine.rotation.x -= 0.25 * a;
-  if (b.neck) b.neck.rotation.x += 0.18 * a;
-  if (b.head) b.head.rotation.x += 0.16 * a;
+  const frame = rig.civilianFramePose;
+  if (b.spine) {
+    if (frame?.spineBase) b.spine.quaternion.copy(frame.spineBase);
+    b.spine.rotateX(-0.25 * a);
+  }
+  if (b.neck) {
+    if (frame?.neckBase) b.neck.quaternion.copy(frame.neckBase);
+    b.neck.rotateX(0.18 * a);
+  }
+  if (b.head) {
+    if (frame?.headBase) b.head.quaternion.copy(frame.headBase);
+    b.head.rotateX(0.16 * a);
+  }
   return true;
 }
 

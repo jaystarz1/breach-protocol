@@ -668,6 +668,41 @@ function clearObjectiveMarker() {
   world.beacon = null;
 }
 
+function addCombatEffect(effect) {
+  effect.combatTransient = true;
+  world.effects.push(effect);
+}
+
+function suspendGroundCombatForDrone() {
+  if (!world || world.droneGroundVisibility) return;
+  // The drone update returns before the infantry effect loop. Without an explicit handoff,
+  // whichever tracer or muzzle flash exists on the transition frame freezes in the aerial
+  // picture indefinitely.
+  for (let i = world.effects.length - 1; i >= 0; i--) {
+    const effect = world.effects[i];
+    if (!effect.combatTransient) continue;
+    effect(60);
+    world.effects.splice(i, 1);
+  }
+  for (const grenade of world.grenades) {
+    scene.remove(grenade.mesh);
+    grenade.mesh.geometry?.dispose();
+    grenade.mesh.material?.dispose();
+  }
+  world.grenades.length = 0;
+
+  const actors = [...world.enemies, ...world.civilians, ...world.allies]
+    .map(actor => actor.mesh).filter(Boolean);
+  world.droneGroundVisibility = actors.map(mesh => [mesh, mesh.visible]);
+  for (const mesh of actors) mesh.visible = false;
+}
+
+function restoreGroundCombatAfterDrone() {
+  if (!world?.droneGroundVisibility) return;
+  for (const [mesh, visible] of world.droneGroundVisibility) mesh.visible = visible;
+  world.droneGroundVisibility = null;
+}
+
 function setObjective() {
   const obj = world.level.objectives[world.objectiveIdx];
   hud.objective(obj ? obj.text : 'MISSION COMPLETE');
@@ -683,6 +718,7 @@ function setObjective() {
   if (world.drone && !world.drone.complete) {
     world.drone.dispose();
     world.drone = null;
+    restoreGroundCombatAfterDrone();
     player.locked = !!world.level.lockPlayer;
   }
   // Hostiles are identified by sight, behavior and weapon presentation—not supernatural UI.
@@ -743,6 +779,7 @@ function setObjective() {
     world.beacon = marker;
   } else if (obj && obj.type === 'drone') {
     player.locked = true;
+    suspendGroundCombatForDrone();
     world.drone = new DroneController(scene, camera, obj, () => {
       if (!world?.drone) return;
       world.drone.complete = true;
@@ -1065,7 +1102,16 @@ function tracer(a, b, color = 0xffe0a0, fade = 4, opacity = 0.85) {
   const g = new THREE.BufferGeometry().setFromPoints([a, b]);
   const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
   scene.add(line);
-  world.effects.push(dt => { line.material.opacity -= dt * fade; if (line.material.opacity <= 0) { scene.remove(line); g.dispose(); return true; } return false; });
+  addCombatEffect(dt => {
+    line.material.opacity -= dt * fade;
+    if (line.material.opacity <= 0) {
+      scene.remove(line);
+      g.dispose();
+      line.material.dispose();
+      return true;
+    }
+    return false;
+  });
 }
 
 const COMBAT_FLASH_GEO = new THREE.SphereGeometry(0.13, 8, 6);
@@ -1077,7 +1123,7 @@ function flashAt(p, color) {
   const flash = new THREE.Mesh(COMBAT_FLASH_GEO, mat);
   flash.position.set(p.x, p.y + 1.4, p.z);
   scene.add(flash);
-  world.effects.push(dt => {
+  addCombatEffect(dt => {
     mat.opacity -= dt * 12;
     flash.scale.addScalar(dt * 3.5);
     if (mat.opacity > 0) return false;
@@ -1144,7 +1190,11 @@ function detonateFlash(pos) {
   const light = new THREE.PointLight(0xffffff, 40, 40);
   light.position.copy(pos);
   scene.add(light);
-  world.effects.push(dt => { light.intensity -= dt * 90; if (light.intensity <= 0) { scene.remove(light); return true; } return false; });
+  addCombatEffect(dt => {
+    light.intensity -= dt * 90;
+    if (light.intensity <= 0) { scene.remove(light); return true; }
+    return false;
+  });
 
   const eye = camera.position;
   const dist = eye.distanceTo(pos);
@@ -1217,6 +1267,7 @@ function checkObjectives(dt = 0) {
       spawnReconGroundResponse(obj);
       world.drone.dispose();
       world.drone = null;
+      restoreGroundCombatAfterDrone();
       player.locked = !!world.level.lockPlayer;
     }
     world.objectiveIdx++;
@@ -1411,7 +1462,7 @@ function frame() {
       world.grenades.splice(i, 1);
       if (g.kind === 'flash') { detonateFlash(g.mesh.position); continue; }
       sfx.explosion(g.mesh.position);
-      world.effects.push(explosionEffect(scene, g.mesh.position));
+      addCombatEffect(explosionEffect(scene, g.mesh.position));
       // radius damage
       const P = g.mesh.position;
       for (const e of world.enemies) {

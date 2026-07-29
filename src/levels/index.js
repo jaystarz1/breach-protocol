@@ -116,6 +116,19 @@ function tower(x, z, w, d, floors, opts = {}) {
     // doorway trim on the ground-floor entrance
     if (f === 0 && opts.door !== false) {
       geo.push(...doorFrame(x1 + w / 2 - 0.8 + 0.8, z2, false, 1.6, 2.4));
+      // The tower shell is reused in three missions. A thin frame and a grey steel leaf
+      // disappeared into its battered facade—especially with a crate in the approach—so the
+      // breach existed logically but read as a solid wall. This deep exterior portal remains
+      // unmistakable from the courtyard without changing collision or the breach socket.
+      const portalZ = z2 + 0.27;
+      geo.push(
+        [x - 0.98, 1.28, portalZ, 0.22, 2.56, 0.48, C.metal, false],
+        [x + 0.98, 1.28, portalZ, 0.22, 2.56, 0.48, C.metal, false],
+        [x, 2.52, portalZ, 2.18, 0.22, 0.48, C.metal, false],
+        [x, 0.055, z2 + 0.48, 1.92, 0.11, 0.72, C.concrete, false],
+        [x, 2.78, z2 + 0.7, 2.7, 0.16, 1.2, C.metal, false],
+        [x, 2.69, z2 + 0.93, 0.78, 0.055, 0.2, 0xffd39a, false, true],
+      );
     }
     geo.push(...exitSign(sx + 1.2, y + 2.4, f % 2 === 0 ? z1 + 1.0 : z2 - 1.0, false));
   }

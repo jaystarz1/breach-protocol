@@ -309,7 +309,10 @@ def main():
         if args.gate:
             assert not errors
             assert output["prewarm"] and output["prewarm"]["ok"]
-            assert output["programs"]["compiledDuringPlay"] == 0
+            # Three may release an unused program after prewarm, producing a negative delta.
+            # That is not a live compile and cannot cause the hitch this gate is designed to
+            # catch; only positive program growth is a regression.
+            assert output["programs"]["compiledDuringPlay"] <= 0
             assert output["internal"]["resolution"]["enabled"]
             assert output["internal"]["resolution"]["scale"] == 1
             assert output["frameTimeMs"]["p99"] < 16.7
