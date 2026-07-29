@@ -700,10 +700,24 @@ function poseAuthoredHostage(root, rig) {
   rig.seat = seat;
 }
 
+const patchMaterials = new Map();
+const PATCH_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
+PATCH_GEOMETRY.name = 'shared-combatant-fabric-patch';
 function patch(color, position, scale) {
+  if (!patchMaterials.has(color)) {
+    const material = new THREE.MeshStandardMaterial({
+      color, roughness: 0.9, metalness: 0,
+      normalMap: combatantFabricNormal,
+      normalScale: new THREE.Vector2(0.16, 0.16),
+      roughnessMap: combatantFabricRoughness,
+    });
+    material.name = 'combatant-subdued-fabric-patch';
+    patchMaterials.set(color, material);
+  }
   const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshBasicMaterial({ color }));
+    PATCH_GEOMETRY,
+    patchMaterials.get(color));
+  mesh.name = 'combatant-fabric-patch';
   mesh.position.fromArray(position);
   mesh.scale.fromArray(scale);
   return mesh;
@@ -771,12 +785,10 @@ export function createAuthoredCharacter({
   rifle.userData.sourceParts = authoredRifleSourceParts;
   root.add(rifle);
 
-  if (!silhouette && friendly) {
-    root.add(
-      patch(0x4f96a8, [0, 1.42, 0.245], [0.075, 0.025, 0.014]),
-      patch(0x4f96a8, [0, 1.42, -0.245], [0.075, 0.025, 0.014]),
-    );
-  } else if (!silhouette && bastion) {
+  // Friendly CT operators stay in uninterrupted black assault gear. Their formation, posture
+  // and blue-grey base fabric distinguish them without adding a tiny faction box that can
+  // become an arcade cue—or a lazy-upload boundary—when first entering the camera.
+  if (!silhouette && bastion) {
     // BASTION must be recognizable because of what he is wearing, not because the renderer
     // draws a game icon over him. A command radio changes the silhouette from every angle;
     // the muted sand tabs are readable in the bunker without becoming a glowing faction cue.

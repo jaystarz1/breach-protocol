@@ -23,6 +23,7 @@ const TEXELS_PER_M = {
   concrete: 0.28,
   metal: 0.45,
   timber: 0.5,
+  glass: 0.5,
   plain: 0.5,
   compatibility: 0.5,
 };
@@ -34,6 +35,7 @@ function staticSurfaceFamily(color) {
   if (color === C.sidewalk || color === C.platform || color === C.interiorFloor) return 'sidewalk';
   if (color === C.building) return 'brick';
   if (color === C.buildingB || color === C.interiorWall) return 'plaster';
+  if (color === C.glassWall) return 'glass';
   if (color === C.concrete || color === C.tunnel) return 'concrete';
   if (color === C.metal || color === C.roof) return 'metal';
   if (color === C.crate || color === C.accent) return 'timber';
@@ -51,6 +53,7 @@ function staticTint(color, family) {
     concrete: 0xd5d2c9,
     metal: 0x727b80,
     timber: 0x927558,
+    glass: 0x9fb4bb,
   };
   return fixed[family] ?? color;
 }
@@ -66,6 +69,23 @@ function staticMaterial(family) {
   const procedural = surfaces();
   const photos = photoSurfaces();
   let options = { vertexColors: true, roughness: 0.9, metalness: 0.02 };
+  if (family === 'glass') {
+    const material = new THREE.MeshPhysicalMaterial({
+      vertexColors: true,
+      color: 0x78909a,
+      roughness: 0.32,
+      metalness: 0.06,
+      transparent: true,
+      opacity: 0.24,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      clearcoat: 0.42,
+      clearcoatRoughness: 0.3,
+    });
+    material.name = 'records-architectural-glass';
+    staticMaterials.set(family, material);
+    return material;
+  }
   if (photos?.[family]) {
     const photo = photos[family];
     options = {

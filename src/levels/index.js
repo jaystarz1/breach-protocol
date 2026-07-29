@@ -804,6 +804,14 @@ export const LEVELS = [
       g.push(...wall(x1, z1, x1, z2, 3, C.interiorWall));
       g.push(...wall(x2, z1, x2, z2, 3, C.interiorWall));
       g.push(...floorSlab(0, 0, 32, 42, 3.1, 0.3, C.roof));
+      // Enclose the insertion point in a short records-office vestibule. Previously the player
+      // spawned on an exterior strip and could turn around to see the finite ground slab end
+      // against black void; the grazing full-screen floor view also caused a reproducible GPU
+      // residency stall. These walls are real collision and make the threshold a finished room.
+      g.push(...wall(-4, 20, -4, 29, 3, C.interiorWall));
+      g.push(...wall(4, 20, 4, 29, 3, C.interiorWall));
+      g.push(...wall(-4, 29, 4, 29, 3, C.interiorWall));
+      g.push(...floorSlab(0, 24.5, 8.2, 9.2, 3.1, 0.3, C.roof));
       // interior partitions
       g.push(...wall(-15, 10, 2, 10, 3, C.glassWall, [{ off: 12, w: 2, h: 2.5 }]));
       g.push(...wall(6, 10, 15, 10, 3, C.glassWall));
@@ -817,7 +825,9 @@ export const LEVELS = [
       g.push(...wall(4, -14, 15, -14, 3, C.glassWall, [{ off: 5, w: 2, h: 2.5 }]));
       // desks
       for (const [dx, dz] of [[-10, 5], [0, 6], [10, 4], [-10, -8], [10, -10], [2, -10], [-8, -17], [8, -17]]) {
-        g.push([dx, 0.45, dz, 2.2, 0.9, 1.1, C.metal]);
+        // Preserve the original cover box for navigation and bullets, but let the desktop
+        // interior kit draw a real desk with a thin top, legs and drawer pedestal.
+        g.push([dx, 0.45, dz, 2.2, 0.9, 1.1, C.metal, true, false, false]);
       }
       // Records office: boards, floor plans and departmental notices. Under NVGs these are the
       // only things telling you which cubicle you have already cleared.

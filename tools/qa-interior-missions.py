@@ -86,6 +86,10 @@ def main():
         assert records["art"]["instances"] >= 250
         assert records["art"]["batches"]["records-chair-casters"] == 40
         assert records["art"]["batches"]["records-server-racks"] == 4
+        assert records["art"]["batches"]["records-partition-rails"] == 48
+        assert records["art"]["batches"]["records-desk-tops"] == 8
+        assert records["art"]["batches"]["records-archive-boxes"] == 48
+        assert records["art"]["batches"]["records-jammer-body"] == 1
         assert metro["art"]["levelId"] == 9
         assert metro["art"]["instances"] >= 250
         assert metro["art"]["batches"]["metro-sleepers"] >= 40

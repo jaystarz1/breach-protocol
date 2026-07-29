@@ -225,6 +225,48 @@ function tacticalMapTexture() {
   return texture;
 }
 
+function spectrumTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#071613';
+  ctx.fillRect(0, 0, 512, 256);
+  ctx.strokeStyle = 'rgba(83,190,136,.18)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= 512; x += 32) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 256); ctx.stroke();
+  }
+  for (let y = 0; y <= 256; y += 32) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke();
+  }
+  ctx.strokeStyle = '#63e2a0';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  for (let x = 0; x <= 512; x += 4) {
+    const carrier = (
+      Math.exp(-Math.pow((x - 138) / 21, 2)) * 62
+      + Math.exp(-Math.pow((x - 326) / 13, 2)) * 92
+      + Math.exp(-Math.pow((x - 411) / 28, 2)) * 48
+    );
+    const noise = Math.sin(x * 0.19) * 5 + Math.sin(x * 0.47) * 2;
+    const y = 205 - carrier - noise;
+    if (x === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#9bf0c1';
+  ctx.font = '700 24px monospace';
+  ctx.fillText('RF DENIAL // CH 04', 18, 30);
+  ctx.fillStyle = '#5ba984';
+  ctx.font = '18px monospace';
+  ctx.fillText('433.8       915.2       2.4G', 18, 242);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  return texture;
+}
+
 function addSign(scene, name, title, subtitle, position, rotationY = 0, width = 3.6,
   accent = '#d8b545') {
   const material = new THREE.MeshBasicMaterial({
@@ -270,6 +312,67 @@ function addMonitor(b, x, z, yaw, mats, broken = false) {
     matrix(x - dx, 1.18, z - dz, 0.69, 0.41, 0.012, 0, yaw, broken ? -0.08 : 0));
 }
 
+function addOfficeDesk(b, x, z, yaw, mats, index) {
+  // The old visible desk was its collision volume: a 2.2 × 0.9 × 1.1 solid block. Keep that
+  // invisible body authoritative, then reconstruct the furniture around the same footprint.
+  b.add('records-desk-tops', UNIT_BOX, mats.deskTop,
+    matrix(x, 0.84, z, 2.2, 0.11, 1.1, 0, yaw));
+  b.add('records-desk-edge-bands', UNIT_BOX, mats.deskEdge,
+    matrix(x, 0.79, z - Math.cos(yaw) * 0.54, 2.18, 0.12, 0.055, 0, yaw));
+
+  const drawerSide = index % 2 ? -1 : 1;
+  const sideX = x + Math.cos(yaw) * drawerSide * 0.72;
+  const sideZ = z - Math.sin(yaw) * drawerSide * 0.72;
+  b.add('records-desk-pedestals', UNIT_BOX, mats.cabinet,
+    matrix(sideX, 0.41, sideZ, 0.48, 0.72, 0.68, 0, yaw));
+  for (const y of [0.24, 0.43, 0.62]) {
+    b.add('records-desk-drawer-handles', UNIT_BOX, mats.darkMetal,
+      matrix(
+        sideX - Math.sin(yaw) * 0.35, y,
+        sideZ - Math.cos(yaw) * 0.35,
+        0.2, 0.025, 0.025, 0, yaw,
+      ));
+  }
+
+  // The open side gets two square tube legs and a modesty rail, leaving real negative space.
+  const openX = x - Math.cos(yaw) * drawerSide * 0.78;
+  const openZ = z + Math.sin(yaw) * drawerSide * 0.78;
+  for (const depth of [-0.42, 0.42]) {
+    b.add('records-desk-legs', UNIT_BOX, mats.darkMetal,
+      matrix(
+        openX + Math.sin(yaw) * depth, 0.4,
+        openZ + Math.cos(yaw) * depth,
+        0.055, 0.75, 0.055, 0, yaw,
+      ));
+  }
+  b.add('records-desk-modesty-rails', UNIT_BOX, mats.darkMetal,
+    matrix(
+      x + Math.sin(yaw) * 0.39, 0.48,
+      z + Math.cos(yaw) * 0.39,
+      1.45, 0.055, 0.055, 0, yaw,
+    ));
+}
+
+function addPartitionSegment(b, x1, z1, x2, z2, mats) {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const len = Math.hypot(dx, dz);
+  if (len < 0.25) return;
+  const yaw = Math.atan2(-dz, dx);
+  const x = (x1 + x2) / 2;
+  const z = (z1 + z2) / 2;
+  for (const y of [0.09, 1.08, 2.83]) {
+    b.add('records-partition-rails', UNIT_BOX, mats.partitionFrame,
+      matrix(x, y, z, len, y === 1.08 ? 0.055 : 0.09, 0.16, 0, yaw));
+  }
+  const mullions = Math.max(1, Math.floor(len / 2.25));
+  for (let i = 0; i <= mullions; i++) {
+    const t = i / mullions;
+    b.add('records-partition-mullions', UNIT_BOX, mats.partitionFrame,
+      matrix(x1 + dx * t, 1.46, z1 + dz * t, 0.07, 2.75, 0.18, 0, yaw));
+  }
+}
+
 function addRecordsOffice(scene) {
   const b = new Batches(scene);
   const mats = {
@@ -289,6 +392,19 @@ function addRecordsOffice(scene) {
     rackFace: standard(0x0e1416, 0.7, 0.4),
     greenLed: new THREE.MeshBasicMaterial({ color: 0x4cd68a }),
     amberLed: new THREE.MeshBasicMaterial({ color: 0xe0a148 }),
+    deskTop: standard(0x777066, 0.82, 0.04),
+    deskEdge: standard(0x383e3f, 0.68, 0.34),
+    partitionFrame: standard(0x273235, 0.52, 0.62),
+    archiveBox: standard(0x8b8069, 0.94, 0),
+    archiveLabel: new THREE.MeshBasicMaterial({ color: 0xb4afa0 }),
+    jammer: standard(0x242d2c, 0.58, 0.42),
+    jammerScreen: new THREE.MeshBasicMaterial({
+      color: 0xffffff, map: spectrumTexture(),
+    }),
+    floorGrime: new THREE.MeshBasicMaterial({
+      map: grimeTexture(), transparent: true, opacity: 0.42,
+      depthWrite: false, color: 0x35433b,
+    }),
   };
 
   // A suspended grid gives the low office ceiling scale. Missing tiles and sagged panels
@@ -329,11 +445,26 @@ function addRecordsOffice(scene) {
       matrix(x, 2.48, z, 1, len, 1, Math.PI / 2, 0, Math.PI / 2));
   }
 
+  // Replace the opaque-looking partition blocks with transparent architectural glass and
+  // explicit metal framing. Each segment mirrors the original wall helper's solid pieces, so
+  // doorway gaps remain visually and physically aligned.
+  for (const segment of [
+    [-15, 10, -3, 10], [-1, 10, 2, 10], [6, 10, 15, 10],
+    [-6, 10, -6, 4], [-6, 2, -6, -2], [6, 10, 6, -6],
+    [-15, -2, -10, -2], [-6, -2, 2, -2], [4, -2, 10, -2],
+    [-2, -2, -2, -14], [6, -6, 9, -6], [11, -6, 15, -6],
+    [-15, -14, -11, -14], [-9, -14, -2, -14],
+    [4, -14, 9, -14], [11, -14, 15, -14],
+  ]) {
+    addPartitionSegment(b, ...segment, mats);
+  }
+
   const desks = [
     [-10, 5, Math.PI], [0, 6, Math.PI], [10, 4, Math.PI],
     [-10, -8, 0], [10, -10, 0], [2, -10, 0], [-8, -17, 0], [8, -17, 0],
   ];
   desks.forEach(([x, z, yaw], i) => {
+    addOfficeDesk(b, x, z, yaw, mats, i);
     addOfficeChair(b, x + Math.sin(yaw) * 1.05, z + Math.cos(yaw) * 1.05,
       yaw + Math.PI, mats);
     addMonitor(b, x, z, yaw, mats, i === 3 || i === 6);
@@ -369,10 +500,104 @@ function addRecordsOffice(scene) {
     }
   }
 
+  // Dense archive shelving provides an unmistakable records-office zone along the west wall.
+  // The shelves are shallow and outside the central sweep lane.
+  for (const z of [-5.0, -8.2, -11.4]) {
+    for (const x of [-14.35, -12.95]) {
+      b.add('records-archive-uprights', UNIT_BOX, mats.darkMetal,
+        matrix(x, 1.12, z - 1.15, 0.07, 2.24, 0.07));
+      b.add('records-archive-uprights', UNIT_BOX, mats.darkMetal,
+        matrix(x, 1.12, z + 1.15, 0.07, 2.24, 0.07));
+    }
+    for (const y of [0.14, 0.65, 1.16, 1.67, 2.18]) {
+      b.add('records-archive-shelves', UNIT_BOX, mats.galvanized,
+        matrix(-13.65, y, z, 1.48, 0.055, 2.38));
+    }
+    for (let row = 0; row < 4; row++) {
+      const y = 0.37 + row * 0.51;
+      for (let slot = 0; slot < 4; slot++) {
+        const boxZ = z - 0.83 + slot * 0.56;
+        b.add('records-archive-boxes', UNIT_BOX, mats.archiveBox,
+          matrix(-13.63, y, boxZ, 1.17, 0.38, 0.48, 0, 0, (slot - 1.5) * 0.015));
+        b.add('records-archive-labels', UNIT_BOX, mats.archiveLabel,
+          matrix(-13.025, y, boxZ, 0.012, 0.14, 0.2));
+      }
+    }
+  }
+
+  // The mission objective now has a physical identity: a mobile jammer/control rack between
+  // the surviving server banks, with antenna whips and an active spectrum display.
+  b.add('records-jammer-body', UNIT_BOX, mats.jammer,
+    matrix(0, 0.92, -19.12, 2.15, 1.82, 0.78));
+  b.add('records-jammer-face', UNIT_BOX, mats.rackFace,
+    matrix(0, 0.94, -18.71, 1.94, 1.58, 0.035));
+  b.add('records-jammer-screen', UNIT_BOX, mats.jammerScreen,
+    matrix(-0.36, 1.22, -18.68, 0.86, 0.45, 0.018));
+  for (let i = 0; i < 6; i++) {
+    b.add('records-jammer-controls', LED,
+      i % 3 ? mats.greenLed : mats.amberLed,
+      matrix(0.44 + (i % 2) * 0.22, 0.74 + Math.floor(i / 2) * 0.2, -18.66,
+        1.35, 1.35, 1.35));
+  }
+  for (let i = 0; i < 6; i++) {
+    b.add('records-jammer-vents', UNIT_BOX, mats.galvanized,
+      matrix(0.56, 1.37 - i * 0.13, -18.675, 0.58, 0.028, 0.014));
+  }
+  for (const x of [-0.93, 0.93]) {
+    b.add('records-jammer-handles', UNIT_BOX, mats.darkMetal,
+      matrix(x, 1.38, -18.63, 0.08, 0.42, 0.08));
+  }
+  for (const x of [-0.72, 0.72]) {
+    b.add('records-jammer-antennas', SMALL_PIPE, mats.darkMetal,
+      matrix(x, 2.05, -19.1, 1.15, 1.65, 1.15, 0, 0, x * 0.08));
+  }
+  b.add('records-jammer-crossbar', UNIT_BOX, mats.darkMetal,
+    matrix(0, 2.48, -19.1, 1.8, 0.055, 0.055));
+  for (const [x, length] of [[-2.2, 3.2], [2.2, 3.2]]) {
+    b.add('records-jammer-floor-cables', CABLE, mats.cable,
+      matrix(x / 2, 0.045, -18.92, 1.35, length, 1.35, 0, 0, Math.PI / 2));
+  }
+
+  // Damage and traffic staining bind the furniture to the floor instead of leaving every
+  // object on pristine concrete.
+  const grimePlane = new THREE.PlaneGeometry(1, 1);
+  for (const [x, z, sx, sz, rz] of [
+    [0, 14, 5.2, 7.0, 0.08], [-8.5, 2, 5.8, 7.5, -0.12],
+    [7.5, -5, 6.6, 7.2, 0.16], [0, -15.8, 8.5, 5.4, -0.05],
+  ]) {
+    b.add('records-floor-grime', grimePlane, mats.floorGrime,
+      matrix(x, 0.027, z, sx, sz, 1, -Math.PI / 2, 0, rz));
+  }
+  for (const [x, z, rx, rz] of [
+    [-8.2, 15.6, 0.18, -0.12], [4.4, 11.8, -0.24, 0.09],
+    [-3.6, -7.8, 0.32, -0.08], [12.0, -11.8, -0.18, 0.15],
+  ]) {
+    b.add('records-dangling-ceiling-panels', UNIT_BOX, mats.ceiling,
+      matrix(x, 2.54, z, 3.55, 0.055, 3.55, rx, 0, rz));
+  }
+
   // Entry frame and floor debris establish the threshold before the first contact.
   b.add('records-entry-frame', UNIT_BOX, mats.darkMetal, matrix(-1.58, 1.35, 19.82, 0.12, 2.7, 0.22));
   b.add('records-entry-frame', UNIT_BOX, mats.darkMetal, matrix(1.58, 1.35, 19.82, 0.12, 2.7, 0.22));
   b.add('records-entry-frame', UNIT_BOX, mats.darkMetal, matrix(0, 2.72, 19.82, 3.28, 0.12, 0.22));
+  for (const x of [-1.2, 0, 1.2]) {
+    b.add('records-vestibule-bench-slats', UNIT_BOX, mats.deskTop,
+      matrix(x, 0.52, 27.75, 1.12, 0.09, 0.48));
+    b.add('records-vestibule-bench-slats', UNIT_BOX, mats.deskTop,
+      matrix(x, 0.93, 28.0, 1.12, 0.48, 0.09));
+  }
+  for (const x of [-1.55, 1.55]) {
+    b.add('records-vestibule-bench-legs', UNIT_BOX, mats.darkMetal,
+      matrix(x, 0.27, 27.75, 0.06, 0.47, 0.36));
+  }
+  b.add('records-vestibule-locker', UNIT_BOX, mats.cabinet,
+    matrix(3.72, 1.08, 26.3, 0.42, 1.72, 0.95));
+  b.add('records-vestibule-locker-door', UNIT_BOX, mats.darkMetal,
+    matrix(3.49, 1.08, 26.3, 0.025, 1.56, 0.82));
+  for (let i = 0; i < 4; i++) {
+    b.add('records-vestibule-hooks', SMALL_PIPE, mats.darkMetal,
+      matrix(-3.84, 1.62, 22.2 + i * 1.42, 1, 0.22, 1, 0, 0, Math.PI / 2));
+  }
   for (const [x, z, r, s] of [
     [-2.8, 17.3, 0.2, 0.5], [3.6, 14.8, -0.5, 0.38], [-8.2, 2.4, 0.4, 0.44],
     [6.8, -1.1, -0.2, 0.52], [-3.1, -11.8, 0.8, 0.35], [11.2, -15.1, -0.7, 0.42],
@@ -383,6 +608,10 @@ function addRecordsOffice(scene) {
 
   addSign(scene, 'records-direction-sign', 'ARCHIVE / SERVER', 'CONTROL ROOM  ↓',
     [-5.1, 1.9, 19.68], 0, 2.4, '#cf8b35');
+  addSign(scene, 'records-vestibule-sign', 'PERSONNEL ENTRY', 'RECORDS / EW CONTROL',
+    [0, 2.18, 28.88], Math.PI, 2.7, '#637f86');
+  addSign(scene, 'records-jammer-status', 'EW CONTROL', 'SPECTRUM DENIAL / ACTIVE',
+    [0, 2.35, -19.78], 0, 2.6, '#4dc486');
   return b.flush();
 }
 
