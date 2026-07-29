@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v107-hostile-field-kit';
+const CACHE = 'breach-protocol-v108-articulated-combatant-kit';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

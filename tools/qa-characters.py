@@ -75,6 +75,7 @@ def main():
                   let combatantSurface = null;
                   let civilianSurface = null;
                   let handRig = null;
+                  const tacticalGear = [];
                   row.actor.mesh.traverse(object => {
                     if (!object.isMesh || !object.visible) return;
                     meshes++;
@@ -86,6 +87,18 @@ def main():
                     const count = object.geometry?.index?.count
                       || object.geometry?.attributes?.position?.count || 0;
                     triangles += Math.round(count / 3);
+                    if (object.userData.articulatedTacticalGear) {
+                      object.geometry.computeBoundingBox();
+                      tacticalGear.push({
+                        name: object.name,
+                        parent: object.parent?.name || '',
+                        material: object.material?.name || '',
+                        triangles: Math.round(count / 3),
+                        size: ['x', 'y', 'z'].map(axis => +(
+                          object.geometry.boundingBox.max[axis]
+                          - object.geometry.boundingBox.min[axis]).toFixed(3)),
+                      });
+                    }
                     if (object.userData.authoredCarriedRifle) {
                       object.geometry.computeBoundingBox();
                       const box = object.geometry.boundingBox;
@@ -233,6 +246,7 @@ def main():
                     combatantSurface,
                     civilianSurface,
                     handRig,
+                    tacticalGear,
                     materials,
                   };
                 }""",
@@ -366,8 +380,24 @@ def main():
         assert captures["enemy"]["mergedCombatant"], result
         assert captures["friendly"]["mergedCombatant"], result
         assert captures["enemy"]["draws"] <= 3, result
-        assert captures["friendly"]["draws"] <= 4, result
+        assert captures["friendly"]["draws"] <= 3, result
         for kind in ("enemy", "friendly"):
+            gear = captures[kind]["tacticalGear"]
+            assert len(gear) == 1, result
+            assert {row["name"] for row in gear} == {
+                "combatant-articulated-torso-kit",
+            }, result
+            assert any(
+                any(label in row["parent"].lower() for label in ("spine", "chest"))
+                for row in gear
+            ), result
+            assert sum(row["triangles"] for row in gear) < 2_000, result
+            expected_kit = (
+                "hostile-articulated-field-kit"
+                if kind == "enemy"
+                else "ct-articulated-black-kit"
+            )
+            assert all(row["material"] == expected_kit for row in gear), result
             rifle = captures[kind]["carriedRifle"]
             assert rifle and rifle["sourceParts"] >= 7, result
             assert rifle["vertices"] > 10_000, result

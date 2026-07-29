@@ -792,6 +792,129 @@ function patch(color, position, scale) {
   return mesh;
 }
 
+function roundedKitPart({
+  position, size, radius = 0.018, rotation = [0, 0, 0],
+}) {
+  const [width, height, depth] = size;
+  const edge = Math.min(radius, width * 0.22, height * 0.22);
+  const shape = new THREE.Shape();
+  shape.moveTo(edge, 0);
+  shape.lineTo(width - edge, 0);
+  shape.quadraticCurveTo(width, 0, width, edge);
+  shape.lineTo(width, height - edge);
+  shape.quadraticCurveTo(width, height, width - edge, height);
+  shape.lineTo(edge, height);
+  shape.quadraticCurveTo(0, height, 0, height - edge);
+  shape.lineTo(0, edge);
+  shape.quadraticCurveTo(0, 0, edge, 0);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(0.006, depth - edge * 0.7),
+    steps: 1,
+    curveSegments: 2,
+    bevelEnabled: true,
+    bevelSegments: 1,
+    bevelSize: edge * 0.48,
+    bevelThickness: edge * 0.35,
+  });
+  geometry.translate(-width / 2, -height / 2, -depth / 2);
+  geometry.rotateX(rotation[0]);
+  geometry.rotateY(rotation[1]);
+  geometry.rotateZ(rotation[2]);
+  geometry.translate(...position);
+  for (const name of Object.keys(geometry.attributes)) {
+    if (!['position', 'normal', 'uv'].includes(name)) geometry.deleteAttribute(name);
+  }
+  return geometry.index ? geometry.toNonIndexed() : geometry;
+}
+
+function mergedKitGeometry(parts, name) {
+  const geometries = parts.map(roundedKitPart);
+  const merged = mergeGeometries(geometries, false);
+  for (const geometry of geometries) geometry.dispose();
+  if (!merged) return null;
+  merged.clearGroups();
+  merged.computeBoundingBox();
+  merged.computeBoundingSphere();
+  merged.name = name;
+  return merged;
+}
+
+// These pieces deliberately add depth at the distances where the source skin used to read as
+// a segmented action figure: bevelled carrier plates, separate magazines, shoulder webbing,
+// radio, belt pouches and holster. They remain one immutable shared geometry; each actor pays
+// one articulated draw, not a draw for every pouch. The source helmet is already readable,
+// so a second helmet-kit draw did not earn its frame cost in the combat-distance A/B capture.
+const TACTICAL_TORSO_GEO = quality.desktop ? mergedKitGeometry([
+  { position: [0, 1.3, 0.145], size: [0.365, 0.37, 0.045], radius: 0.032 },
+  { position: [0, 1.3, -0.145], size: [0.35, 0.36, 0.045], radius: 0.03 },
+  { position: [-0.14, 1.45, 0.025], size: [0.065, 0.19, 0.105], radius: 0.02,
+    rotation: [0, 0, -0.08] },
+  { position: [0.14, 1.45, 0.025], size: [0.065, 0.19, 0.105], radius: 0.02,
+    rotation: [0, 0, 0.08] },
+  { position: [-0.095, 1.14, 0.185], size: [0.072, 0.12, 0.043], radius: 0.012,
+    rotation: [-0.07, 0, 0.015] },
+  { position: [0, 1.135, 0.188], size: [0.072, 0.125, 0.043], radius: 0.012,
+    rotation: [-0.07, 0, 0] },
+  { position: [0.095, 1.14, 0.185], size: [0.072, 0.12, 0.043], radius: 0.012,
+    rotation: [-0.07, 0, -0.015] },
+  { position: [0.225, 1.29, -0.01], size: [0.075, 0.155, 0.075], radius: 0.016 },
+  { position: [0.225, 1.49, -0.015], size: [0.012, 0.26, 0.012], radius: 0.004,
+    rotation: [0, 0, -0.06] },
+  { position: [-0.22, 1.02, 0.005], size: [0.08, 0.125, 0.08], radius: 0.018 },
+  { position: [0.22, 1.02, 0.005], size: [0.08, 0.125, 0.08], radius: 0.018 },
+  { position: [0.255, 0.86, 0.02], size: [0.075, 0.205, 0.06], radius: 0.018,
+    rotation: [0, 0, -0.06] },
+], 'shared-articulated-tactical-torso') : null;
+
+const tacticalKitMaterials = new Map();
+function tacticalKitMaterial(faction, silhouette) {
+  const key = silhouette ? 'silhouette' : faction;
+  if (tacticalKitMaterials.has(key)) return tacticalKitMaterials.get(key);
+  let material;
+  if (silhouette) {
+    material = MERGED_SILHOUETTE_MATERIAL;
+  } else {
+    const hostile = faction === 'hostile';
+    material = new THREE.MeshStandardMaterial({
+      name: hostile ? 'hostile-articulated-field-kit' : 'ct-articulated-black-kit',
+      color: hostile ? 0x30382b
+        : faction === 'friendly' ? 0x172027
+          : faction === 'bastion' ? 0x22282a : 0x111619,
+      normalMap: combatantFabricNormal,
+      normalScale: new THREE.Vector2(0.22, 0.22),
+      roughnessMap: combatantFabricRoughness,
+      roughness: 0.88,
+      metalness: 0.025,
+    });
+  }
+  tacticalKitMaterials.set(key, material);
+  return material;
+}
+
+function attachRootSpaceGear(root, visual, geometry, material, boneNames, name) {
+  if (!geometry) return null;
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = name;
+  mesh.castShadow = mesh.receiveShadow = quality.shadows;
+  mesh.userData.articulatedTacticalGear = true;
+  root.add(mesh);
+  root.updateMatrixWorld(true);
+  const bone = boneNames.map(candidate => findRigObject(visual, candidate)).find(Boolean);
+  if (bone) bone.attach(mesh);
+  return mesh;
+}
+
+function addArticulatedTacticalKit(root, visual, faction, silhouette) {
+  if (!quality.desktop) return [];
+  const material = tacticalKitMaterial(faction, silhouette);
+  return [
+    attachRootSpaceGear(
+      root, visual, TACTICAL_TORSO_GEO, material,
+      ['Spine.002', 'Spine.001', 'Spine2', 'Spine1', 'Spine', 'Chest'],
+      'combatant-articulated-torso-kit'),
+  ].filter(Boolean);
+}
+
 function mapActions(clips, mixer) {
   const actions = {};
   for (const clip of clips) {
@@ -839,6 +962,7 @@ export function createAuthoredCharacter({
       : faction === 'hostile' ? MERGED_HOSTILE_MATERIAL : MERGED_COMBATANT_MATERIAL,
   });
   root.add(visual);
+  const tacticalGear = addArticulatedTacticalKit(root, visual, faction, silhouette);
 
   const rifle = new THREE.Mesh(RIFLE_GEO, silhouette
     ? new THREE.MeshBasicMaterial({ color: 0x020305 })
@@ -943,6 +1067,7 @@ export function createAuthoredCharacter({
     currentAction: idle || null,
     lastAnimationTime: performance.now(),
     rifle,
+    tacticalGear,
     mergedSkin,
     hostile: true,
     friendly: !!friendly,
