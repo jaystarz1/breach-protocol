@@ -583,6 +583,37 @@ const WATCH_ROOF_GEO = (() => {
   return geometry;
 })();
 
+let gateSectorTexture = null;
+function fortifiedGateSectorTexture() {
+  if (gateSectorTexture) return gateSectorTexture;
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#182321';
+  ctx.fillRect(0, 0, 512, 256);
+  ctx.strokeStyle = '#8f7852';
+  ctx.lineWidth = 12;
+  ctx.strokeRect(10, 10, 492, 236);
+  ctx.fillStyle = '#b9aa83';
+  ctx.font = '700 34px monospace';
+  ctx.fillText('37TH DIRECTORATE', 36, 66);
+  ctx.fillStyle = '#e4ded0';
+  ctx.font = '800 52px monospace';
+  ctx.fillText('FIRE CONTROL', 36, 132);
+  ctx.fillStyle = '#b9aa83';
+  ctx.font = '700 28px monospace';
+  ctx.fillText('SECTOR 04  //  RESTRICTED', 36, 190);
+  ctx.fillStyle = '#82564a';
+  for (let i = 0; i < 5; i++) {
+    ctx.fillRect(35 + i * 94, 215, 56, 12);
+  }
+  gateSectorTexture = new THREE.CanvasTexture(canvas);
+  gateSectorTexture.colorSpace = THREE.SRGBColorSpace;
+  gateSectorTexture.anisotropy = 8;
+  return gateSectorTexture;
+}
+
 function droneModel() {
   const root = new THREE.Group();
   const carbon = new THREE.MeshStandardMaterial({ color: 0x171a1c, roughness: 0.5, metalness: 0.45 });
@@ -1430,15 +1461,38 @@ export function addFrontlineMissionArt(scene, levelId) {
 
     // The compound's old municipal wall has been converted into a fighting position. These
     // silhouettes sit above the collision shell and turn the blank slab into a defended gate.
-    const timber = new THREE.MeshStandardMaterial({ color: 0x4b5048, roughness: 0.93 });
-    const roofSteel = new THREE.MeshStandardMaterial({
-      color: 0x2c3335, roughness: 0.54, metalness: 0.56,
-    });
+    const timber = frontline.timber.clone();
+    timber.color.setHex(0x4f544b);
+    timber.roughness = 0.94;
+    const roofSteel = frontline.barrierSteel.clone();
+    roofSteel.color.setHex(0x30383a);
+    roofSteel.roughness = 0.68;
     const char = new THREE.MeshStandardMaterial({
       color: 0x202324, roughness: 1, transparent: true, opacity: 0.76,
     });
-    const watchGlass = new THREE.MeshStandardMaterial({
-      color: 0x162630, roughness: 0.2, metalness: 0.08,
+    const watchGlass = new THREE.MeshPhysicalMaterial({
+      color: 0x69818a,
+      roughness: 0.26,
+      metalness: 0.04,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.24,
+    });
+    watchGlass.name = 'watch-post-laminated-glass';
+    const plywood = frontline.timber.clone();
+    plywood.color.setHex(0x806d50);
+    plywood.roughness = 0.97;
+    const cabinInterior = new THREE.MeshStandardMaterial({
+      color: 0x171d1e, roughness: 0.94, metalness: 0.02,
+    });
+    const lampLens = new THREE.MeshStandardMaterial({
+      color: 0xffddb0,
+      emissive: 0xff9f48,
+      emissiveIntensity: 2.2,
+      roughness: 0.3,
+      metalness: 0,
     });
     const towerParts = [];
     const towerRoofs = [];
@@ -1448,6 +1502,16 @@ export function addFrontlineMissionArt(scene, levelId) {
     const towerBraces = [];
     const towerLadders = [];
     const towerRails = [];
+    const towerCladding = [];
+    const towerSideCladding = [];
+    const towerRoofRibs = [];
+    const towerPlywoodPatches = [];
+    const towerInteriorBacks = [];
+    const towerInteriorCounters = [];
+    const towerInteriorEquipment = [];
+    const towerFloodHousings = [];
+    const towerFloodLenses = [];
+    const towerCableDrops = [];
     const platformBags = [];
     for (const x of [-8.5, 8.5]) {
       towerParts.push(
@@ -1458,6 +1522,44 @@ export function addFrontlineMissionArt(scene, levelId) {
       );
       towerRoofs.push([x, 6.15, 30.25, 0, 0, 0, 1, 1, 1]);
       towerWindows.push([x, 5.35, 30.84, 0, 0, 0, 3.2, 0.64, 0.04]);
+      // Narrow front sheets and side panels break the cabin out of the "one scaled cube"
+      // silhouette. The textured sheets sit just proud of the collision-independent shell.
+      for (const dx of [-1.5, -0.75, 0, 0.75, 1.5]) {
+        towerCladding.push(
+          [x + dx, 4.68, 30.86, 0, 0, 0, 0.68, 0.42, 0.035],
+          [x + dx, 5.92, 30.86, 0, 0, 0, 0.68, 0.28, 0.035],
+        );
+      }
+      for (const side of [-1, 1]) for (const dz of [-0.68, 0, 0.68]) {
+        towerSideCladding.push([
+          x + side * 1.995, 5.3, 30.22 + dz,
+          0, 0, 0, 0.035, 1.45, 0.58,
+        ]);
+      }
+      // A dark back wall, duty shelf and radio shapes give the now-transparent window real
+      // parallax. The old opaque blue rectangle had no cabin behind it at all.
+      towerInteriorBacks.push([x, 5.3, 29.46, 0, 0, 0, 3.45, 1.42, 0.06]);
+      towerInteriorCounters.push([x, 4.9, 30.03, 0, 0, 0, 3.1, 0.12, 0.58]);
+      towerInteriorEquipment.push(
+        [x - 0.95, 5.13, 29.91, 0, 0.12, 0, 0.42, 0.34, 0.25],
+        [x + 0.78, 5.08, 29.93, 0, -0.08, 0, 0.58, 0.24, 0.28],
+      );
+      for (const z of [28.9, 29.58, 30.26, 30.94, 31.62]) {
+        towerRoofRibs.push([x, 6.2, z, 0, 0, 0, 4.82, 0.045, 0.055]);
+      }
+      // Field repairs differ between posts, preventing mirrored prefabs.
+      towerPlywoodPatches.push(
+        x < 0
+          ? [x - 1.99, 5.3, 30.58, 0, 0, 0.035, 0.045, 0.78, 0.66]
+          : [x + 1.99, 5.42, 29.9, 0, 0, -0.045, 0.045, 0.72, 0.58],
+      );
+      const lightX = x < 0 ? x + 1.28 : x - 1.28;
+      towerFloodHousings.push([lightX, 5.94, 31.05, -0.18, 0, 0, 0.48, 0.22, 0.28]);
+      towerFloodLenses.push([lightX, 5.9, 31.205, -0.18, 0, 0, 0.36, 0.12, 0.025]);
+      towerCableDrops.push([
+        x < 0 ? x - 1.78 : x + 1.78, 5.3, 30.88,
+        0, 0, 0, 0.025, 1.42, 0.025,
+      ]);
       for (const dx of [-1.55, 1.55]) for (const dz of [-0.74, 0.74]) {
         towerSupports.push([x + dx, 2.15, 30.25 + dz, 0, 0, 0, 1, 4.3, 1]);
       }
@@ -1515,7 +1617,161 @@ export function addFrontlineMissionArt(scene, levelId) {
     ladders.name = 'watch-post-ladders';
     const rails = instanced(scene, new THREE.BoxGeometry(1, 1, 1), steel, towerRails);
     rails.name = 'watch-post-rails';
+    const cladding = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), timber, towerCladding);
+    cladding.name = 'watch-post-front-cladding';
+    const sideCladding = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), timber, towerSideCladding);
+    sideCladding.name = 'watch-post-side-cladding';
+    const roofRibs = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), roofSteel, towerRoofRibs);
+    roofRibs.name = 'watch-post-roof-ribs';
+    const patchPanels = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), plywood, towerPlywoodPatches);
+    patchPanels.name = 'watch-post-plywood-repairs';
+    const interiorBacks = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), cabinInterior, towerInteriorBacks, false);
+    interiorBacks.name = 'watch-post-interior-backs';
+    const interiorCounters = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), timber, towerInteriorCounters);
+    interiorCounters.name = 'watch-post-interior-counters';
+    const interiorEquipment = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), frontline.equipment,
+      towerInteriorEquipment);
+    interiorEquipment.name = 'watch-post-interior-equipment';
+    const floodHousings = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), steel, towerFloodHousings);
+    floodHousings.name = 'watch-post-floodlight-housings';
+    const floodLenses = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), lampLens, towerFloodLenses, false);
+    floodLenses.name = 'watch-post-floodlight-lenses';
+    const cableDrops = instanced(
+      scene, new THREE.CylinderGeometry(0.5, 0.5, 1, 7),
+      cabinInterior, towerCableDrops, false);
+    cableDrops.name = 'watch-post-cable-drops';
     sandbagInstances(scene, 'watch-post-sandbags', platformBags);
+
+    // Segment the municipal wall into repaired blast bays. Its original collision mesh stays
+    // authoritative, but a cap, piers, damaged gate returns and concertina wire stop the
+    // sixty-metre surface reading as one pristine primitive.
+    const gatePiers = [];
+    const gateCaps = [];
+    const gateWire = [];
+    const gatePanelsA = [];
+    const gatePanelsB = [];
+    const panelSpans = [
+      [-28, 3.8], [-23, 5.8], [-17, 5.8], [-11, 5.8], [-5.5, 4.7],
+      [5.5, 4.7], [11, 5.8], [17, 5.8], [23, 5.8], [28, 3.8],
+    ];
+    panelSpans.forEach(([x, width], index) => {
+      (index % 2 ? gatePanelsA : gatePanelsB).push([
+        x, 2.0, 30.215, 0, 0, 0, width, 3.74, 0.055,
+      ]);
+    });
+    for (const x of [-26, -20, -14, -8, 8, 14, 20, 26]) {
+      gatePiers.push([x, 2.0, 30.28, 0, 0, 0, 0.34, 3.86, 0.48]);
+    }
+    for (const [start, end] of [[-29.6, -3.4], [3.4, 29.6]]) {
+      for (let x = start + 1.1; x < end; x += 2.2) {
+        gateCaps.push([x, 4.08, 30.08, 0, 0, (x % 4.4) * 0.003, 2.08, 0.18, 0.72]);
+      }
+      for (let x = start + 0.5; x < end; x += 0.62) {
+        gateWire.push([x, 4.55, 30.06, 0, 0, 0, 0.54, 0.54, 0.54]);
+      }
+    }
+    const gatePierMesh = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), frontline.concreteDark, gatePiers);
+    gatePierMesh.name = 'fortified-gate-repair-piers';
+    const panelMaterialA = frontline.concrete.clone();
+    panelMaterialA.color.setHex(0x85867f);
+    const panelMaterialB = frontline.concrete.clone();
+    panelMaterialB.color.setHex(0x747872);
+    const gatePanelMeshA = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), panelMaterialA, gatePanelsA);
+    gatePanelMeshA.name = 'fortified-gate-wall-panels-a';
+    const gatePanelMeshB = instanced(
+      scene, new THREE.BoxGeometry(1, 1, 1), panelMaterialB, gatePanelsB);
+    gatePanelMeshB.name = 'fortified-gate-wall-panels-b';
+    const gateCapMesh = instanced(
+      scene, distressedBoxGeometry(1, 1, 1, 1088), frontline.concrete,
+      gateCaps);
+    gateCapMesh.name = 'fortified-gate-broken-caps';
+    const gateWireMesh = instanced(
+      scene, new THREE.TorusGeometry(1, 0.025, 5, 16), steel, gateWire, false);
+    gateWireMesh.name = 'fortified-gate-concertina';
+
+    const gateReturns = [];
+    const gateRebar = [];
+    const edgeHeights = [0.48, 1.42, 2.52];
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < edgeHeights.length; i++) {
+        gateReturns.push([
+          side * (3.11 + ((i * 7) % 2) * 0.07),
+          edgeHeights[i],
+          30.24 + ((i * 3) % 4) * 0.035,
+          i * 0.17,
+          side * (0.04 + (i % 2) * 0.06),
+          side * (-0.09 + i * 0.035),
+          0.36 + (i % 3) * 0.08,
+          0.32 + (i % 2) * 0.1,
+          0.24 + (i % 3) * 0.055,
+        ]);
+      }
+      for (let i = 0; i < 4; i++) {
+        gateRebar.push([
+          side * (2.72 + (i % 2) * 0.08),
+          0.74 + i * 0.63,
+          30.31 + (i % 2) * 0.06,
+          0,
+          0,
+          Math.PI / 2 + side * (i - 1.5) * 0.035,
+          1,
+          0.74 + (i % 3) * 0.18,
+          1,
+        ]);
+      }
+    }
+    const gateReturnMesh = instanced(
+      scene, distressedBoxGeometry(1, 1, 1, 1093), frontline.concreteDark,
+      gateReturns);
+    gateReturnMesh.name = 'fortified-gate-broken-returns';
+    const gateRebarMesh = instanced(
+      scene, new THREE.CylinderGeometry(0.035, 0.045, 1, 7),
+      frontline.rebar, gateRebar);
+    gateRebarMesh.name = 'fortified-gate-exposed-rebar';
+
+    const sectorSignMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: fortifiedGateSectorTexture(),
+      roughness: 0.72,
+      metalness: 0.12,
+      side: THREE.DoubleSide,
+    });
+    const sectorSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.4, 2.2), sectorSignMaterial);
+    sectorSign.name = 'fortified-gate-sector-sign';
+    sectorSign.position.set(-17, 2.2, 30.52);
+    sectorSign.castShadow = quality.shadows;
+    scene.add(sectorSign);
+
+    const gateImpacts = [];
+    for (let i = 0; i < 12; i++) {
+      const side = i % 2 ? -1 : 1;
+      gateImpacts.push([
+        side * (7.2 + (i % 6) * 3.15),
+        0.8 + ((i * 7) % 11) * 0.23,
+        30.535,
+        0,
+        0,
+        (i - 5) * 0.08,
+        0.16 + (i % 3) * 0.06,
+        0.14 + (i % 4) * 0.04,
+        1,
+      ]);
+    }
+    const impactMesh = instanced(
+      scene, raggedDisc(1, 14, 1097), char, gateImpacts, false);
+    impactMesh.name = 'fortified-gate-impact-scars';
 
     const gateScars = [
       [-12.5, 2.1, 30.21, 0, 0, -0.2, 0.86, 0.7, 1],
