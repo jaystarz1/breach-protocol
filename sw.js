@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v102-stable-desktop-grain';
+const CACHE = 'breach-protocol-v103-adaptive-resolution';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -10,7 +10,8 @@ const ASSETS = [
   'src/visual-kit.js', 'src/character-assets.js', 'src/interior-mission-art.js',
   'src/frontline-art.js',
   'src/drone.js',
-  'src/campaign.js', 'src/renderer/capabilities.js', 'src/renderer/render-pipeline.js',
+  'src/campaign.js', 'src/renderer/capabilities.js', 'src/renderer/adaptive-resolution.js',
+  'src/renderer/render-pipeline.js',
   'src/renderer/telemetry.js',
   'assets/street-sweep/asphalt.jpg', 'assets/street-sweep/asphalt-height.jpg',
   'assets/street-sweep/sidewalk.jpg', 'assets/street-sweep/sidewalk-height.jpg',

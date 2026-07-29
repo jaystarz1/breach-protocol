@@ -1310,7 +1310,11 @@ function frame() {
   lastTime = now;
 
   if (skyMesh) skyMesh.position.copy(camera.position);
-  if (mode !== 'playing' || !world) { if (scene) renderPipeline.render(scene, camera); clearEdges(); return; }
+  if (mode !== 'playing' || !world) {
+    if (scene) renderPipeline.render(scene, camera, { adaptive: false });
+    clearEdges();
+    return;
+  }
 
   if (input.pausePressed) { mode = 'paused'; hud.screen('pause'); clearEdges(); return; }
 
@@ -1330,7 +1334,7 @@ function frame() {
   if (world.drone?.active) {
     world.drone.update(dt, input, world.solids);
     checkObjectives();
-    renderPipeline.render(scene, camera);
+    renderPipeline.render(scene, camera, { adaptive: true });
     clearEdges();
     return;
   }
@@ -1561,7 +1565,7 @@ function frame() {
     ? `EVAC ${escorted.length} · ${HOSTAGE_COMMAND_LABEL[world.hostageCommand]} · H COMMAND`
     : '');
 
-  renderPipeline.render(scene, camera);
+  renderPipeline.render(scene, camera, { adaptive: true });
   clearEdges();
 }
 frame();

@@ -5,7 +5,8 @@
 // module scope in main.js before save.load() has run. So read localStorage directly here.
 
 import {
-  normalizeMode, requestedMode, requestedResolutionScale, resolveRendererMode,
+  hasRequestedResolutionScale, normalizeMode, requestedMode, requestedResolutionScale,
+  resolveRendererMode,
 } from './renderer/capabilities.js';
 
 const KEY = 'breach-protocol-save-v1';
@@ -34,4 +35,5 @@ export const quality = {
   shadowMapSize: desktop ? 3072 : 1024,
   pixelRatioCap: desktop ? 2 : 1.25,
   resolutionScale: requestedResolutionScale(),
+  adaptiveResolution: desktop && !hasRequestedResolutionScale(),
 };

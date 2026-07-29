@@ -29,6 +29,7 @@ export function createTelemetry(mode) {
   let uiElapsed = 0;
   let uiWorst = 0;
   let lastRender = { calls: 0, triangles: 0, lines: 0, points: 0 };
+  let lastResolution = { enabled: false, scale: 1, minScale: 1, maxScale: 1, p95: 0 };
   let programFloor = null;
 
   function snapshot(renderer) {
@@ -58,11 +59,12 @@ export function createTelemetry(mode) {
         geometries: renderer.info.memory.geometries,
         textures: renderer.info.memory.textures,
       },
+      resolution: { ...lastResolution },
     };
   }
 
   return {
-    frame(renderer, renderStats) {
+    frame(renderer, renderStats, resolution) {
       const now = performance.now();
       const dt = now - last;
       last = now;
@@ -73,6 +75,7 @@ export function createTelemetry(mode) {
       }
       if (programFloor == null) programFloor = renderer.info.programs?.length || 0;
       lastRender = { ...renderStats };
+      if (resolution) lastResolution = { ...resolution };
 
       if (!el) return;
       uiFrames++;
@@ -83,7 +86,7 @@ export function createTelemetry(mode) {
       const fps = uiFrames * 1000 / uiElapsed;
       el.textContent = [
         `${mode.toUpperCase()}  ${fps.toFixed(0)} FPS  p99 ${s.frameTimeMs.p99.toFixed(1)}ms  worst ${uiWorst.toFixed(1)}ms`,
-        `${s.render.calls} calls  ${(s.render.triangles / 1000).toFixed(0)}k tris`,
+        `${s.render.calls} calls  ${(s.render.triangles / 1000).toFixed(0)}k tris  scale ${(s.resolution.scale * 100).toFixed(0)}%`,
         `${s.resources.geometries} geo  ${s.resources.textures} tex  ${s.resources.programs} programs`,
       ].join('\n');
       uiFrames = 0;

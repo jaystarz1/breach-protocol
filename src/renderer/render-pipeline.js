@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createAdaptiveResolutionController } from './adaptive-resolution.js';
 import { createTelemetry } from './telemetry.js';
 
 export function createRenderPipeline(canvas, settings) {
@@ -20,6 +21,24 @@ export function createRenderPipeline(canvas, settings) {
   let postCamera = null;
   let postMaterial = null;
   let lastRender = { calls: 0, triangles: 0, lines: 0, points: 0 };
+  let viewport = { width: 1, height: 1, devicePixelRatio: 1 };
+  let lastFrameAt = performance.now();
+  const resolution = createAdaptiveResolutionController({
+    enabled: !!settings.adaptiveResolution,
+    initialScale: settings.resolutionScale,
+  });
+
+  function applySize() {
+    const ratio = Math.min(viewport.devicePixelRatio, settings.pixelRatioCap) * resolution.scale;
+    renderer.setPixelRatio(ratio);
+    renderer.setSize(viewport.width, viewport.height, false);
+    if (target) {
+      const rw = Math.max(1, Math.round(viewport.width * ratio));
+      const rh = Math.max(1, Math.round(viewport.height * ratio));
+      target.setSize(rw, rh);
+      postMaterial.uniforms.resolution.value.set(rw, rh);
+    }
+  }
 
   if (settings.desktop) {
     target = new THREE.WebGLRenderTarget(1, 1, {
@@ -92,17 +111,15 @@ export function createRenderPipeline(canvas, settings) {
     renderer,
     get mode() { return settings.rendererMode; },
     resize(width, height, devicePixelRatio) {
-      const ratio = Math.min(devicePixelRatio, settings.pixelRatioCap) * settings.resolutionScale;
-      renderer.setPixelRatio(ratio);
-      renderer.setSize(width, height, false);
-      if (target) {
-        const rw = Math.max(1, Math.round(width * ratio));
-        const rh = Math.max(1, Math.round(height * ratio));
-        target.setSize(rw, rh);
-        postMaterial.uniforms.resolution.value.set(rw, rh);
-      }
+      viewport = { width, height, devicePixelRatio };
+      applySize();
     },
-    render(scene, camera) {
+    render(scene, camera, frameState = {}) {
+      const now = performance.now();
+      const adaptive = frameState.adaptive !== false && !document.hidden;
+      const adjustment = resolution.sample(now - lastFrameAt, adaptive);
+      lastFrameAt = now;
+      if (adjustment) applySize();
       renderer.info.reset();
       if (target) {
         renderer.setRenderTarget(target);
@@ -118,7 +135,7 @@ export function createRenderPipeline(canvas, settings) {
         lines: renderer.info.render.lines,
         points: renderer.info.render.points,
       };
-      telemetry.frame(renderer, lastRender);
+      telemetry.frame(renderer, lastRender, resolution.snapshot());
     },
     async prewarm(scene, camera) {
       const started = performance.now();
@@ -188,6 +205,7 @@ export function createRenderPipeline(canvas, settings) {
           enabled: !!target,
           temporalNoise: false,
         },
+        resolution: resolution.snapshot(),
         render: { ...lastRender },
         drawingBuffer: [gl.drawingBufferWidth, gl.drawingBufferHeight],
         megapixels: +((gl.drawingBufferWidth * gl.drawingBufferHeight) / 1e6).toFixed(2),

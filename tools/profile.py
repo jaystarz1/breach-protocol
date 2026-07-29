@@ -273,6 +273,7 @@ def main():
                 "drawingBuffer": result["snapshot"]["drawingBuffer"],
                 "megapixels": result["snapshot"]["megapixels"],
                 "pixelRatio": result["snapshot"]["pixelRatio"],
+                "resolution": result["snapshot"]["resolution"],
             },
             "frameTimeMs": {
                 "p50": p50,
@@ -309,6 +310,8 @@ def main():
             assert not errors
             assert output["prewarm"] and output["prewarm"]["ok"]
             assert output["programs"]["compiledDuringPlay"] == 0
+            assert output["internal"]["resolution"]["enabled"]
+            assert output["internal"]["resolution"]["scale"] == 1
             assert output["frameTimeMs"]["p99"] < 16.7
             assert output["frameTimeMs"]["max"] < 35
             assert output["drawCalls"]["max"] < 330

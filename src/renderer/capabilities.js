@@ -47,6 +47,11 @@ export function requestedResolutionScale() {
   return Number.isFinite(raw) && raw > 0 ? Math.max(0.7, Math.min(1, raw)) : 1;
 }
 
+export function hasRequestedResolutionScale() {
+  const raw = new URLSearchParams(location.search).get('resolution');
+  return raw !== null && Number.isFinite(Number(raw)) && Number(raw) > 0;
+}
+
 export function statsRequested() {
   return new URLSearchParams(location.search).get('stats') === '1';
 }
