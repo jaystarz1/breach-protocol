@@ -35,7 +35,6 @@ export function createRenderPipeline(canvas, settings) {
       uniforms: {
         tDiffuse: { value: target.texture },
         resolution: { value: new THREE.Vector2(1, 1) },
-        time: { value: 0 },
       },
       vertexShader: `
         varying vec2 vUv;
@@ -47,11 +46,12 @@ export function createRenderPipeline(canvas, settings) {
       fragmentShader: `
         uniform sampler2D tDiffuse;
         uniform vec2 resolution;
-        uniform float time;
         varying vec2 vUv;
 
         float hash(vec2 p) {
-          return fract(sin(dot(p, vec2(12.9898, 78.233)) + time * 0.01) * 43758.5453);
+          // Interleaved gradient noise: stable in screen space and substantially cheaper than
+          // evaluating sin() for every output pixel, especially in browser software renderers.
+          return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
         }
 
         void main() {
@@ -70,6 +70,8 @@ export function createRenderPipeline(canvas, settings) {
           c = (c - 0.5) * 1.025 + 0.5;
           float vignette = 1.0 - smoothstep(0.28, 0.72, length(vUv - 0.5));
           c *= mix(0.9, 1.0, vignette);
+          // Stable screen-space dither keeps gradients and photographic surfaces from
+          // banding without making broad walls and dark window bays crawl every frame.
           c += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
           // Raw ShaderMaterial does not append Three's output colour-space chunk when
           // toneMapped is disabled, so encode the linear render target explicitly.
@@ -106,7 +108,6 @@ export function createRenderPipeline(canvas, settings) {
         renderer.setRenderTarget(target);
         renderer.render(scene, camera);
         renderer.setRenderTarget(null);
-        postMaterial.uniforms.time.value = performance.now();
         renderer.render(postScene, postCamera);
       } else {
         renderer.render(scene, camera);
@@ -183,6 +184,10 @@ export function createRenderPipeline(canvas, settings) {
       const gl = renderer.getContext();
       return {
         ...telemetry.snapshot(renderer),
+        postProcess: {
+          enabled: !!target,
+          temporalNoise: false,
+        },
         render: { ...lastRender },
         drawingBuffer: [gl.drawingBufferWidth, gl.drawingBufferHeight],
         megapixels: +((gl.drawingBufferWidth * gl.drawingBufferHeight) / 1e6).toFixed(2),

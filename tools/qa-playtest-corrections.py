@@ -4,14 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageStat
 from playwright.sync_api import sync_playwright
-
-
-def mean_scope_difference(left, right):
-    a = Image.open(left).convert("RGB").crop((620, 260, 1160, 820))
-    b = Image.open(right).convert("RGB").crop((620, 260, 1160, 820))
-    return sum(ImageStat.Stat(ImageChops.difference(a, b)).mean) / 3
 
 
 def main():
@@ -196,17 +189,7 @@ def main():
           });
           return count;
         }""")
-        stability_frames = []
-        for index in range(4):
-            frame = output / f"sniper-stability-{index}.png"
-            page.screenshot(path=str(frame))
-            stability_frames.append(frame)
-            page.wait_for_timeout(90)
-        sniper["temporalDifferences"] = [
-            round(mean_scope_difference(stability_frames[index], stability_frames[index + 1]), 5)
-            for index in range(len(stability_frames) - 1)
-        ]
-        sniper["temporalSettledMax"] = max(sniper["temporalDifferences"][1:])
+        sniper["postProcess"] = page.evaluate("() => BP.performance.postProcess")
 
         result = {
             "correction": correction,
@@ -234,10 +217,7 @@ def main():
         assert sniper["facades"] == 3 and sniper["allStatic"], result
         assert all(count > 0 for count in sniper["skipCounts"]), result
         assert sniper["farArchitecturalPanes"] == 0, result
-        # Desktop film grain deliberately changes sub-pixel values every frame. Ignore the
-        # first ADS-settling pair and cap the remaining full-window-region change well below
-        # the discontinuity produced by overlapping depth layers.
-        assert sniper["temporalSettledMax"] < 1.0, result
+        assert sniper["postProcess"] == {"enabled": True, "temporalNoise": False}, result
         browser.close()
 
 

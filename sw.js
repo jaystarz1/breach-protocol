@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v101-recon-response';
+const CACHE = 'breach-protocol-v102-stable-desktop-grain';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
