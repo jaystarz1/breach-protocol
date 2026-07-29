@@ -38,6 +38,7 @@ def main():
               const armor = [];
               const sleeves = [];
               const sleeveDetails = [];
+              const authoredRifles = [];
               mesh.traverse(node => {
                 if (node.userData.authoredViewmodelGlove) gloves.push({
                   name: node.name,
@@ -56,9 +57,18 @@ def main():
                   vertices: node.geometry.attributes.position.count,
                   support: node.userData.support,
                 });
+                if (node.userData.authoredViewmodelRifle) authoredRifles.push({
+                  name: node.name,
+                  vertices: node.geometry.attributes.position.count,
+                  sourceParts: node.userData.sourceParts,
+                  vertexColors: !!node.material.vertexColors,
+                  normalMapped: !!node.material.normalMap,
+                  roughnessMapped: !!node.material.roughnessMap,
+                });
               });
               return {
-                gloves, armor, sleeves, sleeveDetails,
+                gloves, armor, sleeves, sleeveDetails, authoredRifles,
+                adsSpread: BP.weapons.spec.adsSpread,
                 meshLayer: mesh.layers.mask,
                 cameraLayers: BP.weapons.camera.layers.mask,
                 lightLayers: [
@@ -71,6 +81,12 @@ def main():
             captures.append(f"{name}-hip.png")
             page.evaluate("() => { BP.input.ads = true; BP.input.breath = true; }")
             page.wait_for_timeout(260)
+            if name == "m4":
+                rigs[name]["adsHud"] = page.evaluate("""() => ({
+                  dot: !!document.querySelector('#ads-reticle .rdot'),
+                  ring: !!document.querySelector('#ads-reticle .rring'),
+                  ticks: document.querySelectorAll('#ads-reticle .rtick').length,
+                })""")
             page.screenshot(path=str(output / f"{name}-ads.png"))
             captures.append(f"{name}-ads.png")
             page.evaluate("() => { BP.input.ads = false; BP.input.breath = false; }")
@@ -152,6 +168,18 @@ def main():
         assert reload_state["holderDrop"] < -0.25
         assert centre["dead"] and centre["trace"]["hitEnemy"]
         assert not near_miss["dead"] and near_miss["trace"]["hitEnemy"] is None
+        assert len(rigs["m4"]["authoredRifles"]) == 1
+        authored = rigs["m4"]["authoredRifles"][0]
+        assert authored["vertices"] > 10_000
+        assert authored["sourceParts"] >= 7
+        assert authored["vertexColors"]
+        assert authored["normalMapped"] and authored["roughnessMapped"]
+        assert rigs["m4"]["adsSpread"] <= 0.0015
+        assert rigs["pistol"]["adsSpread"] <= 0.0025
+        assert rigs["barrett"]["adsSpread"] == 0
+        assert not rigs["pistol"]["authoredRifles"]
+        assert not rigs["barrett"]["authoredRifles"]
+        assert rigs["m4"]["adsHud"] == {"dot": True, "ring": False, "ticks": 0}
         browser.close()
 
 

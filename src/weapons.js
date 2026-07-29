@@ -3,16 +3,17 @@ import { mergeGeometries } from '../lib/BufferGeometryUtils.js';
 import { quality } from './quality.js';
 import { surfaces } from './textures.js';
 import { sfx } from './audio.js';
+import { authoredRifleViewGeometry } from './character-assets.js';
 
 export const WEAPON_SPECS = {
   pistol: {
     name: 'M9 SIDEARM', auto: false, damage: 34, rpm: 320, mag: 12, reserve: Infinity,
-    spread: 0.012, adsSpread: 0.004, recoil: 0.022, range: 60, reloadTime: 1.3,
+    spread: 0.012, adsSpread: 0.0025, recoil: 0.022, range: 60, reloadTime: 1.3,
     adsFov: 55, sound: 'pistol',
   },
   m4: {
     name: 'M4 CARBINE', auto: true, damage: 26, rpm: 700, mag: 30, reserve: 120,
-    spread: 0.02, adsSpread: 0.006, recoil: 0.014, range: 120, reloadTime: 2.0,
+    spread: 0.02, adsSpread: 0.0015, recoil: 0.014, range: 120, reloadTime: 2.0,
     adsFov: 45, sound: 'rifle',
   },
   barrett: {
@@ -49,6 +50,25 @@ function gunMaterials() {
     black: std(0x1d2226, 0.55, 0.55, true),     // parkerised furniture
     poly: std(0x30363a, 0.88, 0.03, false),     // polymer grip / handguard / stock
     tan: std(0x6d5f45, 0.82, 0.04, false),      // sniper furniture
+    authoredRifle: quality.pbr
+      ? new THREE.MeshStandardMaterial({
+        name: 'authored-viewmodel-rifle-layered',
+        color: 0xb7bdc0,
+        vertexColors: true,
+        map: s?.metal.map || null,
+        roughnessMap: s?.metal.roughnessMap || null,
+        normalMap: s?.metal.normalMap || null,
+        normalScale: new THREE.Vector2(0.18, 0.18),
+        roughness: 0.48,
+        metalness: 0.58,
+        emissive: 0x15191b,
+        emissiveIntensity: 0.18,
+      })
+      : new THREE.MeshLambertMaterial({
+        name: 'authored-viewmodel-rifle-layered',
+        color: 0x8a9093,
+        vertexColors: true,
+      }),
     glove: quality.pbr
       ? new THREE.MeshStandardMaterial({
         color: 0x242a2d, roughness: 0.91, metalness: 0.01,
@@ -424,6 +444,7 @@ function gunMesh(kind) {
 
   } else if (kind === 'm4') {
     g.scale.setScalar(0.7);
+    const proceduralBodyStart = g.children.length;
     // upper + lower receiver, with the magazine well as its own block so the profile steps
     g.add(rb(M.steel, 0.05, 0.062, 0.3, 0, 0.02, 0.13, 0.006));
     g.add(rb(M.black, 0.048, 0.056, 0.17, 0, -0.038, 0.185, 0.006));
@@ -453,23 +474,38 @@ function gunMesh(kind) {
     g.add(bx(M.poly, 0.048, 0.026, 0.03, 0, -0.05, 0.44));         // toe
     g.add(bx(M.black, 0.052, 0.02, 0.036, 0, 0.032, 0.465));       // buttpad
     g.add(bx(M.black, 0.06, 0.012, 0.03, 0, 0.062, 0.28));         // charging handle
+    const proceduralBodyEnd = g.children.length;
+    const authoredGeometry = quality.desktop ? authoredRifleViewGeometry() : null;
+    if (authoredGeometry) {
+      for (const child of g.children.slice(proceduralBodyStart, proceduralBodyEnd)) {
+        child.visible = false;
+      }
+      const rifle = new THREE.Mesh(authoredGeometry, M.authoredRifle);
+      rifle.name = 'authored-first-person-m4';
+      rifle.userData.authoredViewmodelRifle = true;
+      rifle.userData.sourceParts = authoredGeometry.userData.sourceParts || 0;
+      // Match the proven one-metre procedural silhouette and keep its receiver origin under
+      // the existing optic/hand anchors. The source itself is already normalized to 82 cm.
+      rifle.scale.set(1.16, 1.05, 1.2);
+      rifle.position.set(0, 0.005, 0.01);
+      g.add(rifle);
+    }
     // Optic: an open tube you sight through. Walls only, rings for the lens rims, faint
     // additive glass, and an illuminated dot suspended on the bore axis.
-    g.add(bx(M.black, 0.036, 0.02, 0.09, 0, 0.07, 0.06));          // mount
-    g.add(shell(M.black, 0.026, 0.15, 0, 0.098, 0.04));            // body
-    g.add(ring(M.black, 0.026, 0.032, 0, 0.098, -0.036));          // objective rim
-    g.add(ring(M.black, 0.026, 0.032, 0, 0.098, 0.116));           // ocular rim
+    g.add(bx(M.black, 0.032, 0.016, 0.066, 0, 0.078, 0.055));       // mount
+    g.add(shell(M.black, 0.021, 0.108, 0, 0.104, 0.04, 18));        // body
+    g.add(ring(M.black, 0.021, 0.026, 0, 0.104, -0.015, 20));       // objective rim
+    g.add(ring(M.black, 0.021, 0.026, 0, 0.104, 0.095, 20));        // ocular rim
     // Group.add() returns the group, not the child, so the lens is positioned before adding.
-    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.026, 16), M.glass);
-    lens.position.set(0, 0.098, -0.03);
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.021, 20), M.glass);
+    lens.position.set(0, 0.104, -0.01);
     g.add(lens);
-    g.add(bx(M.black, 0.014, 0.026, 0.026, 0.032, 0.098, 0.055));  // windage turret
-    // The dot itself, plus a faint surrounding ring: a circle-dot reticle. Both are additive
-    // and depth-test-free, which is what makes them read as emitted light in a black room.
-    const rdot = bx(M.dot, 0.006, 0.006, 0.002, 0, 0.098, -0.03);
-    const rring = ring(M.dot, 0.019, 0.021, 0, 0.098, -0.03);
-    g.add(rdot, rring);
-    g.userData.reticle = [rdot, rring];
+    g.add(bx(M.black, 0.011, 0.019, 0.019, 0.026, 0.104, 0.052));  // windage turret
+    // A single small emitter is enough at an oblique hip-fire angle. The old full red halo
+    // looked painted onto the screen and made the compact optic appear twice its real size.
+    const rdot = bx(M.dot, 0.0035, 0.0035, 0.0015, 0, 0.104, -0.01);
+    g.add(rdot);
+    g.userData.reticle = [rdot];
     addGlovedArm(g, M, {
       side: 1, palm: [0.058, -0.105, 0.245], palmRot: [0.32, 0.02, -0.08],
       elbow: [0.2, -0.42, 0.49],
@@ -478,7 +514,7 @@ function gunMesh(kind) {
       side: -1, palm: [-0.066, -0.004, -0.15], palmRot: [-0.2, 0.04, 0.2],
       elbow: [-0.23, -0.37, 0.2], support: true,
     });
-    g.userData.sight = [0, 0.098, 0];
+    g.userData.sight = [0, 0.104, 0];
     g.userData.muzzle = [0, 0.026, -0.53];
 
   } else {
@@ -725,7 +761,7 @@ export class Weapons {
     // at camera-space x=y=0 projects to screen centre regardless of depth), so this is free
     // shrink: it cuts how much of the lower screen the receiver eats without moving the aim.
     const adsDepth = this.current === 'pistol' ? -0.88
-      : this.current === 'm4' ? -0.95 : -0.7;
+      : this.current === 'm4' ? -1.1 : -0.7;
     this.holder.position.z = (ads ? adsDepth : -0.45) + kick;
     this.holder.position.x = (ads ? (this.adsX ?? 0) : 0.22) + rl * 0.05;
     this.holder.position.y = (ads ? (this.adsY ?? -0.155) : -0.22) + Math.sin(t * 1.8) * 0.004 - rl * 0.12;

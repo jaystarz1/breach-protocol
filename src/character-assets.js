@@ -351,6 +351,13 @@ function prepareCarriedRifleGeometry(source) {
   return { geometry, sourceParts };
 }
 
+// The same one-draw authored rifle serves both world actors and the first-person M4. Sharing
+// the immutable BufferGeometry avoids loading or decoding the GLB twice; each consumer owns
+// its own Mesh, material and transform.
+export function authoredRifleViewGeometry() {
+  return authoredRifleGeometry;
+}
+
 // Quaternius' civilians are authored as 7–10 skinned garment/anatomy pieces that all use
 // the same skeleton and transform. They animate correctly but each piece is a draw call:
 // twenty people in the market cost 163 draws before props, enemies or the squad. Bake each

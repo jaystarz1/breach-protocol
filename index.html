@@ -103,28 +103,15 @@
   #nvg::after { content:''; position:absolute; inset:0;
     background: repeating-linear-gradient(0deg, rgba(0,0,0,.06) 0 1px, transparent 1px 3px); }
 
-  /* ---------- ADS reticle (non-scoped weapons) ----------
-     The optic in the view model is see-through now, but a few pixels of additive geometry is
-     not a dependable aiming reference — and once the lights go out in the kill-house an unlit
-     sight is no reference at all. This is the illuminated element: crisp at any resolution,
-     glows in the dark, and sits exactly on the bore because the ADS sight anchor puts the
-     optic on screen centre. */
+  /* ---------- ADS red dot (non-scoped weapons) ----------
+     The authored optic supplies the housing and glass. Only its projected emitter belongs in
+     the HUD: a large green ring plus four witness bars read as an arcade overlay rather than
+     something reflected inside the sight. */
   #ads-reticle { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    width:120px; height:120px; display:none; pointer-events:none; }
-  #ads-reticle .rdot { position:absolute; left:50%; top:50%; width:5px; height:5px; margin:-2.5px 0 0 -2.5px;
-    border-radius:50%; background:#ff6a4a; box-shadow:0 0 5px #ff4a28, 0 0 12px rgba(255,74,40,.75); }
-  #ads-reticle .rring { position:absolute; left:50%; top:50%; width:54px; height:54px; margin:-27px 0 0 -27px;
-    border-radius:50%; border:1.5px solid rgba(150,255,190,.55);
-    box-shadow:0 0 5px rgba(80,255,150,.5), inset 0 0 5px rgba(80,255,150,.25); }
-  /* four short witness ticks at the cardinal points: gives the eye something to centre on */
-  #ads-reticle .rtick { position:absolute; left:50%; top:50%; background:rgba(150,255,190,.8);
-    box-shadow:0 0 4px rgba(80,255,150,.8); }
-  #ads-reticle .rtick.v { width:1.5px; height:10px; margin-left:-0.75px; }
-  #ads-reticle .rtick.h { height:1.5px; width:10px; margin-top:-0.75px; }
-  #ads-reticle .rtick.t { margin-top:-40px; }
-  #ads-reticle .rtick.b { margin-top:30px; }
-  #ads-reticle .rtick.l { margin-left:-40px; }
-  #ads-reticle .rtick.r { margin-left:30px; }
+    width:24px; height:24px; display:none; pointer-events:none; }
+  #ads-reticle .rdot { position:absolute; left:50%; top:50%; width:3px; height:3px; margin:-1.5px 0 0 -1.5px;
+    border-radius:50%; background:#ff654d;
+    box-shadow:0 0 3px #ff4a30, 0 0 7px rgba(255,74,48,.58); }
 
   /* ---------- Scope overlay ----------
      Illuminated reticle. Black crosshairs vanish against a night city, which is exactly what
@@ -223,10 +210,7 @@
 </div>
 
 <div id="ads-reticle">
-  <div class="rring"></div>
   <div class="rdot"></div>
-  <div class="rtick v t"></div><div class="rtick v b"></div>
-  <div class="rtick h l"></div><div class="rtick h r"></div>
 </div>
 <div id="nvg"></div>
 <div id="flash-white"></div>
