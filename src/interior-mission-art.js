@@ -401,6 +401,272 @@ function addPartitionSegment(b, x1, z1, x2, z2, mats) {
   }
 }
 
+function addForwardCommand(scene) {
+  const b = new Batches(scene);
+  const procedural = surfaces();
+  const grime = grimeTexture();
+  const mats = {
+    floorA: concreteMaterial(0x666b68),
+    floorB: concreteMaterial(0x5d6361),
+    runner: new THREE.MeshStandardMaterial({
+      color: 0x1b2324,
+      map: procedural.fabric.map,
+      normalMap: procedural.fabric.normalMap,
+      normalScale: new THREE.Vector2(0.2, 0.2),
+      roughness: 0.96,
+    }),
+    darkSteel: standard(0x20282b, 0.62, 0.54),
+    galvanized: new THREE.MeshStandardMaterial({
+      color: 0x667173,
+      map: procedural.metal.map,
+      normalMap: procedural.metal.normalMap,
+      roughnessMap: procedural.metal.roughnessMap,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+      roughness: 0.58,
+      metalness: 0.58,
+    }),
+    wallPanel: standard(0x343f42, 0.84, 0.14),
+    panelTrim: standard(0x566164, 0.58, 0.5),
+    cable: standard(0x111719, 0.94, 0.02),
+    console: standard(0x343d3e, 0.68, 0.34),
+    screen: new THREE.MeshStandardMaterial({
+      color: 0x122624,
+      emissive: 0x1c6b5f,
+      emissiveIntensity: 0.38,
+      roughness: 0.32,
+      metalness: 0.06,
+    }),
+    deadScreen: standard(0x101416, 0.9, 0.02),
+    red: new THREE.MeshBasicMaterial({ color: 0xc24a3e }),
+    amber: new THREE.MeshBasicMaterial({ color: 0xd49a45 }),
+    green: new THREE.MeshBasicMaterial({ color: 0x4bc17e }),
+    kit: new THREE.MeshStandardMaterial({
+      color: 0x101617,
+      map: procedural.fabric.map,
+      normalMap: procedural.fabric.normalMap,
+      normalScale: new THREE.Vector2(0.2, 0.2),
+      roughness: 0.9,
+      metalness: 0.02,
+    }),
+    paper: standard(0xbcb6a5, 0.98, 0),
+    floorGrime: new THREE.MeshBasicMaterial({
+      color: 0x5d625b,
+      map: grime,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    }),
+    wallGrime: new THREE.MeshBasicMaterial({
+      color: 0x666b64,
+      map: grime,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    }),
+    tacticalMap: new THREE.MeshBasicMaterial({ map: tacticalMapTexture() }),
+  };
+  mats.screen.userData.blackoutIntensity = mats.screen.emissiveIntensity;
+  scene.userData.blackoutMaterials = [mats.screen];
+
+  // The original concrete ground remains collision. A field-laid tile deck gives the
+  // corridor and rooms repeatable scale without one stretched texture over the entire map.
+  for (let row = 0, z = 20.4; z >= -18.4; row++, z -= 2.04) {
+    for (const x of [-1.42, 1.42]) {
+      b.add(row % 2 ? 'command-floor-tiles-b' : 'command-floor-tiles-a',
+        UNIT_BOX, row % 2 ? mats.floorB : mats.floorA,
+        matrix(x, 0.027, z, 2.72, 0.045, 1.92));
+    }
+  }
+  for (const [roomIndex, rz] of [11, -1, -13].entries()) {
+    for (let zi = -1; zi <= 1; zi++) {
+      for (let xi = 0; xi < 3; xi++) {
+        b.add((roomIndex + xi + zi) % 2
+          ? 'command-floor-tiles-b' : 'command-floor-tiles-a',
+        UNIT_BOX, (roomIndex + xi + zi) % 2 ? mats.floorB : mats.floorA,
+        matrix(4.45 + xi * 2.65, 0.027, rz + zi * 2.18, 2.53, 0.045, 2.06));
+      }
+    }
+  }
+  for (const z of [17.5, 10.5, 3.5, -3.5, -10.5, -17]) {
+    b.add('command-corridor-runner', UNIT_BOX, mats.runner,
+      matrix(0, 0.056, z, 1.16, 0.025, 6.55));
+  }
+
+  // Dark lower wall protection, segmented at every doorway, turns the corridor from one
+  // extrusion into an occupied command floor. All pieces sit less than 6cm off the wall.
+  for (let z = 20; z >= -18; z -= 3.8) {
+    b.add('command-west-wall-panels', UNIT_BOX, mats.wallPanel,
+      matrix(-2.91, 0.72, z, 0.055, 1.25, 3.56));
+    b.add('command-west-panel-rails', UNIT_BOX, mats.panelTrim,
+      matrix(-2.875, 1.35, z, 0.035, 0.08, 3.62));
+  }
+  for (const [z, length] of [[18, 7.4], [7.25, 10.1], [-4.4, 10.7], [-15.2, 7.6]]) {
+    b.add('command-east-wall-panels', UNIT_BOX, mats.wallPanel,
+      matrix(2.91, 0.72, z, 0.055, 1.25, length));
+    b.add('command-east-panel-rails', UNIT_BOX, mats.panelTrim,
+      matrix(2.875, 1.35, z, 0.035, 0.08, length + 0.06));
+  }
+  for (const rz of [11, -1, -13]) {
+    b.add('command-room-wall-panels', UNIT_BOX, mats.wallPanel,
+      matrix(10.91, 0.72, rz, 0.055, 1.25, 6.55));
+    b.add('command-room-panel-rails', UNIT_BOX, mats.panelTrim,
+      matrix(10.875, 1.35, rz, 0.035, 0.08, 6.62));
+  }
+
+  // Exposed structure, ventilation and a proper runged cable tray occupy separate ceiling
+  // lanes, leaving the existing fluorescent fixtures unobstructed down the centre.
+  for (let z = 20; z >= -18; z -= 4) {
+    b.add('command-ceiling-ribs', UNIT_BOX, mats.darkSteel,
+      matrix(0, 3.06, z, 5.65, 0.13, 0.12));
+  }
+  b.add('command-ventilation-trunk', UNIT_BOX, mats.galvanized,
+    matrix(1.62, 2.94, 1, 0.68, 0.42, 39.5));
+  for (let z = 19; z >= -17; z -= 4) {
+    b.add('command-ventilation-joints', UNIT_BOX, mats.darkSteel,
+      matrix(1.62, 2.94, z, 0.75, 0.48, 0.08));
+    b.add('command-ventilation-grilles', UNIT_BOX, mats.darkSteel,
+      matrix(1.62, 2.715, z - 1.55, 0.52, 0.025, 0.68));
+    for (const offset of [-0.17, 0, 0.17]) {
+      b.add('command-ventilation-grille-slats', UNIT_BOX, mats.panelTrim,
+        matrix(1.62 + offset, 2.695, z - 1.55, 0.035, 0.018, 0.56));
+    }
+  }
+  for (const x of [-1.76, -1.08]) {
+    b.add('command-cable-tray-rails', UNIT_BOX, mats.galvanized,
+      matrix(x, 2.96, 1, 0.06, 0.07, 39.5));
+  }
+  for (let z = 20; z >= -18; z -= 1.15) {
+    b.add('command-cable-tray-rungs', UNIT_BOX, mats.galvanized,
+      matrix(-1.42, 2.93, z, 0.76, 0.035, 0.045));
+  }
+  for (const x of [-1.62, -1.42, -1.22]) {
+    b.add('command-overhead-cables', CABLE, mats.cable,
+      matrix(x, 2.86, 1, 1, 39, 1, Math.PI / 2));
+  }
+
+  // Room one: live operations and the launch-corridor map the infiltrators came to steal.
+  b.add('command-ops-bench', UNIT_BOX, mats.console,
+    matrix(10.45, 0.82, 11, 0.72, 0.12, 4.7));
+  for (const z of [9.7, 11, 12.3]) {
+    b.add('command-monitor-cases', UNIT_BOX, mats.darkSteel,
+      matrix(10.32, 1.55, z, 0.18, 0.72, 1.05));
+    b.add(z === 12.3 ? 'command-monitor-dead' : 'command-monitor-live',
+      UNIT_BOX, z === 12.3 ? mats.deadScreen : mats.screen,
+      matrix(10.215, 1.55, z, 0.025, 0.58, 0.87));
+    for (let i = -2; i <= 2; i++) {
+      b.add('command-console-controls', UNIT_BOX, i === 2 ? mats.red : mats.amber,
+        matrix(10.02, 0.89, z + i * 0.14, 0.025, 0.026, 0.05));
+    }
+  }
+  const opsMap = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 1.72), mats.tacticalMap);
+  opsMap.name = 'command-launch-corridor-map';
+  opsMap.position.set(7.1, 2.02, 14.43);
+  opsMap.rotation.y = Math.PI;
+  scene.add(opsMap);
+  addSign(scene, 'command-ops-room-sign', 'OPS / MAP CELL', 'VEKTOR // AUTHORIZED',
+    [2.86, 2.68, 13.25], -Math.PI / 2, 2.25, '#4f9d86');
+
+  // Room two: communications and the breaker bank that fails after the room is cleared.
+  for (const z of [-3.0, -1.0, 1.0]) {
+    b.add('command-radio-racks', UNIT_BOX, mats.console,
+      matrix(10.48, 1.16, z, 0.68, 2.08, 1.5));
+    b.add('command-radio-rack-faces', UNIT_BOX, mats.darkSteel,
+      matrix(10.12, 1.16, z, 0.035, 1.88, 1.32));
+    for (let y = 0.4; y <= 1.9; y += 0.25) {
+      b.add('command-radio-rack-slots', UNIT_BOX, mats.galvanized,
+        matrix(10.08, y, z, 0.025, 0.035, 1.02));
+    }
+    for (const y of [0.62, 1.12, 1.62]) {
+      b.add('command-radio-led-green', LED, mats.green,
+        matrix(10.04, y, z + 0.51));
+      b.add('command-radio-led-amber', LED, mats.amber,
+        matrix(10.04, y, z + 0.42));
+    }
+  }
+  b.add('command-breaker-cabinet', UNIT_BOX, mats.galvanized,
+    matrix(6.6, 1.62, 2.42, 2.1, 1.5, 0.18));
+  for (const x of [5.95, 6.35, 6.75, 7.15]) {
+    for (const y of [1.3, 1.65, 2.0]) {
+      b.add('command-breaker-switches', UNIT_BOX, mats.darkSteel,
+        matrix(x, y, 2.31, 0.18, 0.08, 0.035));
+    }
+  }
+  addSign(scene, 'command-signals-room-sign', 'SIGNALS / POWER', 'BACKUP BUS // ROOM 02',
+    [2.86, 2.68, 1.25], -Math.PI / 2, 2.25, '#d49a45');
+
+  // Room three: black assault kit, casualty supplies and an armoury wall. These shallow
+  // assemblies preserve the hostage/enemy floor positions while making the final dark room
+  // visually distinct before the blackout occurs.
+  for (const z of [-15.2, -13.2, -11.2]) {
+    b.add('command-gear-lockers', UNIT_BOX, mats.galvanized,
+      matrix(10.48, 1.18, z, 0.72, 2.14, 1.55));
+    b.add('command-gear-locker-doors', UNIT_BOX, mats.darkSteel,
+      matrix(10.09, 1.18, z, 0.035, 1.94, 1.34));
+    for (const y of [0.6, 0.72, 1.72, 1.84]) {
+      b.add('command-gear-locker-vents', UNIT_BOX, mats.panelTrim,
+        matrix(10.05, y, z, 0.025, 0.035, 0.78));
+    }
+    b.add('command-black-kit-panels', UNIT_BOX, mats.kit,
+      matrix(9.99, 1.25, z, 0.04, 0.9, 0.68));
+  }
+  const helmet = new THREE.SphereGeometry(0.24, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.58);
+  for (const z of [-15.2, -13.2, -11.2]) {
+    b.add('command-black-kit-helmets', helmet, mats.kit,
+      matrix(9.91, 2.22, z, 0.95, 0.62, 1.05));
+    b.add('command-black-kit-helmet-brims', UNIT_BOX, mats.kit,
+      matrix(9.86, 2.17, z, 0.12, 0.055, 0.58));
+    b.add('command-black-kit-helmet-mounts', UNIT_BOX, mats.darkSteel,
+      matrix(9.73, 2.28, z, 0.08, 0.12, 0.14));
+  }
+  b.add('command-medical-shelf', UNIT_BOX, mats.console,
+    matrix(6.9, 1.65, -16.32, 3.2, 1.5, 0.22));
+  for (const x of [5.8, 6.55, 7.3, 8.05]) {
+    b.add('command-medical-cases', UNIT_BOX, mats.red,
+      matrix(x, 1.4, -16.15, 0.58, 0.42, 0.24));
+  }
+  addSign(scene, 'command-armoury-room-sign', 'ASSAULT / MEDICAL', 'BLACK TEAM // ROOM 03',
+    [2.86, 2.68, -10.75], -Math.PI / 2, 2.25, '#b94b42');
+
+  // Traffic grime, wall seepage and scattered fragments bind the new layer to a command post
+  // that has already taken direct fire.
+  for (const [x, z, sx, sz, rz] of [
+    [0, 16, 2.7, 6.2, 0.08], [0.2, 5, 2.6, 7.0, -0.1],
+    [-0.1, -7, 2.5, 6.4, 0.14], [0, -16, 2.7, 5.0, -0.06],
+    [7.5, 10.5, 5.2, 4.5, 0.12], [7.2, -2, 5.0, 4.2, -0.1],
+    [7.4, -13.5, 5.4, 4.4, 0.08],
+  ]) {
+    b.add('command-floor-grime', TRAIN_SIDE_DECAL, mats.floorGrime,
+      matrix(x, 0.056, z, sx, sz, 1, -Math.PI / 2, 0, rz));
+  }
+  for (const [x, y, z, sy, sz, side] of [
+    [-2.94, 1.75, 5, 2.5, 7.0, 1], [-2.94, 1.65, -13, 2.3, 6.2, 1],
+    [10.94, 1.7, 10.5, 2.4, 5.0, -1], [10.94, 1.6, -1, 2.2, 5.2, -1],
+    [10.94, 1.65, -13, 2.3, 5.0, -1],
+  ]) {
+    b.add('command-wall-grime', TRAIN_SIDE_DECAL, mats.wallGrime,
+      matrix(x, y, z, sz, sy, 1, 0, side * Math.PI / 2, 0));
+  }
+  for (const [x, z, sx, sy, sz, rx, rz] of [
+    [-2.2, 8, 0.18, 0.12, 0.32, 0.1, 0.2],
+    [2.1, 4.5, 0.28, 0.09, 0.18, -0.2, 0.1],
+    [-1.8, -5, 0.34, 0.1, 0.2, 0.1, -0.2],
+    [4.1, 9.2, 0.24, 0.1, 0.34, -0.1, 0.3],
+    [5.0, -4, 0.32, 0.08, 0.2, 0.2, -0.2],
+    [4.2, -14.8, 0.2, 0.1, 0.3, -0.15, 0.2],
+  ]) {
+    b.add('command-rubble-fragments', UNIT_BOX, mats.floorB,
+      matrix(x, 0.09, z, sx, sy, sz, rx, rz, rz));
+  }
+
+  addSign(scene, 'command-corridor-status', 'FORWARD COMMAND', 'VEKTOR GROUP / SECTOR EAST',
+    [0, 2.35, -19.72], 0, 2.9, '#4f9d86');
+  return b.flush();
+}
+
 function addRecordsOffice(scene) {
   const b = new Batches(scene);
   const mats = {
@@ -1334,6 +1600,7 @@ function addCommandBunker(scene) {
 export function addInteriorMissionArt(scene, levelId) {
   if (!quality.desktop) return;
   let batches = null;
+  if (levelId === 1) batches = addForwardCommand(scene);
   if (levelId === 8) batches = addRecordsOffice(scene);
   if (levelId === 9) batches = addMetro(scene);
   if (levelId === 10) batches = addCommandBunker(scene);

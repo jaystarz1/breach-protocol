@@ -215,6 +215,13 @@ function killPower() {
   world.blackedOut = true;
   const r = nvgRig;
   if (r.fixtures) for (const f of r.fixtures) f.intensity = 0;
+  for (const material of scene.userData.blackoutMaterials || []) {
+    if (material?.isMeshStandardMaterial && material.emissiveIntensity > 0) {
+      material.userData.blackoutIntensity ??= material.emissiveIntensity;
+      material.emissiveIntensity = 0;
+      material.needsUpdate = true;
+    }
+  }
   // The environment map lights every PBR surface on its own, completely independently of the
   // light list. Zeroing every lamp in the building and leaving this set produced a "blackout"
   // you could comfortably read a wall by. It is cached in textures.js, so dropping the scene's

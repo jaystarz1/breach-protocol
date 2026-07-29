@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v91-rear-infiltration-metro';
+const CACHE = 'breach-protocol-v92-forward-command-post';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
