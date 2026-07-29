@@ -104,7 +104,7 @@ def main():
         page.evaluate(
             """() => {
               const subject = BP.world.civilians.find(c =>
-                c.mesh.userData.rig?.panicStyle === 0 && !c.dead);
+                c.mesh.userData.rig?.civilianSource === 1 && !c.dead);
               subject.pos.set(0, 0, 22);
               subject.mesh.rotation.y = 0;
               subject.update = () => {};
@@ -135,6 +135,10 @@ def main():
                 hairVertices: countMask('hairMask'),
                 fabricNormal: !!skin?.material?.normalMap,
                 fabricRoughness: !!skin?.material?.roughnessMap,
+                completePanicArms: [
+                  rig?.panicBones?.upperL, rig?.panicBones?.lowerL, rig?.panicBones?.wristL,
+                  rig?.panicBones?.upperR, rig?.panicBones?.lowerR, rig?.panicBones?.wristR,
+                ].every(Boolean),
               };
               return coverage;
             }, {})"""
@@ -360,6 +364,7 @@ def main():
             and rig["hairVertices"] > 0
             and rig["fabricNormal"]
             and rig["fabricRoughness"]
+            and rig["completePanicArms"]
             for rig in rig_coverage.values()
         )
         assert reveal and not reveal["concealed"] and reveal["state"] == "alert"

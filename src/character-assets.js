@@ -636,6 +636,16 @@ function findRigObject(visual, name) {
     const actual = canonical(object.name || '');
     if (!match && (actual === expected || actual.endsWith(expected))) match = object;
   });
+  // The long-sleeve civilian uses PalmL/PalmR where the other civilian and combatant rigs
+  // use WristL/WristR. Treat those as the same articulation point so every source receives
+  // forearm aiming, cover poses and the close-range hand proportion correction.
+  if (!match && (expected === 'wristl' || expected === 'wristr')) {
+    const palm = expected === 'wristl' ? 'palml' : 'palmr';
+    visual.traverse(object => {
+      const actual = canonical(object.name || '');
+      if (!match && (actual === palm || actual.endsWith(palm))) match = object;
+    });
+  }
   return match;
 }
 
@@ -1312,10 +1322,14 @@ export function poseAuthoredCivilianPanic(root, phase = 0) {
         left: [[-0.44, 1.3, 0.17], [-0.15, 1.61 + pulse * 0.03, 0.14]],
         right: [[0.48, 1.16, 0.25], [0.45, 1.4 - pulse * 0.04, 0.34]],
       };
-  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(...arms.left[0]));
-  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(...arms.left[1]));
-  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(...arms.right[0]));
-  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(...arms.right[1]));
+  // These source rigs use anatomical L/R names from the character's perspective: the L
+  // shoulder sits on positive root X and the R shoulder on negative root X. Matching labels
+  // to screen-left targets crossed both arms through the chest. Route each chain to the
+  // same-sign side of the body so elbows open naturally instead of forming an X.
+  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(...arms.right[0]));
+  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(...arms.right[1]));
+  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(...arms.left[0]));
+  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(...arms.left[1]));
   if (b.head) {
     const base = rig.civilianFramePose?.headBase;
     if (base) b.head.quaternion.copy(base);
@@ -1343,10 +1357,10 @@ export function poseAuthoredCivilianCover(root, amount = 1) {
     };
   }
   const b = rig.coverBones;
-  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(-0.34, 1.05, 0.16));
-  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(-0.18, 1.36, 0.03));
-  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(0.34, 1.05, 0.16));
-  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(0.18, 1.36, 0.03));
+  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(0.34, 1.05, 0.16));
+  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(0.18, 1.36, 0.03));
+  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(-0.34, 1.05, 0.16));
+  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(-0.18, 1.36, 0.03));
   rig.visual.position.y = rig.baseVisualY - 0.52 * a;
   rig.visual.rotation.x = -0.34 * a;
   const frame = rig.civilianFramePose;
