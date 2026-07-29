@@ -11,7 +11,9 @@
 //   - They can die. They do not respawn and losing them never fails the mission — that would
 //     turn a squad from an asset into a babysitting objective.
 import * as THREE from 'three';
-import { makeCharacter, animateRig, deathPose, kneelRig } from './levelgen.js';
+import {
+  makeCharacter, animateDeathRig, animateRig, deathPose, kneelRig,
+} from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { claimPath, findPathFor } from './enemies.js';
 import { sfx } from './audio.js';
@@ -52,7 +54,7 @@ export function slotWorld(px, pz, yaw, off) {
 
 export class Ally {
   constructor(scene, pos, idx, opts = {}) {
-    this.mesh = makeCharacter({ friendly: true, black: !!opts.black });
+    this.mesh = makeCharacter({ friendly: true, black: !!opts.black, variant: idx });
     this.mesh.position.set(pos[0], pos[1], pos[2]);
     scene.add(this.mesh);
     this.idx = idx;
@@ -74,6 +76,7 @@ export class Ally {
     this.walkPhase = Math.random() * 6;
     this.moving = false;
     this.flinch = 0;
+    this.shotPoseTimer = 0;
     this.stepAccum = 0;
     this.path = null;
     this.pathIdx = 0;
@@ -228,16 +231,14 @@ export class Ally {
 
   update(dt, world) {
     if (this.dead) {
-      if (this.deathAnim < 1) {
-        this.deathAnim = Math.min(1, this.deathAnim + dt * 3);
-        this.mesh.rotation.x = -Math.PI / 2 * this.deathAnim;
-      }
+      this.deathAnim = animateDeathRig(this.mesh, dt);
       return;
     }
     const p = this.pos;
     this.moving = false;
     this.progress = 0;
     this.flinch = Math.max(0, this.flinch - dt * 3);
+    this.shotPoseTimer = Math.max(0, this.shotPoseTimer - dt);
     this.repathTimer -= dt;
     this.acquireTimer -= dt;
     this.strafeTimer -= dt;
@@ -427,6 +428,7 @@ export class Ally {
     if (!this.lineIsClear(world, t)) { this.burstShots = 0; this.burstTimer = 0.5; return; }
     this.burstShots--;
     this.burstTimer = 0.12;
+    this.shotPoseTimer = 0.2;
     sfx.enemyShot(this.pos);
     world.allyFlash(this.pos);
     world.allyTracer(this, t);
@@ -441,7 +443,9 @@ export class Ally {
     const g = groundHeight(world.solids, p.x, p.z, 0.3, p.y + 0.75);
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.mesh.rotation.y = this.yaw;
-    animateRig(this.mesh, this.walkPhase, this.moving, this.flinch);
+    const intent = this.shotPoseTimer > 0 ? 'firing'
+      : this.target ? 'engage' : this.moving ? 'patrol' : 'engage';
+    animateRig(this.mesh, this.walkPhase, this.moving, this.flinch, false, intent);
     // Kneel last: it overrides the walk cycle's leg rotations rather than blending with them.
     if (this.kneel > 0.001) kneelRig(this.mesh, this.kneel);
     if (this.moving) {

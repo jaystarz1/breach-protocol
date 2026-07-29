@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v82-command-bunker';
+const CACHE = 'breach-protocol-v83-combatant-motion';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

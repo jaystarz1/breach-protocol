@@ -1,4 +1,6 @@
-import { makeCharacter, animateRig, deathPose, releaseHostageRig } from './levelgen.js';
+import {
+  makeCharacter, animateDeathRig, animateRig, deathPose, releaseHostageRig,
+} from './levelgen.js';
 import { groundHeight, resolveXZ } from './physics.js';
 import { sfx } from './audio.js';
 
@@ -139,10 +141,7 @@ export class Civilian {
 
   update(dt, world) {
     if (this.dead) {
-      if (this.deathAnim < 1) {
-        this.deathAnim = Math.min(1, this.deathAnim + dt * 3);
-        this.mesh.rotation.x = -Math.PI / 2 * this.deathAnim;
-      }
+      this.deathAnim = animateDeathRig(this.mesh, dt);
       return;
     }
     if (this.perch) { this.updateWindow(dt, world); return; }

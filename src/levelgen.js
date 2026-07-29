@@ -363,7 +363,9 @@ export function makeCharacter({
     if (civilian) return civilian;
   }
   if (armed && !concealed && !hostage) {
-    const authored = createAuthoredCharacter({ friendly, black, silhouette, bastion });
+    const authored = createAuthoredCharacter({
+      friendly, black, silhouette, bastion, variant,
+    });
     if (authored) return authored;
   }
   const g = new THREE.Group();
@@ -574,7 +576,9 @@ export function releaseHostageRig(g) {
 export function revealWeaponRig(g) {
   const r = g.userData.rig;
   if (!r?.rifle || !r.concealed) return;
-  const authored = createAuthoredCharacter({ friendly: false, black: false, silhouette: false });
+  const authored = createAuthoredCharacter({
+    friendly: false, black: false, silhouette: false, variant: r.variant,
+  });
   if (authored) {
     for (const child of g.children) child.visible = false;
     g.add(authored);
@@ -591,11 +595,13 @@ export function revealWeaponRig(g) {
 
 // Walk cycle plus hit reaction. phase advances with distance moved; flinch is 0..~0.32s
 // remaining, which jerks the upper body back so bullets visibly land.
-export function animateRig(g, phase, moving, flinch = 0, panic = false) {
+export function animateRig(
+  g, phase, moving, flinch = 0, panic = false, intent = 'idle',
+) {
   const r = g.userData.rig;
   if (!r) return;
   if (r.authored) {
-    animateAuthoredCharacter(g, moving, flinch);
+    animateAuthoredCharacter(g, moving, flinch, intent, phase);
     if (panic) poseAuthoredCivilianPanic(g, phase);
     return;
   }
@@ -648,13 +654,39 @@ export function kneelRig(g, k) {
 export function deathPose(g) {
   const r = g.userData.rig;
   if (!r) return;
-  if (stopAuthoredCharacter(g)) return;
-  const s = () => (Math.random() - 0.5);
-  r.lArm.rotation.set(-0.4 + s() * 0.5, 0, 0.9 + s() * 0.4);
-  r.rArm.rotation.set(-0.3 + s() * 0.5, 0, -0.9 + s() * 0.4);
-  r.lLeg.rotation.x = s() * 0.5; r.rLeg.rotation.x = s() * 0.5;
-  if (r.rifle) { r.rifle.rotation.z = 0.9; r.rifle.position.y = 0.9; }
-  g.rotation.z = s() * 0.35;
+  const authored = stopAuthoredCharacter(g);
+  const variant = Math.abs(r.variant ?? Math.floor(Math.random() * 9));
+  const side = variant % 2 ? 1 : -1;
+  if (!authored) {
+    const s = () => (Math.random() - 0.5);
+    r.lArm.rotation.set(-0.4 + s() * 0.5, 0, 0.9 + s() * 0.4);
+    r.rArm.rotation.set(-0.3 + s() * 0.5, 0, -0.9 + s() * 0.4);
+    r.lLeg.rotation.x = s() * 0.5; r.rLeg.rotation.x = s() * 0.5;
+    if (r.rifle) { r.rifle.rotation.z = 0.9; r.rifle.position.y = 0.9; }
+  }
+  const mode = variant % 3;
+  g.userData.deathMotion = {
+    t: 0,
+    duration: 0.48 + (variant % 5) * 0.035,
+    startX: g.rotation.x,
+    startZ: g.rotation.z,
+    targetX: mode === 1 ? -0.3 : mode === 2 ? -1.24 : -1.49,
+    targetZ: mode === 1 ? side * 1.45 : mode === 2 ? side * 0.42 : side * 0.12,
+  };
+}
+
+export function animateDeathRig(g, dt) {
+  const motion = g.userData.deathMotion;
+  if (!motion) return 1;
+  motion.t = Math.min(1, motion.t + dt / motion.duration);
+  const t = motion.t;
+  const ease = 1 - Math.pow(1 - t, 3);
+  // A small late settle removes the perfectly mathematical stop without turning this into a
+  // per-limb physics simulation. Bone articulation was baked once in deathPose.
+  const settle = t > 0.78 ? Math.sin((t - 0.78) / 0.22 * Math.PI) * 0.035 : 0;
+  g.rotation.x = motion.startX + (motion.targetX - motion.startX) * ease - settle;
+  g.rotation.z = motion.startZ + (motion.targetZ - motion.startZ) * ease;
+  return t;
 }
 
 const doorGeometryCache = new Map();

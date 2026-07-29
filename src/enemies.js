@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { makeCharacter, animateRig, deathPose, revealWeaponRig } from './levelgen.js';
+import {
+  makeCharacter, animateDeathRig, animateRig, deathPose, revealWeaponRig,
+} from './levelgen.js';
 import { groundHeight, resolveXZ, hasLOS } from './physics.js';
 import { findPath, nearestNode } from './navgrid.js';
 import { sfx } from './audio.js';
@@ -58,6 +60,7 @@ export class Enemy {
     this.moving = false;
     this.inactiveTime = 0;
     this.flinch = 0;
+    this.shotPoseTimer = 0;
     this.stepAccum = 0;
     this.path = null;
     this.pathIdx = 0;
@@ -303,12 +306,10 @@ export class Enemy {
     }
     if (this.dead) {
       if (this.mflash) this.mflash.visible = false;
-      if (this.deathAnim < 1) {
-        this.deathAnim = Math.min(1, this.deathAnim + dt * 3);
-        this.mesh.rotation.x = -Math.PI / 2 * this.deathAnim;
-      }
+      this.deathAnim = animateDeathRig(this.mesh, dt);
       return;
     }
+    this.shotPoseTimer = Math.max(0, this.shotPoseTimer - dt);
     this.peekTimer -= dt;
     this.flinch = Math.max(0, this.flinch - dt * 3);
 
@@ -331,7 +332,10 @@ export class Enemy {
     const dx = t.x - this.pos.x, dz = t.z - this.pos.z;
     this.yaw = lerpAng(this.yaw, Math.atan2(dx, dz), Math.min(1, dt * 4));
     this.mesh.rotation.y = this.yaw;
-    animateRig(this.mesh, this.walkPhase, false, this.flinch);
+    animateRig(
+      this.mesh, this.walkPhase, false, this.flinch, false,
+      this.shotPoseTimer > 0 ? 'firing' : 'engage',
+    );
     this.reactTimer -= dt;
     const dist = Math.hypot(dx, t.y - this.pos.y, dz);
     if (this.reactTimer <= 0 && this.duck < 0.25) this.doShoot(dt, world, dist, t);
@@ -347,12 +351,10 @@ export class Enemy {
   update(dt, world) {
     if (this.perches) { this.updateSniper(dt, world); return; }
     if (this.dead) {
-      if (this.deathAnim < 1) {
-        this.deathAnim = Math.min(1, this.deathAnim + dt * 3);
-        this.mesh.rotation.x = -Math.PI / 2 * this.deathAnim;
-      }
+      this.deathAnim = animateDeathRig(this.mesh, dt);
       return;
     }
+    this.shotPoseTimer = Math.max(0, this.shotPoseTimer - dt);
     const p = this.pos;
     this.moving = false;
     this.progress = 0;
@@ -482,7 +484,10 @@ export class Enemy {
     const g = groundHeight(world.solids, p.x, p.z, 0.3, p.y + 0.75);
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.mesh.rotation.y = this.yaw;
-    animateRig(this.mesh, this.walkPhase, this.moving, this.flinch);
+    const intent = this.flee ? 'flee'
+      : this.shotPoseTimer > 0 ? 'firing'
+        : this.state === 'patrol' ? 'patrol' : 'engage';
+    animateRig(this.mesh, this.walkPhase, this.moving, this.flinch, false, intent);
     this.inactiveTime = (this.moving || this.state !== 'patrol') ? 0 : this.inactiveTime + dt;
 
     // footsteps: the single biggest piece of tactical information in a room-clearing game
@@ -567,6 +572,7 @@ export class Enemy {
     this.burstShots--;
     this.burstTimer = this.single ? 1.7 + Math.random() : 0.11;
     this.shotsHere++;
+    this.shotPoseTimer = 0.2;
     sfx.enemyShot(this.pos);
     world.enemyFlash(this.pos);
     world.enemyTracer(this, target);

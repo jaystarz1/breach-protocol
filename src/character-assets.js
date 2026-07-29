@@ -719,9 +719,13 @@ function mapActions(clips, mixer) {
   return actions;
 }
 
-export function createAuthoredCharacter({ friendly, black, silhouette, bastion = false }) {
+let combatantSequence = 0;
+export function createAuthoredCharacter({
+  friendly, black, silhouette, bastion = false, variant: requestedVariant,
+}) {
   if (!soldierSource) return null;
   const root = new THREE.Group();
+  const variant = Math.abs(requestedVariant ?? combatantSequence++);
   const visual = cloneSkeleton(soldierSource);
   const faction = friendly ? (black ? 'black' : 'friendly') : bastion ? 'bastion' : 'hostile';
   visual.scale.setScalar(soldierScale);
@@ -817,11 +821,10 @@ export function createAuthoredCharacter({ friendly, black, silhouette, bastion =
     root.add(
       pack, aerial, leftTab, rightTab, neckGaiter, commandPouch, radioHandset,
     );
-  } else if (!silhouette) {
-    // Small shoulder tape, not a floating faction bar. Identification must come from the
-    // uniform, weapon and behavior at useful range rather than a red UI-like slab.
-    root.add(patch(0x922a25, [-0.31, 1.36, 0], [0.035, 0.09, 0.12]));
   }
+  // Hostiles deliberately get no red geometry or floating faction cue. Their olive kit,
+  // carried weapon, posture, and behavior identify them; a rigid shoulder box separates from
+  // the animated arm and reads like an arcade marker at the ranges where recognition matters.
 
   const mixer = new THREE.AnimationMixer(visual);
   const actions = mapActions(soldierClips, mixer);
@@ -829,8 +832,19 @@ export function createAuthoredCharacter({ friendly, black, silhouette, bastion =
   // hands remain on the rifle instead of swinging like an unarmed mannequin.
   actions.combatIdle = actions.idle_gun || actions.idle_gun_shoot || actions.idle;
   actions.combatRun = actions.run_shoot || actions.run || actions.walk;
+  mixer.timeScale = 0.94 + (variant % 7) * 0.02;
   const idle = actions.combatIdle;
-  if (idle) idle.play();
+  const phaseOffset = (variant * 0.173) % 1;
+  if (idle) {
+    idle.play();
+    idle.time = idle.getClip().duration * phaseOffset;
+  }
+  const bodyScale = bastion ? 1.025 : 0.97 + (variant % 6) * 0.012;
+  root.scale.set(
+    bodyScale * (0.985 + ((variant >> 1) % 3) * 0.012),
+    bodyScale,
+    bodyScale * (0.99 + ((variant >> 2) % 3) * 0.008),
+  );
   root.userData.rig = {
     authored: true,
     visual,
@@ -843,6 +857,9 @@ export function createAuthoredCharacter({ friendly, black, silhouette, bastion =
     hostile: true,
     friendly: !!friendly,
     bastion: !!bastion,
+    variant,
+    phaseOffset,
+    intent: 'patrol',
     combatant: true,
     baseVisualY: visual.position.y,
     baseRiflePosition: rifle.position.clone(),
@@ -923,6 +940,7 @@ export function createCivilianCharacter({
     hostile: false,
     friendly: false,
     civilian: true,
+    variant,
     civilianSource: sourceIndex,
     panicStyle: Math.abs(sequence) % 3,
     bodyScale: { height: heightScale, width: widthScale },
@@ -936,7 +954,9 @@ export function createCivilianCharacter({
   return root;
 }
 
-export function animateAuthoredCharacter(root, moving, flinch = 0) {
+export function animateAuthoredCharacter(
+  root, moving, flinch = 0, intent = 'idle', motionPhase = 0,
+) {
   const rig = root.userData.rig;
   if (!rig?.authored) return;
   const now = performance.now();
@@ -947,16 +967,49 @@ export function animateAuthoredCharacter(root, moving, flinch = 0) {
     root.userData.bob = 0;
     return;
   }
-  const desired = moving
-    ? (rig.actions.combatRun || rig.actions.run || rig.actions.walk || rig.actions.character_walk)
-    : (rig.actions.combatIdle || rig.actions.idle || rig.actions.character_idle);
+  let desired;
+  if (moving) {
+    desired = intent === 'flee'
+      ? (rig.actions.run || rig.actions.walk || rig.actions.combatRun)
+      : intent === 'patrol'
+        ? (rig.actions.walk || rig.actions.combatRun || rig.actions.run)
+        : (rig.actions.combatRun || rig.actions.run || rig.actions.walk);
+  } else if (intent === 'firing') {
+    desired = rig.actions.gun_shoot || rig.actions.idle_gun_shoot
+      || rig.actions.idle_gun_pointing || rig.actions.combatIdle;
+  } else if (intent === 'engage') {
+    desired = rig.actions.idle_gun_pointing || rig.actions.idle_gun_shoot
+      || rig.actions.combatIdle;
+  } else {
+    desired = rig.actions.combatIdle || rig.actions.idle || rig.actions.character_idle;
+  }
   if (desired && desired !== rig.currentAction) {
     desired.reset().fadeIn(0.14).play();
+    desired.time = desired.getClip().duration * rig.phaseOffset;
     rig.currentAction?.fadeOut(0.14);
     rig.currentAction = desired;
   }
+  rig.intent = intent;
   rig.mixer.update(dt);
   if (rig.combatant) poseAuthoredRifle(root, rig);
+  if (!rig.lifeBones && rig.combatant) {
+    rig.lifeBones = {
+      head: findRigObject(rig.visual, 'Head'),
+      neck: findRigObject(rig.visual, 'Neck'),
+    };
+  }
+  // The clip drives the whole body; this small post-layer only breaks the surveillance-camera
+  // mannequin stare. It touches head/neck, never the arms, so the solved weapon contacts stay
+  // exact. Patrols scan, engaged men keep their eyes much closer to the weapon line.
+  const life = motionPhase * 0.11 + rig.variant * 0.73;
+  const scan = moving ? 0.012 : intent === 'patrol' ? 0.075 : 0.018;
+  if (rig.lifeBones?.head) {
+    rig.lifeBones.head.rotation.y += Math.sin(life) * scan;
+    rig.lifeBones.head.rotation.z += Math.sin(life * 0.47) * scan * 0.18;
+  }
+  if (rig.lifeBones?.neck) {
+    rig.lifeBones.neck.rotation.y += Math.sin(life * 0.71 + 1.2) * scan * 0.28;
+  }
   const hit = flinch * 3.2;
   rig.visual.rotation.x = -hit * 0.12;
   rig.visual.rotation.z = hit * 0.07;
@@ -1049,6 +1102,31 @@ export function stopAuthoredCharacter(root) {
   const rig = root.userData.rig;
   if (!rig?.authored) return false;
   rig.mixer.stopAllAction();
-  if (rig.rifle) rig.rifle.rotation.z += 0.7;
+  const variant = rig.variant || 0;
+  const side = variant % 2 ? 1 : -1;
+  const bone = name => findRigObject(rig.visual, name);
+  const rotate = (name, x, y, z) => {
+    const node = bone(name);
+    if (!node) return;
+    node.rotation.x += x;
+    node.rotation.y += y;
+    node.rotation.z += z;
+  };
+  rotate('Spine1', -0.2, side * 0.08, side * 0.1);
+  rotate('Head', -0.22, side * 0.18, side * 0.12);
+  rotate('UpperArm.L', -0.45, 0, 0.55 + side * 0.22);
+  rotate('LowerArm.L', -0.32, 0, 0.24);
+  rotate('UpperArm.R', -0.35, 0, -0.58 + side * 0.2);
+  rotate('LowerArm.R', -0.28, 0, -0.18);
+  rotate('UpperLeg.L', 0.18 + (variant % 3) * 0.11, 0, 0.08);
+  rotate('LowerLeg.L', 0.42 + (variant % 2) * 0.28, 0, 0);
+  rotate('UpperLeg.R', -0.12 + (variant % 2) * 0.25, 0, -0.08);
+  rotate('LowerLeg.R', 0.24 + ((variant + 1) % 2) * 0.35, 0, 0);
+  if (rig.rifle) {
+    rig.rifle.rotation.z += side * 0.7;
+    rig.rifle.rotation.x += 0.28;
+    rig.rifle.position.x += side * 0.12;
+    rig.rifle.position.y -= 0.16;
+  }
   return true;
 }
