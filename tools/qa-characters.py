@@ -118,6 +118,7 @@ def main():
                         || texture?.image?.src || '';
                       combatantSurface = {
                         material: object.material.name,
+                        fieldMap: source(object.material.userData.fieldMap),
                         normalMap: source(object.material.normalMap),
                         roughnessMap: source(object.material.roughnessMap),
                         normalRepeat: object.material.normalMap
@@ -373,7 +374,18 @@ def main():
             assert rifle["vertexColors"] == rifle["vertices"], result
             assert max(rifle["size"]) > 0.75, result
             surface = captures[kind]["combatantSurface"]
-            assert surface and surface["material"] == "combatant-scanned-fabric", result
+            expected_surface = (
+                "combatant-field-fabric"
+                if kind == "enemy"
+                else "combatant-scanned-fabric"
+            )
+            assert surface and surface["material"] == expected_surface, result
+            if kind == "enemy":
+                assert surface["fieldMap"].endswith(
+                    "assets/characters/materials/hostile-field-fabric.webp"
+                ), result
+            else:
+                assert not surface["fieldMap"], result
             assert surface["normalMap"].endswith(
                 "assets/characters/materials/fabric074-normal.webp"
             ), result

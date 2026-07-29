@@ -13,6 +13,7 @@ let authoredRifleGeometry = null;
 let authoredRifleSourceParts = 0;
 let combatantFabricNormal = null;
 let combatantFabricRoughness = null;
+let hostileFieldFabric = null;
 
 if (quality.desktop) {
   try {
@@ -59,9 +60,10 @@ if (quality.desktop) {
 if (quality.desktop) {
   try {
     const loader = new THREE.TextureLoader();
-    [combatantFabricNormal, combatantFabricRoughness] = await Promise.all([
+    [combatantFabricNormal, combatantFabricRoughness, hostileFieldFabric] = await Promise.all([
       loader.loadAsync('./assets/characters/materials/fabric074-normal.webp'),
       loader.loadAsync('./assets/characters/materials/fabric074-roughness.webp'),
+      loader.loadAsync('./assets/characters/materials/hostile-field-fabric.webp'),
     ]);
     for (const texture of [combatantFabricNormal, combatantFabricRoughness]) {
       texture.colorSpace = THREE.NoColorSpace;
@@ -69,6 +71,9 @@ if (quality.desktop) {
       texture.repeat.set(8, 8);
       texture.anisotropy = Math.min(quality.maxAnisotropy || 4, 8);
     }
+    hostileFieldFabric.colorSpace = THREE.SRGBColorSpace;
+    hostileFieldFabric.wrapS = hostileFieldFabric.wrapT = THREE.RepeatWrapping;
+    hostileFieldFabric.anisotropy = Math.min(quality.maxAnisotropy || 4, 8);
   } catch (error) {
     console.warn('[bp] scanned combatant fabric unavailable; using flat gear material', error);
   }
@@ -219,65 +224,94 @@ outgoingLight += vec3(0.026, 0.031, 0.034) * vEyeMask;
     );
 };
 MERGED_CIVILIAN_MATERIAL.customProgramCacheKey = () => 'bp-civilian-surface-v2';
-const MERGED_COMBATANT_MATERIAL = new THREE.MeshStandardMaterial({
-  name: 'combatant-scanned-fabric',
-  vertexColors: true,
-  roughness: 0.88,
-  metalness: 0.025,
-  normalMap: combatantFabricNormal,
-  normalScale: new THREE.Vector2(0.3, 0.3),
-  roughnessMap: combatantFabricRoughness,
-});
-MERGED_COMBATANT_MATERIAL.onBeforeCompile = shader => {
-  shader.vertexShader = shader.vertexShader
-    .replace(
-      '#include <common>',
-      `#include <common>
+function createMergedCombatantMaterial({ fieldUniform = false } = {}) {
+  const material = new THREE.MeshStandardMaterial({
+    name: fieldUniform ? 'combatant-field-fabric' : 'combatant-scanned-fabric',
+    vertexColors: true,
+    roughness: 0.88,
+    metalness: 0.025,
+    normalMap: combatantFabricNormal,
+    normalScale: new THREE.Vector2(0.3, 0.3),
+    roughnessMap: combatantFabricRoughness,
+  });
+  material.userData.fieldUniform = fieldUniform;
+  material.userData.fieldMap = fieldUniform ? hostileFieldFabric : null;
+  material.onBeforeCompile = shader => {
+    if (fieldUniform && hostileFieldFabric) {
+      shader.uniforms.bpFieldMap = { value: hostileFieldFabric };
+    }
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
 attribute float fabricMask;
 attribute float visorMask;
 varying float vFabricMask;
-varying float vVisorMask;`,
-    )
-    .replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
+varying float vVisorMask;
+`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
 vFabricMask = fabricMask;
 vVisorMask = visorMask;`,
-    );
-  shader.fragmentShader = shader.fragmentShader
-    .replace(
-      '#include <common>',
-      `#include <common>
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
 varying float vFabricMask;
-varying float vVisorMask;`,
-    )
-    .replace(
-      '#include <roughnessmap_fragment>',
-      `#include <roughnessmap_fragment>
+varying float vVisorMask;
+${fieldUniform && hostileFieldFabric ? 'uniform sampler2D bpFieldMap;' : ''}`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+${fieldUniform ? `
+// A real low-contrast fabric albedo supplies the large-scale breakup; the existing scanned
+// normal and roughness maps retain the close cloth response. vNormalMapUv already carries
+// the eight-repeat fabric transform, so reducing it here keeps camo fields human-scale.
+${hostileFieldFabric ? `
+vec3 bpFieldAlbedo = texture2D(bpFieldMap, vNormalMapUv * 0.18).rgb;
+vec3 bpFieldMultiplier = mix(vec3(0.76), bpFieldAlbedo * 1.72, 0.68);
+diffuseColor.rgb *= mix(vec3(1.0), bpFieldMultiplier, vFabricMask * 0.72);
+` : `
+diffuseColor.rgb *= mix(vec3(1.0), vec3(0.88, 0.9, 0.8), vFabricMask * 0.22);
+`}
+` : ''}`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
 roughnessFactor = mix(roughness, roughnessFactor, vFabricMask);
 roughnessFactor = mix(roughnessFactor, 0.32, vVisorMask);`,
-    )
-    .replace(
-      '#include <metalnessmap_fragment>',
-      `#include <metalnessmap_fragment>
+      )
+      .replace(
+        '#include <metalnessmap_fragment>',
+        `#include <metalnessmap_fragment>
 metalnessFactor = mix(metalnessFactor, 0.2, vVisorMask);`,
-    )
-    .replace(
-      '#include <normal_fragment_maps>',
-      `vec3 bpBaseNormal = normal;
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `vec3 bpBaseNormal = normal;
 #include <normal_fragment_maps>
 normal = normalize(mix(bpBaseNormal, normal, vFabricMask));`,
-    )
-    .replace(
-      '#include <opaque_fragment>',
-      `float bpVisorFresnel = pow(
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        `float bpVisorFresnel = pow(
   1.0 - saturate(dot(geometryNormal, geometryViewDir)), 2.0);
 outgoingLight += vVisorMask * (0.014 + bpVisorFresnel * 0.055)
   * vec3(0.35, 0.62, 0.74);
 #include <opaque_fragment>`,
-    );
-};
-MERGED_COMBATANT_MATERIAL.customProgramCacheKey = () => 'bp-combatant-surface-v2';
+      );
+  };
+  material.customProgramCacheKey = () =>
+    `bp-combatant-surface-v3:${fieldUniform ? 'field' : 'solid'}`;
+  return material;
+}
+const MERGED_COMBATANT_MATERIAL = createMergedCombatantMaterial();
+const MERGED_HOSTILE_MATERIAL = createMergedCombatantMaterial({ fieldUniform: true });
 const MERGED_SILHOUETTE_MATERIAL = new THREE.MeshBasicMaterial({ color: 0x020305 });
 
 function bakeVertexColor(geometry, material, surfaceRoles = false, objectName = '') {
@@ -394,7 +428,7 @@ export function authoredRifleViewGeometry() {
 // piece's flat material colour into vertices and merge the compatible skin streams. The
 // silhouette, bones and clips remain untouched; a crowd member becomes one skinned draw.
 function mergeCivilianVisual(visual, cacheKey, {
-  name = 'civilian-merged-skinned', civilian = true,
+  name = 'civilian-merged-skinned', civilian = true, material = null,
 } = {}) {
   visual.updateMatrixWorld(true);
   const pieces = [];
@@ -454,7 +488,7 @@ function mergeCivilianVisual(visual, cacheKey, {
   const relative = visual.matrixWorld.clone().invert().multiply(first.matrixWorld);
   const merged = new THREE.SkinnedMesh(
     cached.geometry,
-    civilian ? MERGED_CIVILIAN_MATERIAL : MERGED_COMBATANT_MATERIAL,
+    material || (civilian ? MERGED_CIVILIAN_MATERIAL : MERGED_COMBATANT_MATERIAL),
   );
   relative.decompose(merged.position, merged.quaternion, merged.scale);
   merged.bindMode = first.bindMode;
@@ -800,8 +834,10 @@ export function createAuthoredCharacter({
     visual, `combatant:${faction}:${silhouette ? 'silhouette' : 'lit'}`, {
     name: 'combatant-merged-skinned',
     civilian: false,
+    material: silhouette
+      ? MERGED_SILHOUETTE_MATERIAL
+      : faction === 'hostile' ? MERGED_HOSTILE_MATERIAL : MERGED_COMBATANT_MATERIAL,
   });
-  if (mergedSkin && silhouette) mergedSkin.material = MERGED_SILHOUETTE_MATERIAL;
   root.add(visual);
 
   const rifle = new THREE.Mesh(RIFLE_GEO, silhouette

@@ -26,3 +26,7 @@ https://ambientcg.com/view?id=Fabric074
 
 The source material is dedicated to the public domain under CC0 1.0. Only the OpenGL normal
 and roughness maps are shipped; combatant faction colour remains authored vertex data.
+
+`materials/hostile-field-fabric.webp` is a project-authored, AI-assisted raster albedo created
+for Breach Protocol. It provides a subdued, unbranded field-uniform layer for hostile cloth;
+the shader masks it away from skin, armor, boots and visor surfaces.

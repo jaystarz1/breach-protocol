@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v106-desktop-spatial-audio';
+const CACHE = 'breach-protocol-v107-hostile-field-kit';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -29,6 +29,7 @@ const ASSETS = [
   'assets/characters/NOTICE.md',
   'assets/characters/materials/fabric074-normal.webp',
   'assets/characters/materials/fabric074-roughness.webp',
+  'assets/characters/materials/hostile-field-fabric.webp',
   'assets/weapons/AssaultRifleWest.glb',
   'assets/weapons/NOTICE.md',
   'assets/vehicles/CarSedan.glb',
