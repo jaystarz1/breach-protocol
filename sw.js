@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v103-adaptive-resolution';
+const CACHE = 'breach-protocol-v104-expanded-mission-variants';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

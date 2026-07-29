@@ -11,8 +11,8 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:4178/?renderer=desktop")
     parser.add_argument(
         "--levels",
-        default="1,2,5,7,8,9",
-        help="Comma-separated mission ids (default: 1,2,5,7,8,9)",
+        default="1,2,3,4,5,7,8,9,10",
+        help="Comma-separated mission ids (default: every authored-variant mission)",
     )
     args = parser.parse_args()
     selected_levels = [int(value) for value in args.levels.split(",") if value]
@@ -33,7 +33,8 @@ def main():
                 timeout=90000,
             )
             page.wait_for_timeout(120)
-            return page.evaluate("""() => {
+            return page.evaluate("""async () => {
+              const { resolveActorVariant } = await import('./src/mission-variants.js');
               const nav = BP.world.nav;
               const nearest = (x, y, z) => {
                 let best = -1;
@@ -133,6 +134,22 @@ def main():
                     };
                   }),
                 }));
+              const defenseWaves = BP.world.level.objectives
+                .filter(objective => objective.type === 'defend')
+                .flatMap(objective => objective.waves || [])
+                .flatMap(wave => wave.enemies || [])
+                .map(definition => resolveActorVariant(
+                  definition, BP.world.missionVariant));
+              const waveEnemies = defenseWaves.map(enemy => {
+                const target = nearest(...enemy.pos);
+                return {
+                  pos: enemy.pos,
+                  patrol: enemy.patrol || [],
+                  node: target.node,
+                  distance: +target.distance.toFixed(2),
+                  reachable: target.node >= 0 && !!visited[target.node],
+                };
+              });
               return {
                 variant: BP.world.missionVariant,
                 enemySignature: BP.world.enemies.map(enemy => [
@@ -146,6 +163,10 @@ def main():
                   +civilian.spawnPos.z.toFixed(1),
                 ]),
                 reinforcementSockets: BP.world.reinf?.at || [],
+                defenseWaveSignature: defenseWaves.map(enemy => ({
+                  pos: enemy.pos,
+                  patrol: enemy.patrol || [],
+                })),
                 streetLayout: BP.world.staticMesh.parent.userData.streetShopLayout || null,
                 nav: {
                   nodes: nav.nodeX.length,
@@ -156,6 +177,7 @@ def main():
                   reinforcements,
                   reachObjectives,
                   reconResponses,
+                  waveEnemies,
                 },
               };
             }""")
@@ -172,6 +194,7 @@ def main():
             assert rows[0]["enemySignature"] == rows[3]["enemySignature"], level
             assert rows[0]["civilianSignature"] == rows[3]["civilianSignature"], level
             assert rows[0]["reinforcementSockets"] == rows[3]["reinforcementSockets"], level
+            assert rows[0]["defenseWaveSignature"] == rows[3]["defenseWaveSignature"], level
             assert rows[0]["streetLayout"] == rows[3]["streetLayout"], level
             assert len({
                 json.dumps(row["enemySignature"], sort_keys=True)
@@ -192,7 +215,7 @@ def main():
                 # Breach rooms and dedicated firing bays are intentionally separate islands.
                 # Their variants must stay in the identical authored island. Open missions
                 # instead require every initial actor to be directly path-reachable.
-                if level in {"1", "7", "8"}:
+                if level in {"1", "3", "7", "8", "10"}:
                     assert [
                         actor["component"] for actor in row["nav"]["actors"]
                     ] == baseline_components, (level, row)
@@ -207,7 +230,9 @@ def main():
                     for socket in row["nav"]["reinforcements"]
                 ), (level, row)
                 assert all(
-                    objective["reachable"] and objective["withinZone"]
+                    objective["node"] >= 0
+                    and objective["withinZone"]
+                    and (objective["reachable"] or level == "3")
                     for objective in row["nav"]["reachObjectives"]
                 ), (level, row)
                 if level == "2":
@@ -222,6 +247,12 @@ def main():
                         for response in responses
                         for enemy in response["enemies"]
                     ), row
+                assert all(
+                    enemy["node"] >= 0
+                    and enemy["distance"] < 2.8
+                    and enemy["reachable"]
+                    for enemy in row["nav"]["waveEnemies"]
+                ), (level, row)
 
         if "2" in results:
             street = results["2"]
@@ -229,12 +260,20 @@ def main():
                 json.dumps(row["streetLayout"], sort_keys=True)
                 for row in street[:3]
             }) == 3
-        for level in [key for key in ["2", "5", "7", "8", "9"] if key in results]:
+        for level in [
+            key for key in ["2", "3", "4", "5", "7", "8", "9", "10"]
+            if key in results
+        ]:
             rows = results[level]
             assert len({
                 json.dumps(row["reinforcementSockets"], sort_keys=True)
                 for row in rows[:3]
             }) == 3, level
+        if "10" in results:
+            assert len({
+                json.dumps(row["defenseWaveSignature"], sort_keys=True)
+                for row in results["10"][:3]
+            }) == 3
         print(json.dumps({
             "levels": {
                 level: {
@@ -245,6 +284,10 @@ def main():
                     }),
                     "reinforcementLayouts": len({
                         json.dumps(row["reinforcementSockets"], sort_keys=True)
+                        for row in rows[:3]
+                    }),
+                    "defenseWaveLayouts": len({
+                        json.dumps(row["defenseWaveSignature"], sort_keys=True)
                         for row in rows[:3]
                     }),
                     "streetLayouts": len({

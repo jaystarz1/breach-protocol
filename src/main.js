@@ -853,7 +853,7 @@ function spawnDefenseWave(obj, wave, waveIndex) {
   ));
   let made = 0;
   for (let i = 0; i < desired; i++) {
-    const def = authored[i];
+    const def = resolveActorVariant(authored[i], world.missionVariant);
     const enemy = new Enemy(scene, {
       ...def,
       aggro: true,
