@@ -13,6 +13,10 @@ const DRONE_FRAGMENT_GEO = new THREE.BoxGeometry(0.13, 0.13, 0.13);
 const DRONE_HEAT_BODY_GEO = new THREE.CapsuleGeometry(0.23, 0.68, 4, 8);
 const DRONE_HEAT_HEAD_GEO = new THREE.SphereGeometry(0.2, 10, 7);
 const DRONE_HEAT_VEHICLE_GEO = new THREE.BoxGeometry(3.8, 1.45, 1.9);
+const DRONE_TARGET_BOX_PERSON_GEO = new THREE.EdgesGeometry(
+  new THREE.BoxGeometry(0.9, 2.05, 0.9));
+const DRONE_TARGET_BOX_VEHICLE_GEO = new THREE.EdgesGeometry(
+  new THREE.BoxGeometry(4.4, 2.15, 2.45));
 const DRONE_MUNITION_MAT = new THREE.MeshBasicMaterial({
   name: 'drone-strike-munition', color: 0xffd4a3,
 });
@@ -36,6 +40,14 @@ const DRONE_HEAT_HALO_MAT = new THREE.MeshBasicMaterial({
   transparent: true, opacity: 0.22, depthTest: true, depthWrite: false,
   blending: THREE.AdditiveBlending,
 });
+const DRONE_TARGET_BOX_MAT = new THREE.LineBasicMaterial({
+  name: 'drone-ai-target-box',
+  color: 0x52ff79,
+  transparent: true,
+  opacity: 0.9,
+  depthTest: true,
+  depthWrite: false,
+});
 for (const geometry of [
   DRONE_MUNITION_GEO,
   DRONE_FLASH_GEO,
@@ -45,6 +57,8 @@ for (const geometry of [
   DRONE_HEAT_BODY_GEO,
   DRONE_HEAT_HEAD_GEO,
   DRONE_HEAT_VEHICLE_GEO,
+  DRONE_TARGET_BOX_PERSON_GEO,
+  DRONE_TARGET_BOX_VEHICLE_GEO,
 ]) {
   geometry.userData.bpPersistent = true;
 }
@@ -52,6 +66,7 @@ for (const material of [
   DRONE_MUNITION_MAT, DRONE_FRAGMENT_HOT_MAT, DRONE_FRAGMENT_DARK_MAT,
   DRONE_TRACER_MAT,
   DRONE_HEAT_CORE_MAT, DRONE_HEAT_HALO_MAT,
+  DRONE_TARGET_BOX_MAT,
 ]) {
   material.userData.bpPersistent = true;
 }
@@ -102,6 +117,19 @@ function thermalSignature(target, vehicle = false) {
     }
   });
   return root;
+}
+
+function targetingBox(target, vehicle = false) {
+  const line = new THREE.LineSegments(
+    vehicle ? DRONE_TARGET_BOX_VEHICLE_GEO : DRONE_TARGET_BOX_PERSON_GEO,
+    DRONE_TARGET_BOX_MAT,
+  );
+  line.name = vehicle ? 'drone-ai-box-vehicle' : 'drone-ai-box-combatant';
+  line.userData.target = target;
+  line.userData.vehicle = vehicle;
+  line.renderOrder = 9;
+  line.frustumCulled = false;
+  return line;
 }
 
 function reconRouteModel(target) {
@@ -437,6 +465,8 @@ export function dronePrewarmGroup(definition) {
     ));
     root.add(thermalSignature({ dead: false, pos: new THREE.Vector3() }));
     root.add(thermalSignature({ dead: false, pos: new THREE.Vector3() }, true));
+    root.add(targetingBox({ dead: false, pos: new THREE.Vector3() }));
+    root.add(targetingBox({ dead: false, pos: new THREE.Vector3() }, true));
   }
   root.traverse(part => {
     if (part.isMesh || part.isLine) part.frustumCulled = false;
@@ -519,6 +549,8 @@ export class DroneController {
     this.targetModels = [];
     this.routeModels = [];
     this.thermalSignatures = [];
+    this.targetBoxes = [];
+    this.thermalEnabled = true;
     for (const target of this.targets) {
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(
@@ -552,11 +584,17 @@ export class DroneController {
         const signature = thermalSignature(actor);
         scene.add(signature);
         this.thermalSignatures.push(signature);
+        const box = targetingBox(actor);
+        scene.add(box);
+        this.targetBoxes.push(box);
       }
       for (const vehicle of this.combatVehicles) {
         const signature = thermalSignature(vehicle, true);
         scene.add(signature);
         this.thermalSignatures.push(signature);
+        const box = targetingBox(vehicle, true);
+        scene.add(box);
+        this.targetBoxes.push(box);
       }
     }
 
@@ -571,7 +609,7 @@ export class DroneController {
       <div class="drone-label">VEKTOR ISR // ${definition.label || 'TACTICAL UAS'}</div>
       <div class="drone-status"></div>
       <div class="drone-help">${this.mode === 'combat'
-    ? 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE RIFLE · G GRENADE'
+    ? 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE RIFLE · G GRENADE · N EO/THERMAL · F HANDOFF'
     : this.mode === 'strike'
       ? 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE RELEASE'
       : 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE MARK'}</div>
@@ -622,6 +660,21 @@ export class DroneController {
 
   update(dt, input, solids) {
     if (!this.active) return;
+    if (this.mode === 'combat' && input.nvgPressed) {
+      this.thermalEnabled = !this.thermalEnabled;
+      if (this.canvas) {
+        this.canvas.style.filter = this.thermalEnabled
+          ? 'grayscale(1) saturate(0) contrast(1.17) brightness(.84)'
+          : 'saturate(.78) contrast(1.08) brightness(.9)';
+      }
+      this.result.textContent = this.thermalEnabled
+        ? 'THERMAL SENSOR // AI TRACK OVERLAY' : 'EO SENSOR // AI TRACK OVERLAY';
+      this.result.style.opacity = '1';
+      clearTimeout(this.resultTimer);
+      this.resultTimer = setTimeout(() => {
+        if (!this.complete) this.result.style.opacity = '0';
+      }, 850);
+    }
     this.yaw -= input.lookDelta.x * 0.72;
     this.pitch = Math.max(-1.15, Math.min(0.72, this.pitch - input.lookDelta.y * 0.62));
     this.roll += ((-input.move.x * 0.42) - this.roll) * Math.min(1, dt * 6);
@@ -662,6 +715,7 @@ export class DroneController {
     this.camera.rotation.set(this.pitch, this.yaw, this.roll);
 
     this.updateThermalSignatures();
+    this.updateTargetBoxes();
     for (const model of this.targetModels) model?.userData.update?.(dt);
     this.updateMunitions(dt, solids);
     this.updateEffects(dt);
@@ -676,6 +730,14 @@ export class DroneController {
       const live = this.combatants.filter(actor => !actor.dead && !actor.surrendered);
       const liveVehicles = this.combatVehicles.filter(vehicle => !vehicle.dead);
       const liveCount = live.length + liveVehicles.length;
+      if (input.breachPressed && liveCount > 0 && !this.complete) {
+        this.complete = true;
+        this.result.textContent = `HANDOFF // ${liveCount} SURVIVORS JOINING GROUND FIGHT`;
+        this.result.style.opacity = '1';
+        this.status.textContent += `\nHANDOFF ${liveCount} LIVE`;
+        this.completionTimer = setTimeout(() => this.onComplete?.(), 300);
+        return;
+      }
       const nearest = [...live, ...liveVehicles].sort((a, b) =>
         a.pos.distanceToSquared(this.pos) - b.pos.distanceToSquared(this.pos))[0];
       const track = nearest ? (() => {
@@ -694,7 +756,8 @@ export class DroneController {
         `RIFLE ${this.rifleRounds}/100`,
         `FRAG ${this.grenadeRounds}/10`,
         `HOSTILES ${liveCount}/${this.combatants.length + this.combatVehicles.length}`,
-        ...(liveCount <= 3 ? [track] : []),
+        `SENSOR ${this.thermalEnabled ? 'THERMAL' : 'EO'} // AI TRACK`,
+        ...(liveCount <= 4 ? [track] : []),
       ].join('\n');
       this.overlay.style.opacity = String(0.72 + this.signal * 0.28);
       if (!liveCount && (this.combatants.length || this.combatVehicles.length) && !this.complete) {
@@ -758,10 +821,22 @@ export class DroneController {
   updateThermalSignatures() {
     for (const signature of this.thermalSignatures) {
       const target = signature.userData.target;
-      signature.visible = !!target && !target.dead && !target.surrendered;
+      signature.visible = this.thermalEnabled
+        && !!target && !target.dead && !target.surrendered;
       if (!signature.visible) continue;
       signature.position.copy(target.pos);
       if (signature.userData.vehicle) signature.rotation.y = target.mesh?.rotation.y || 0;
+    }
+  }
+
+  updateTargetBoxes() {
+    for (const box of this.targetBoxes) {
+      const target = box.userData.target;
+      box.visible = !!target && !target.dead && !target.surrendered;
+      if (!box.visible) continue;
+      box.position.copy(target.pos);
+      box.position.y += box.userData.vehicle ? 1.05 : 1.03;
+      if (box.userData.vehicle) box.rotation.y = target.mesh?.rotation.y || 0;
     }
   }
 
@@ -814,10 +889,6 @@ export class DroneController {
       headshot = false;
       vehicleHit = true;
     }
-    for (const signature of this.thermalSignatures) {
-      this.scene.remove(signature);
-      disposeObject(signature);
-    }
     const endDistance = Math.min(maxRange, hitDistance);
     const end = origin.clone().addScaledVector(direction, endDistance);
     const geometry = new THREE.BufferGeometry().setFromPoints([origin, end]);
@@ -825,7 +896,7 @@ export class DroneController {
     tracer.name = 'drone-rifle-tracer';
     this.scene.add(tracer);
     this.effects.push({
-      type: 'tracer', root: tracer, life: 0.075, age: 0,
+      type: 'tracer', root: tracer, life: 0.2, age: 0,
     });
     this.onCombatShot?.(origin, end, hit);
     if (hit && vehicleHit) this.onCombatVehicleHit?.(hit, 8);
@@ -1069,6 +1140,14 @@ export class DroneController {
     for (const vehicle of this.combatVehicles) {
       this.scene.remove(vehicle.mesh);
       vehicle.mesh.userData.dispose?.();
+    }
+    for (const signature of this.thermalSignatures) {
+      this.scene.remove(signature);
+      disposeObject(signature);
+    }
+    for (const box of this.targetBoxes) {
+      this.scene.remove(box);
+      disposeObject(box);
     }
     this.munitions.length = 0;
     this.effects.length = 0;

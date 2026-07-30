@@ -18,7 +18,7 @@ def main():
     selected_levels = [int(value) for value in args.levels.split(",") if value]
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=["--mute-audio"])
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))

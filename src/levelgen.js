@@ -1058,6 +1058,7 @@ export function car(x, z, rotZAxis = false, color = null, opts = {}) {
       kind: 'vehicle', x, z, rotZAxis, color: col, police: !!opts.police,
       variant,
       damage: opts.damage ?? appearance % 7,
+      burned: !!opts.burned,
     });
     const length = [4.6, 4.26, 4.76][opts.police ? 0 : variant];
     const width = [1.94, 1.93, 2.06][opts.police ? 0 : variant];
@@ -1102,24 +1103,33 @@ export function car(x, z, rotZAxis = false, color = null, opts = {}) {
 // the desktop visual layer replaces it with a detailed six-wheel cab, chassis and canvas bed.
 export function militaryTruck(x, z, rotZAxis = false, opts = {}) {
   const color = opts.color ?? 0x3f4938;
+  const variant = Math.abs(opts.variant ?? 0) % 20;
+  const family = variant % 10;
+  const isTracked = family === 9;
+  const isWheeledApc = family === 8;
+  const length = isWheeledApc ? 7.15 : isTracked ? 6.7 : 6.6;
+  const width = isWheeledApc ? 2.85 : isTracked ? 3.05 : 2.45;
+  const openBed = family === 1 || family === 5 || family === 6 || family === 7;
+  const height = openBed ? 1.22 : (isTracked ? 2.08 : isWheeledApc ? 2.25 : 2.7);
   if (window.__bpVisualProps) {
     window.__bpVisualProps.push({
       kind: 'military-truck',
       x, z, rotZAxis, color,
+      variant,
       damage: opts.damage ?? 1,
-      canvas: opts.canvas !== false,
+      canvas: opts.canvas ?? family === 0,
     });
     return [[
-      x, 1.35, z,
-      rotZAxis ? 2.45 : 6.6, 2.7,
-      rotZAxis ? 6.6 : 2.45,
+      x, height / 2, z,
+      rotZAxis ? width : length, height,
+      rotZAxis ? length : width,
       color, true, false, false,
     ]];
   }
   return [[
-    x, 1.35, z,
-    rotZAxis ? 2.45 : 6.6, 2.7,
-    rotZAxis ? 6.6 : 2.45,
+    x, height / 2, z,
+    rotZAxis ? width : length, height,
+    rotZAxis ? length : width,
     color, true,
   ]];
 }

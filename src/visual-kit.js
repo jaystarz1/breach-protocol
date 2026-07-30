@@ -1221,15 +1221,20 @@ function addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked) {
 function addVehicle(batcher, def) {
   const damage = def.damage ?? Math.abs(Math.round(def.x * 17 + def.z * 31)) % 7;
   const type = VEHICLE_TYPES[def.police ? 0 : Math.abs(def.variant ?? 0) % VEHICLE_TYPES.length];
-  const wrecked = !def.police && damage === 0;
-  const bodyColor = wrecked ? 0x242321 : def.color;
+  const burned = !def.police && !!def.burned;
+  const wrecked = !def.police && damage === 0 && !burned;
+  const damaged = wrecked || burned;
+  const bodyColor = damaged ? 0x242321 : def.color;
   const parent = new THREE.Matrix4().compose(
     new THREE.Vector3(def.x, 0.01, def.z),
     new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0), def.rotZAxis ? Math.PI / 2 : 0),
     new THREE.Vector3(1, 1, 1),
   );
-  if (addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked)) return;
+  // Burning cars retain a recognizable sedan/SUV shell but use the procedural layered kit so
+  // we can remove a hub, drop a bumper, shatter glass and paint real scorch overlays. The
+  // imported "wreck" asset reads as a covered vehicle from gameplay distance.
+  if (!burned && addAuthoredVehicle(batcher, def, type, bodyColor, parent, wrecked)) return;
   const paint = material('vehicle-paint-instanced', () => new THREE.MeshPhysicalMaterial({
     color: 0xffffff, roughness: 0.32, metalness: 0.04,
     clearcoat: 0.68, clearcoatRoughness: 0.24, envMapIntensity: 1.15,
@@ -1264,7 +1269,7 @@ function addVehicle(batcher, def) {
   const glassSide = type.cabinHalf + 0.014;
   const trimSide = type.bodyHalf + 0.028;
   const wheelSide = type.bodyHalf + 0.06;
-  batcher.add(`vehicle-${type.key}-side-glass`, type.window, wrecked ? shattered : glass,
+  batcher.add(`vehicle-${type.key}-side-glass`, type.window, damaged ? shattered : glass,
     parent);
   for (const side of [-1, 1]) {
     batcher.add('vehicle-trim-box', UNIT_BOX, trim,
@@ -1290,9 +1295,9 @@ function addVehicle(batcher, def) {
   // panes, a visible interior and pillars prevent the profile from reading as two stacked
   // boxes when the player approaches from either end.
   batcher.add(`vehicle-${type.key}-windscreen`, type.windscreen,
-    wrecked ? shattered : glass, parent);
+    damaged ? shattered : glass, parent);
   batcher.add(`vehicle-${type.key}-rear-glass`, type.rearGlass,
-    wrecked ? shattered : glass, parent);
+    damaged ? shattered : glass, parent);
   for (const side of [-0.45, 0.45]) {
     batcher.add('vehicle-seats', UNIT_BOX, interior,
       instanceMatrix(parent, 0.12, 0.96, side, 0.42, 0.58, 0.44, 0, 0, -0.08));
@@ -1368,7 +1373,7 @@ function addVehicle(batcher, def) {
         instanceMatrix(parent, 1.22, 0.71, -side * (trimSide + 0.01), 0.58, 0.32, 0.022,
           0, 0, damage === 2 ? 0.11 : -0.08));
     }
-    if (wrecked) {
+    if (damaged) {
       batcher.add('vehicle-missing-hub', CAP_GEO, rubber,
         instanceMatrix(parent, type.wheels[1], 0.4, wheelSide + 0.065,
           1.35, 1.35, 1.1, Math.PI / 2));
@@ -1385,68 +1390,207 @@ function addVehicle(batcher, def) {
   if (def.police) addPoliceVehicleDetails(batcher, parent, type);
 }
 
+const MILITARY_TRUCK_CAB_GEO = loftedVehicleShell([
+  [-3.34, 0.5, 0.72, 0.72], [-3.18, 0.43, 1.25, 1.0],
+  [-2.9, 0.42, 2.12, 1.05], [-2.52, 0.43, 2.42, 1.08],
+  [-1.38, 0.44, 2.38, 1.08], [-1.08, 0.48, 1.92, 1.02],
+  [-1.02, 0.52, 0.72, 0.82],
+], 0.86);
+const MILITARY_APC_HULL_GEO = loftedVehicleShell([
+  [-3.52, 0.35, 0.66, 0.8], [-3.24, 0.3, 1.4, 1.28],
+  [-2.45, 0.28, 1.75, 1.38], [1.9, 0.28, 1.86, 1.4],
+  [3.15, 0.3, 1.48, 1.35], [3.52, 0.38, 0.72, 0.9],
+], 0.84);
+const MILITARY_BMP_HULL_GEO = loftedVehicleShell([
+  [-3.3, 0.34, 0.72, 0.8], [-3.02, 0.28, 1.18, 1.47],
+  [-2.2, 0.26, 1.58, 1.5], [2.45, 0.26, 1.62, 1.51],
+  [3.12, 0.31, 1.18, 1.42], [3.34, 0.36, 0.7, 0.86],
+], 0.82);
+const MILITARY_TANKER_GEO = new THREE.CylinderGeometry(0.92, 0.92, 3.75, 22, 1);
+const MILITARY_TRACK_GEO = new THREE.CapsuleGeometry(0.42, 3.9, 5, 12);
+const MILITARY_TUBE_GEO = new THREE.CylinderGeometry(0.07, 0.085, 2.8, 9);
+
 function addMilitaryTruck(batcher, def) {
-  const olive = standard('military-truck-olive', 0x3f4938, 0.82, 0.14);
-  const darkOlive = standard('military-truck-dark-olive', 0x252d25, 0.9, 0.08);
+  const variant = Math.abs(def.variant ?? 0) % 20;
+  const family = variant % 10;
+  const paintIndex = Math.floor(variant / 5);
+  const paintColours = [0x414b39, 0x4b4c38, 0x35453b, 0x4a4435];
+  const surfaceKit = surfaces();
+  const paint = material(`military-vehicle-paint-${paintIndex}`, () =>
+    new THREE.MeshPhysicalMaterial({
+      color: def.damage === 0 ? 0x252925 : paintColours[paintIndex],
+      map: surfaceKit.metal.map,
+      normalMap: surfaceKit.metal.normalMap,
+      roughnessMap: surfaceKit.metal.roughnessMap,
+      normalScale: new THREE.Vector2(0.18, 0.18),
+      roughness: 0.78,
+      metalness: 0.16,
+      clearcoat: 0.12,
+      clearcoatRoughness: 0.72,
+    }));
   const chassis = standard('military-truck-chassis', 0x171b18, 0.78, 0.48);
   const rubber = standard('military-truck-rubber', 0x090b0a, 0.98, 0);
   const steel = standard('military-truck-steel', 0x59605a, 0.62, 0.58);
   const glass = standard('military-truck-glass', 0x101b1d, 0.24, 0.22);
-  const canvas = standard('military-truck-canvas', 0x4f553e, 0.98, 0);
+  const canvas = material('military-truck-canvas', () =>
+    new THREE.MeshStandardMaterial({
+      color: 0x555a42,
+      map: surfaceKit.fabric.map,
+      normalMap: surfaceKit.fabric.normalMap,
+      roughnessMap: surfaceKit.fabric.roughnessMap,
+      normalScale: new THREE.Vector2(0.34, 0.34),
+      roughness: 0.98,
+      metalness: 0,
+    }));
   const lamp = standard('military-truck-lamp', 0xd8cf9b, 0.34, 0.16);
+  const pale = standard('military-medical-panel', 0xb9b9a7, 0.82, 0.03);
+  const red = standard('military-medical-mark', 0x8c2924, 0.72, 0.05);
   const parent = new THREE.Matrix4().compose(
     new THREE.Vector3(def.x, 0.02, def.z),
     new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0), def.rotZAxis ? Math.PI / 2 : 0),
     new THREE.Vector3(1, 1, 1),
   );
-  const paint = def.damage === 0 ? darkOlive : olive;
 
-  // Longitudinal x axis, matching the authored civilian vehicle kit.
-  batcher.add('military-truck-chassis', UNIT_BOX, chassis,
-    instanceMatrix(parent, 0.15, 0.62, 0, 6.35, 0.28, 2.05));
-  batcher.add('military-truck-cab', UNIT_BOX, paint,
-    instanceMatrix(parent, -2.13, 1.43, 0, 1.72, 1.72, 2.12));
-  batcher.add('military-truck-hood', UNIT_BOX, paint,
-    instanceMatrix(parent, -3.0, 0.97, 0, 0.48, 0.78, 2.02, 0, 0, -0.08));
-  batcher.add('military-truck-bed', UNIT_BOX, paint,
-    instanceMatrix(parent, 1.15, 1.02, 0, 3.8, 0.82, 2.18));
-  batcher.add('military-truck-cab-roof', UNIT_BOX, paint,
-    instanceMatrix(parent, -2.1, 2.31, 0, 1.82, 0.16, 2.18));
-  for (const side of [-1, 1]) {
-    batcher.add('military-truck-windows', UNIT_BOX, glass,
-      instanceMatrix(parent, -2.18, 1.75, side * 1.075, 1.12, 0.62, 0.035));
-    batcher.add('military-truck-bed-rails', UNIT_BOX, steel,
-      instanceMatrix(parent, 1.15, 1.67, side * 1.09, 3.72, 0.08, 0.08));
-    for (const x of [-0.56, 0.55, 1.65, 2.7]) {
-      batcher.add('military-truck-bed-stakes', UNIT_BOX, steel,
-        instanceMatrix(parent, x, 1.62, side * 1.09, 0.07, 1.12, 0.07));
+  const wheels = (positions, sideOffset, scale = 1.25) => {
+    for (const x of positions) for (const side of [-1, 1]) {
+      batcher.add('military-truck-tyres', TYRE_GEO, rubber,
+        instanceMatrix(parent, x, 0.55, side * sideOffset, scale, scale, scale * 0.96));
+      batcher.add('military-wheel-hubs', HUB_GEO, steel,
+        instanceMatrix(parent, x, 0.55, side * (sideOffset + 0.05),
+          scale * 0.92, scale * 0.92, scale * 0.92, Math.PI / 2));
     }
-  }
-  batcher.add('military-truck-windscreen', UNIT_BOX, glass,
-    instanceMatrix(parent, -3.01, 1.76, 0, 0.04, 0.62, 1.78, 0, 0, -0.08));
-  batcher.add('military-truck-grille', UNIT_BOX, steel,
-    instanceMatrix(parent, -3.27, 0.98, 0, 0.06, 0.48, 1.5));
-  for (const side of [-0.72, 0.72]) {
-    batcher.add('military-truck-lamps', VEHICLE_LAMP_GEO, lamp,
-      instanceMatrix(parent, -3.32, 1.18, side, 0.2, 0.2, 0.16));
-  }
-  if (def.canvas !== false) {
-    batcher.add('military-truck-canvas-roof', UNIT_BOX, canvas,
-      instanceMatrix(parent, 1.15, 2.38, 0, 3.72, 0.16, 2.08));
+  };
+
+  if (family < 8) {
+    // Unlike the first blockout, the cab is a single curved loft with tapered nose, shoulders
+    // and roof. It uses the same authored-surface method as the sedan/SUV kit.
+    batcher.add('military-truck-authored-cab', MILITARY_TRUCK_CAB_GEO, paint, parent);
+    batcher.add('military-chassis-boxes', UNIT_BOX, chassis,
+      instanceMatrix(parent, 0.12, 0.62, 0, 6.35, 0.24, 2.02));
     for (const side of [-1, 1]) {
-      batcher.add('military-truck-canvas-sides', UNIT_BOX, canvas,
-        instanceMatrix(parent, 1.15, 1.93, side * 1.03, 3.72, 0.82, 0.08));
+      batcher.add('military-glass-boxes', UNIT_BOX, glass,
+        instanceMatrix(parent, -2.15, 1.78, side * 1.086, 1.12, 0.64, 0.026));
     }
+    batcher.add('military-glass-boxes', UNIT_BOX, glass,
+      instanceMatrix(parent, -3.1, 1.72, 0, 0.035, 0.62, 1.76, 0, 0, -0.1));
+    batcher.add('military-truck-grille', VEHICLE_GRILLE_GEO, steel,
+      instanceMatrix(parent, -3.34, 1.0, 0, 1.35, 1.35, 1, 0, -Math.PI / 2, 0));
+    for (const side of [-0.73, 0.73]) {
+      batcher.add('military-vehicle-lamps', VEHICLE_LAMP_GEO, lamp,
+        instanceMatrix(parent, -3.34, 1.17, side, 0.2, 0.2, 0.16));
+    }
+    wheels([-2.35, 0.35, 2.35], 1.11);
+    batcher.add('military-truck-bumper', VEHICLE_BUMPER_GEO, chassis,
+      instanceMatrix(parent, -3.4, 0.63, 0, 1.35, 1, 1, 0, 0, Math.PI / 2));
+
+    if ([0, 1, 5, 6, 7].includes(family)) {
+      batcher.add('military-truck-bed', UNIT_BOX, paint,
+        instanceMatrix(parent, 1.15, 1.0, 0, 3.8, 0.78, 2.18));
+      for (const side of [-1, 1]) {
+        batcher.add('military-steel-boxes', UNIT_BOX, steel,
+          instanceMatrix(parent, 1.15, 1.57, side * 1.09, 3.72, 0.07, 0.07));
+        for (const x of [-0.55, 0.55, 1.65, 2.7]) {
+          batcher.add('military-steel-boxes', UNIT_BOX, steel,
+            instanceMatrix(parent, x, 1.53, side * 1.09, 0.06, 1.0, 0.06));
+        }
+      }
+    }
+    if (family === 0 || def.canvas === true) {
+      batcher.add('military-truck-canvas-roof', MILITARY_APC_HULL_GEO, canvas,
+        instanceMatrix(parent, 1.15, 0.67, 0, 0.55, 0.68, 0.72));
+    } else if (family === 1) {
+      // Open troop transport: benches and an unobstructed rear explain the mounted soldiers.
+      for (const side of [-1, 1]) {
+        batcher.add('military-troop-benches', UNIT_BOX, canvas,
+          instanceMatrix(parent, 1.25, 1.34, side * 0.72, 3.25, 0.12, 0.42));
+      }
+    } else if (family === 2) {
+      batcher.add('military-fuel-tanker', MILITARY_TANKER_GEO, paint,
+        instanceMatrix(parent, 1.15, 1.58, 0, 1, 1, 1, 0, 0, Math.PI / 2));
+      for (const x of [-0.65, 2.95]) {
+        batcher.add('military-tanker-bands', new THREE.TorusGeometry(0.95, 0.035, 8, 18),
+          steel, instanceMatrix(parent, x, 1.58, 0, 1, 1, 1, 0, Math.PI / 2, 0));
+      }
+    } else if (family === 3 || family === 4) {
+      const body = family === 4 ? pale : paint;
+      batcher.add('military-command-body', UNIT_BOX, body,
+        instanceMatrix(parent, 1.15, 1.68, 0, 3.8, 2.12, 2.12));
+      batcher.add('military-command-roof', MILITARY_TANKER_GEO, body,
+        instanceMatrix(parent, 1.15, 2.7, 0, 1.02, 1, 0.34, 0, 0, Math.PI / 2));
+      if (family === 3) {
+        batcher.add('military-steel-boxes', UNIT_BOX, steel,
+          instanceMatrix(parent, 2.2, 3.35, 0, 0.06, 1.55, 0.06));
+      } else {
+        for (const side of [-1, 1]) {
+          batcher.add('military-ambulance-cross', UNIT_BOX, red,
+            instanceMatrix(parent, 1.25, 1.72, side * 1.075, 0.72, 0.2, 0.035));
+          batcher.add('military-ambulance-cross', UNIT_BOX, red,
+            instanceMatrix(parent, 1.25, 1.72, side * 1.078, 0.2, 0.72, 0.035));
+        }
+      }
+    } else if (family === 5) {
+      // Flatbed supply load; separate rounded crates prevent the old single-cube silhouette.
+      for (let i = 0; i < 5; i++) {
+        batcher.add('military-flatbed-load', SUPPLY_CRATE_GEO, canvas,
+          instanceMatrix(parent, -0.1 + i * 0.68, 1.48 + (i % 2) * 0.36,
+            (i % 2 ? -0.42 : 0.42), 0.62, 0.62, 0.62, 0, i * 0.12, 0));
+      }
+    } else if (family === 6) {
+      batcher.add('military-steel-tubes', MILITARY_TUBE_GEO, steel,
+        instanceMatrix(parent, 1.1, 2.15, 0, 1.8, 1.8, 1.8, 0, 0, -0.76));
+      batcher.add('military-steel-tubes', MILITARY_TUBE_GEO, steel,
+        instanceMatrix(parent, 2.25, 2.72, 0, 0.42, 0.42, 0.42, 0, Math.PI / 2, 0));
+    } else if (family === 7) {
+      for (let row = -1; row <= 1; row++) for (let tube = 0; tube < 4; tube++) {
+        batcher.add('military-launcher-tubes', MILITARY_TUBE_GEO, chassis,
+          instanceMatrix(parent, 1.0 + tube * 0.34, 1.75 + row * 0.22, row * 0.38,
+            1.2, 1.2, 1.2, 0, 0, Math.PI / 2 - 0.16));
+      }
+    }
+    return;
   }
-  for (const x of [-2.28, 0.35, 2.35]) for (const side of [-1, 1]) {
-    batcher.add('military-truck-tyres', TYRE_GEO, rubber,
-      instanceMatrix(parent, x, 0.55, side * 1.11, 1.28, 1.28, 1.22));
-    batcher.add('military-truck-hubs', HUB_GEO, steel,
-      instanceMatrix(parent, x, 0.55, side * 1.16, 1.18, 1.18, 1.18, Math.PI / 2));
+
+  if (family === 8) {
+    batcher.add('military-wheeled-apc-hull', MILITARY_APC_HULL_GEO, paint, parent);
+    wheels([-2.55, -0.85, 0.85, 2.55], 1.42, 1.18);
+    for (const side of [-0.48, 0.48]) {
+      batcher.add('military-glass-boxes', UNIT_BOX, glass,
+        instanceMatrix(parent, -3.08, 1.36, side, 0.035, 0.32, 0.68, 0, 0, -0.22));
+      batcher.add('military-vehicle-lamps', VEHICLE_LAMP_GEO, lamp,
+        instanceMatrix(parent, -3.35, 0.88, side * 1.55, 0.18, 0.18, 0.15));
+    }
+    for (const side of [-1, 1]) for (const x of [-1.65, 0.15, 1.9]) {
+      batcher.add('military-glass-boxes', UNIT_BOX, glass,
+        instanceMatrix(parent, x, 1.48, side * 1.395, 0.52, 0.2, 0.025));
+      batcher.add('military-chassis-boxes', UNIT_BOX, chassis,
+        instanceMatrix(parent, x + 0.48, 1.02, side * 1.402, 0.025, 0.62, 0.022));
+    }
+  } else {
+    batcher.add('military-bmp-hull', MILITARY_BMP_HULL_GEO, paint, parent);
+    for (const side of [-1, 1]) {
+      batcher.add('military-bmp-tracks', MILITARY_TRACK_GEO, rubber,
+        instanceMatrix(parent, 0, 0.58, side * 1.39, 1.02, 1.42, 0.72, 0, 0, Math.PI / 2));
+      for (const x of [-2.15, -1.3, -0.45, 0.4, 1.25, 2.1]) {
+        batcher.add('military-wheel-hubs', HUB_GEO, steel,
+          instanceMatrix(parent, x, 0.55, side * 1.48, 1.15, 1.15, 1.15, Math.PI / 2));
+      }
+      for (const x of [-1.75, -0.45, 0.85, 2.1]) {
+        batcher.add('military-glass-boxes', UNIT_BOX, glass,
+          instanceMatrix(parent, x, 1.35, side * 1.505, 0.38, 0.16, 0.024));
+      }
+    }
+    batcher.add('military-glass-boxes', UNIT_BOX, glass,
+      instanceMatrix(parent, -2.55, 1.48, -0.42, 0.48, 0.16, 0.34, 0, 0, -0.16));
   }
-  batcher.add('military-truck-bumper', VEHICLE_BUMPER_GEO, chassis,
-    instanceMatrix(parent, -3.38, 0.62, 0, 1.35, 1, 1, 0, 0, Math.PI / 2));
+  batcher.add('military-apc-turret', new THREE.CylinderGeometry(0.68, 0.82, 0.48, 14),
+    paint, instanceMatrix(parent, 0.45, 2.0, 0, 1, 1, 1));
+  batcher.add('military-steel-tubes', MILITARY_TUBE_GEO, steel,
+    instanceMatrix(parent, -0.95, 2.12, 0, 1, 1, 1, 0, 0, Math.PI / 2));
+  for (const side of [-0.55, 0.55]) {
+    batcher.add('military-chassis-boxes', UNIT_BOX, chassis,
+      instanceMatrix(parent, 1.75, 1.88, side, 0.68, 0.08, 0.52, 0, side * 0.12, 0));
+  }
 }
 
 function addFacade(batcher, def) {

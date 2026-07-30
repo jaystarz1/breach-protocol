@@ -102,6 +102,12 @@ export class Enemy {
     this.hvt = !!def.hvt;
     this.escapes = !!def.escapes;   // only a runner with somewhere to go can get away
     this.tag = def.tag || null;     // scripted-event grouping, e.g. which room this man holds
+    // Motor-pool troops begin visibly riding in an open cargo bed. They are not decorative:
+    // proximity, gunfire or a hit sends each man to his own authored clear-space socket beside
+    // the truck, after which normal navigation and combat take over.
+    this.vehicleExit = def.vehicleExit
+      ? new THREE.Vector3(...def.vehicleExit) : null;
+    this.mounted = !!this.vehicleExit;
     // Window occupants. Instead of walking a patrol this man stands in a windowBay() opening,
     // rises into it to work, and sinks below the sill. `perches` are [x, sillY, z] triples and
     // the reveal built proud of them does the hiding, so ducking is real occlusion.
@@ -151,6 +157,23 @@ export class Enemy {
   }
 
   get pos() { return this.mesh.position; }
+
+  dismount(world, source = null) {
+    if (!this.mounted || !this.vehicleExit) return false;
+    this.mounted = false;
+    this.pos.copy(this.vehicleExit);
+    this.state = 'alert';
+    this.hold = false;
+    this.reactTimer = Math.max(this.reactTimer, this.diff.enemyReaction * 0.7);
+    this.lastKnown = source
+      ? { x: source.x, y: source.y ?? 0, z: source.z }
+      : { x: world.playerPos.x, y: world.playerPos.y, z: world.playerPos.z };
+    this.path = null;
+    this.pathGoal = null;
+    this.repathTimer = 0;
+    this.revealWeapon();
+    return true;
+  }
 
   revealWeapon() {
     if (!this.concealed) return;
@@ -215,6 +238,7 @@ export class Enemy {
   // hostiles from the flank all mission and never once be shot back at.
   damage(amt, world, fromHead, byAlly) {
     if (this.dead) return;
+    if (this.mounted) this.dismount(world, world.playerPos);
     const wasDetainee = this.surrendered;
     this.health -= amt;
     this.suppression = Math.min(1, this.suppression + (fromHead ? 0.7 : 0.42));
@@ -267,6 +291,7 @@ export class Enemy {
     const distance = Math.hypot(
       origin.x - this.pos.x, origin.y - this.pos.y, origin.z - this.pos.z);
     if (distance > radius) return false;
+    if (this.mounted) this.dismount(world, origin);
     const source = { x: origin.x, y: origin.y - 1.25, z: origin.z };
     const investigates = distance <= Math.min(radius, 34);
     if (investigates) this.lastKnown = source;
@@ -543,6 +568,24 @@ export class Enemy {
       const g = groundHeight(world.solids, this.pos.x, this.pos.z, 0.3, this.pos.y + 0.75);
       this.pos.y += ((g === -Infinity ? 0 : g) - this.pos.y) * Math.min(1, dt * 10);
       return;
+    }
+    if (this.mounted) {
+      this.moving = false;
+      const target = this.pickTarget(world);
+      const distance = Math.hypot(
+        target.x - this.pos.x, target.y - this.pos.y, target.z - this.pos.z);
+      const exposed = distance < 30 && hasLOS(
+        world.solids,
+        this.pos.x, this.pos.y + 1.25, this.pos.z,
+        target.x, target.y + 1.45, target.z,
+      );
+      if (this.aggro || world.combatHeat > 0 || exposed) {
+        this.dismount(world, target);
+      } else {
+        this.mesh.rotation.y = this.yaw;
+        animateRig(this.mesh, this.walkPhase, false, 0, false, 'patrol');
+        return;
+      }
     }
     this.shotPoseTimer = Math.max(0, this.shotPoseTimer - dt);
     const p = this.pos;

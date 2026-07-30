@@ -16,7 +16,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(headless=True, args=["--mute-audio"])
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
         page.set_default_timeout(90000)
         errors = []
@@ -47,11 +47,33 @@ def main():
             strikeFiring: objectives[3].targets.map(target => target.firing),
             bunkerUnlockObjective: BP.world.level.doors.find(
               door => door.pos[1] === -5).unlockObjective,
+            towerDoor: BP.world.level.doors.find(
+              door => door.pos[1] === 0).pos,
             shieldText: objectives[4].text,
-            militaryTrucks: BP.scene.children.find(
-              child => child.name === 'military-truck-chassis')?.count || 0,
+            motorPoolVehicles: [
+              'military-truck-authored-cab',
+              'military-wheeled-apc-hull',
+              'military-bmp-hull',
+            ].reduce((count, name) => count + (
+              BP.scene.children.find(child => child.name === name)?.count || 0), 0),
+            motorPoolFamilies: [
+              'military-truck-canvas-roof',
+              'military-troop-benches',
+              'military-fuel-tanker',
+              'military-command-body',
+              'military-flatbed-load',
+              'military-steel-tubes',
+              'military-launcher-tubes',
+              'military-wheeled-apc-hull',
+              'military-bmp-hull',
+            ].filter(name => BP.scene.children.some(child => child.name === name)).length,
+            mountedTroops: BP.world.enemies.filter(enemy => enemy.mounted).length,
             burningWrecks: BP.scene.children.filter(
               child => child.name.startsWith('compound-burning-wreck-')).length,
+            render: {
+              calls: BP.performance.render.calls,
+              triangles: BP.performance.render.triangles,
+            },
           };
         }""")
         bunker_lock = page.evaluate("""() => {
@@ -71,6 +93,13 @@ def main():
         }""")
         page.wait_for_timeout(250)
         page.screenshot(path=str(output / "military-compound.png"))
+        page.evaluate("""() => {
+          BP.player.pos.set(-0.8, 0, 1.2);
+          BP.player.yaw = 0;
+          BP.player.pitch = 0;
+        }""")
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(output / "tower-front-door.png"))
         page.evaluate("""() => {
           BP.player.pos.set(22, 0, -15.2);
           BP.player.yaw = 0;
@@ -108,7 +137,18 @@ def main():
           vehiclePosition: BP.world.drone.combatVehicles[0].pos.toArray(),
           stackVisible: BP.world.allies.every(actor => actor.mesh.visible),
         })""")
-        page.wait_for_timeout(800)
+        # Path requests share a small per-frame budget with the rest of the cast. Give every
+        # assault actor time to claim a route, then prove that none of them is stuck on its
+        # spawn-side truck or wall.
+        page.wait_for_function(
+            """before => BP.world.drone.combatants.every((actor, index) =>
+              Math.hypot(
+                actor.pos.x - before[index][0],
+                actor.pos.z - before[index][2],
+              ) > 0.08)""",
+            arg=combat_before["positions"],
+            timeout=5000,
+        )
         movement = page.evaluate("""before => ({
           infantryMoved: BP.world.drone.combatants.filter((actor, index) =>
             Math.hypot(
@@ -206,6 +246,7 @@ def main():
             "won": page.evaluate("() => BP.world.won"),
             "screenshots": [
                 "military-compound.png",
+                "tower-front-door.png",
                 "bunker-entrance.png",
                 "rooftop-armed-uav.png",
                 "artillery-battery.png",
@@ -229,9 +270,14 @@ def main():
         assert contract["strikeKinds"] == ["artillery", "artillery", "artillery"], result
         assert all(position[2] < -50 for position in contract["strikePositions"]), result
         assert contract["strikeFiring"] == [True, True, True], result
-        assert contract["militaryTrucks"] == 3, result
+        assert contract["motorPoolVehicles"] == 20, result
+        assert contract["motorPoolFamilies"] == 9, result
+        assert contract["mountedTroops"] == 6, result
         assert contract["burningWrecks"] == 2, result
+        assert contract["render"]["calls"] < 450, result
+        assert contract["render"]["triangles"] < 1_500_000, result
         assert contract["bunkerUnlockObjective"] == 4, result
+        assert contract["towerDoor"] == [-0.8, 0, -3], result
         assert "HUMAN SHIELDS" in contract["shieldText"], result
         assert all(bunker_lock.values()), result
         assert 10 <= combat_before["infantry"] <= 12, result

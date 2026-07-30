@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v124-final-compound-assault';
+const CACHE = 'breach-protocol-v127-motor-pool-drone-sensors';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

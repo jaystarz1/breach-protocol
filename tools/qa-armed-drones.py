@@ -12,7 +12,7 @@ def main():
     args = parser.parse_args()
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(headless=True, args=["--mute-audio"])
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -73,9 +73,29 @@ def main():
               survivesHiddenMesh,
               depthTested: BP.world.drone.thermalSignatures.every(signature =>
                 signature.children.every(mesh => mesh.material.depthTest)),
+              boxes: BP.world.drone.targetBoxes.length,
+              boxesDepthTested: BP.world.drone.targetBoxes.every(box =>
+                box.material.depthTest),
             };
           })(),
         })""")
+        sensor_toggle = page.evaluate("""() => {
+          const drone = BP.world.drone;
+          BP.input.nvgPressed = true;
+          drone.update(0.016, BP.input, BP.world.solids);
+          BP.input.nvgPressed = false;
+          const off = {
+            thermal: drone.thermalEnabled,
+            visibleSignatures: drone.thermalSignatures.filter(
+              signature => signature.visible).length,
+            boxes: drone.targetBoxes.filter(box => box.visible).length,
+            filter: document.getElementById('game-canvas').style.filter,
+          };
+          BP.input.nvgPressed = true;
+          drone.update(0.016, BP.input, BP.world.solids);
+          BP.input.nvgPressed = false;
+          return off;
+        }""")
         page.wait_for_timeout(900)
         level2_movement = page.evaluate("""before => {
           const positions = BP.world.drone.combatants.map(actor => [
@@ -118,6 +138,9 @@ def main():
             dead: actor.dead,
             spent: roundsBefore - drone.rifleRounds,
             tracer: !!BP.world.staticMesh.parent.getObjectByName('drone-rifle-tracer'),
+            tracerLife: drone.effects.find(effect => effect.type === 'tracer')?.life || 0,
+            thermalStillAttached: drone.thermalSignatures.every(
+              signature => signature.parent === BP.scene),
           };
         }""")
         grenade = page.evaluate("""() => {
@@ -196,12 +219,15 @@ def main():
         })""")
         page.evaluate("""() => {
           const drone = BP.world.drone;
-          for (const actor of drone.combatants) {
+          for (const actor of drone.combatants.slice(0, -1)) {
             drone.onCombatHit(actor, 99999, false);
           }
           for (const vehicle of drone.combatVehicles) {
             drone.onCombatVehicleHit(vehicle, 99999);
           }
+          BP.input.breachPressed = true;
+          drone.update(0.016, BP.input, BP.world.solids);
+          BP.input.breachPressed = false;
         }""")
         page.wait_for_function(
             "() => !BP.world.drone && BP.world.objectiveIdx === 1",
@@ -210,12 +236,19 @@ def main():
         level7_after = page.evaluate("""() => ({
           objective: BP.world.level.objectives[BP.world.objectiveIdx].text,
           assaultDead: BP.world.droneAssault.actors.every(actor => actor.dead),
+          survivors: BP.world.droneAssault.actors.filter(actor => !actor.dead).map(actor => ({
+            droneTarget: actor.droneTarget,
+            hold: actor.hold,
+            state: actor.state,
+            hasLastKnown: !!actor.lastKnown,
+          })),
         })""")
 
         result = {
             "level2": {
                 "before": level2_before,
                 "movement": level2_movement,
+                "sensorToggle": sensor_toggle,
                 "rifle": rifle,
                 "grenade": {**grenade, **grenade_after},
                 "vehicle": vehicle,
@@ -242,6 +275,12 @@ def main():
         assert level2_before["thermal"]["visible"] == level2_before["thermal"]["count"]
         assert level2_before["thermal"]["survivesHiddenMesh"]
         assert level2_before["thermal"]["depthTested"]
+        assert level2_before["thermal"]["boxes"] == level2_before["thermal"]["count"]
+        assert level2_before["thermal"]["boxesDepthTested"]
+        assert sensor_toggle["thermal"] is False
+        assert sensor_toggle["visibleSignatures"] == 0
+        assert sensor_toggle["boxes"] == level2_before["thermal"]["count"]
+        assert "grayscale" not in sensor_toggle["filter"]
         assert level2_before["staticTargets"] == 0
         assert level2_before["stackVisible"]
         assert level2_movement["moved"] == level2_before["combatants"]
@@ -249,6 +288,8 @@ def main():
         assert rifle["spent"] in (2, 3)
         assert rifle["dead"]
         assert rifle["tracer"]
+        assert rifle["tracerLife"] >= 0.18
+        assert rifle["thermalStillAttached"]
         assert grenade["launched"]
         assert grenade_after["grenades"] == 9
         assert grenade_after["projectiles"] == 0
@@ -265,7 +306,12 @@ def main():
         assert level7_before["staticTargets"] == 0
         assert level7_before["targetModels"] == 0
         assert level7_before["stackVisible"]
-        assert level7_after["assaultDead"]
+        assert not level7_after["assaultDead"]
+        assert len(level7_after["survivors"]) == 1
+        assert level7_after["survivors"][0]["droneTarget"] is False
+        assert level7_after["survivors"][0]["hold"] is False
+        assert level7_after["survivors"][0]["state"] in ("alert", "hunt", "flank", "cover")
+        assert level7_after["survivors"][0]["hasLastKnown"]
         assert "CLEAR THE TOWER" in level7_after["objective"]
         browser.close()
 

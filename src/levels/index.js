@@ -1336,16 +1336,37 @@ export const LEVELS = [
       g.push(...wall(-30, 30, -30, -40, 4, C.concrete));
       g.push(...wall(30, 30, 30, -40, 4, C.concrete));
       g.push(...wall(-30, -40, 30, -40, 4, C.concrete));
-      // A working military yard, not an empty slab. The trucks form two offset sweep lanes:
-      // each has enough space to clear both sides, but none offers a straight sightline from
-      // the gate to the tower. Two damaged staff cars keep the compound from looking staged.
-      g.push(...militaryTruck(-20, 18, true, { damage: 2 }));
-      g.push(...militaryTruck(20, 10, true, { damage: 1 }));
-      g.push(...militaryTruck(-12, 1, false, { damage: 3, canvas: false }));
-      g.push(...car(11, 20, false, null, { variant: 2, damage: 2 }));
-      g.push(...car(24, 23, true, 0x4a4938, { variant: 2, damage: 0 }));
-      g.push(...car(-25, -4, true, 0x343a33, { variant: 2, damage: 0 }));
-      g.push(...crate(0, 13), ...crate(-14, 9), ...crate(14, 2));
+      // Twenty-vehicle supply compound. Every slot receives a distinct configuration:
+      // canvas cargo, open troop carrier, fuel bowser, command van, ambulance, loaded flatbed,
+      // recovery truck, launcher carrier, wheeled APC or tracked BMP. Rows hug the perimeter
+      // while three departure-lane vehicles point toward the gate, leaving 3–6m search aisles.
+      const motorPool = [
+        // west wall, nose-to-tail
+        [-25, 24, true], [-25, 16, true], [-25, 8, true], [-25, 0, true],
+        [-25, -8, true], [-25, -16, true], [-25, -24, true], [-25, -32, true],
+        // east wall stops before the bunker excavation
+        [25, 24, true], [25, 16, true], [25, 8, true], [25, 0, true], [25, -8, true],
+        // southern marshalling line, preserving the central gate
+        [-18, 24, false], [-10, 24, false], [10, 24, false], [18, 24, false],
+        // three vehicles staged to pull out
+        [-13, 12, false], [0, 12, false], [13, 12, false],
+      ];
+      motorPool.forEach(([x, z, turned], variant) => {
+        g.push(...militaryTruck(x, z, turned, {
+          variant,
+          damage: 1 + variant % 4,
+          canvas: variant % 10 === 0,
+        }));
+      });
+      // Only untarped civilian wrecks burn. They use the recognizable sedan/SUV shell with
+      // shattered glass, missing hardware, dropped bumpers and explicit scorch treatment.
+      g.push(...car(-17, -1, true, 0x343a33, {
+        variant: 0, damage: 0, burned: true,
+      }));
+      g.push(...car(17, 3, false, 0x3a332f, {
+        variant: 2, damage: 0, burned: true,
+      }));
+      g.push(...crate(-5, 18), ...crate(5, 18), ...crate(0, 3));
       // the tower (2 floors + roof) at courtyard north
       g.push(...tower(0, -10, 16, 14, 2));
       // stair trench down: from courtyard level at z=-16 descending south to bunker door at z=-24
@@ -1379,13 +1400,25 @@ export const LEVELS = [
       return g;
     },
     doors: [
-      { pos: [0, 0, -3.9], rot: 0, w: 1.6 },        // tower entry
+      // tower() authors its south-wall opening at x=-0.8 on the z=-3 facade. Keep the leaf
+      // and reveal on that exact plane: the old [0,-3.9] placement sat behind intact stucco,
+      // then exposed daylight gaps on both sides once the player clipped through the wall.
+      { pos: [-0.8, 0, -3], rot: 0, w: 1.6 },       // tower entry
       { pos: [22.2, -5, -24], rot: 0, w: 2.4, unlockObjective: 4 },
       // The bunker is physically present from mission load but remains sealed until the
       // observation network destroys its supporting armour, guns and jammer.
     ],
     enemies: [
       // courtyard
+      // Two open troop carriers each hold a three-man ready detail. They remain visibly in
+      // the beds until the player approaches or gunfire starts, then dismount into individual
+      // clear-space sockets in the sweep aisles.
+      { pos: [-24.5, 1.4, 15.6], vehicleExit: [-22, 0, 17], yaw: 90 },
+      { pos: [-25, 1.4, 14.8], vehicleExit: [-22, 0, 15], yaw: 90 },
+      { pos: [-25.5, 1.4, 13.8], vehicleExit: [-22, 0, 13], yaw: 90 },
+      { pos: [25.5, 1.4, -0.4], vehicleExit: [22, 0, 2], yaw: -90 },
+      { pos: [25, 1.4, -1.2], vehicleExit: [22, 0, 0], yaw: -90 },
+      { pos: [24.5, 1.4, -2.2], vehicleExit: [22, 0, -2], yaw: -90 },
       { pos: [-6, 0, 18], positions: [[-6, 0, 18], [5, 0, 20], [-14, 0, 13]],
         patrols: [[[-6, 18], [6, 18]], [[5, 20], [-9, 20]], [[-14, 13], [-3, 9]]] },
       { pos: [12, 0, 8], positions: [[12, 0, 8], [16, 0, 14], [10, 0, 22]],
@@ -1430,7 +1463,7 @@ export const LEVELS = [
       at: [[0, 0, 27], [-24, 0, 24], [24, 0, 24]],
       atVariants: [
         [[0, 0, 27], [-24, 0, 24], [24, 0, 24]],
-        [[-9, 0, 27], [23, 0, 20], [-25, 0, 13]],
+        [[-9, 0, 27], [23, 0, 20], [-22, 0, 13]],
         [[9, 0, 27], [-23, 0, 20], [25, 0, 13]],
       ] },
     objectives: [

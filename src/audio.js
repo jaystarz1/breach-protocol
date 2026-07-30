@@ -219,8 +219,13 @@ export function audioSnapshot() {
 
 // ---------- Ambient bed: filtered noise + slow low drone, so silence isn't dead ----------
 let ambient = null;
+let requestedAmbientKind = null;
 export function startAmbient(kind = 'urban') {
-  stopAmbient();
+  requestedAmbientKind = kind;
+  stopAmbientNodes();
+  // A background game tab must be silent. Previously its infinite filtered-noise source kept
+  // playing after the window was hidden and sounded exactly like unexplained system static.
+  if (document.hidden) return;
   const a = ac();
   if (reverbWet) {
     const wet = kind === 'tunnel' ? 0.18 : 0.07;
@@ -255,8 +260,22 @@ export function startAmbient(kind = 'urban') {
   drone.start();
   ambient = { src, lfo, drone, g, dg };
 }
-export function stopAmbient() {
+function stopAmbientNodes() {
   if (!ambient) return;
   try { ambient.src.stop(); ambient.lfo.stop(); ambient.drone.stop(); } catch {}
   ambient = null;
 }
+
+export function stopAmbient() {
+  requestedAmbientKind = null;
+  stopAmbientNodes();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopAmbientNodes();
+  } else if (requestedAmbientKind) {
+    startAmbient(requestedAmbientKind);
+  }
+});
+window.addEventListener('pagehide', stopAmbientNodes);

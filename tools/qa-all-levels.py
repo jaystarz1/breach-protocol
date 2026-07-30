@@ -12,7 +12,7 @@ def main():
     args = parser.parse_args()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=["--mute-audio"])
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))

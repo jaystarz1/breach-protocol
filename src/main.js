@@ -602,14 +602,16 @@ function startLevel(id) {
       && !definition.perches
       && !definition.teamOnly
       && !definition.targetPlayer
-      && !definition.tag);
+      && !definition.tag
+      && !definition.vehicleExit);
     const scalableDefinitions = L.enemies.filter(definition =>
       !definition.bastion
       && !definition.hvt
       && !definition.perches
       && !definition.teamOnly
       && !definition.targetPlayer
-      && !definition.tag);
+      && !definition.tag
+      && !definition.vehicleExit);
     const sockets = authoredActorSockets(scalableDefinitions, L.enemySpawns)
       .filter(position => !occupied.has(
         position.map(value => value.toFixed(3)).join(',')));
@@ -881,18 +883,54 @@ function updateDroneCombatWave(dt) {
       enemy.update(dt, world);
       continue;
     }
+    enemy.repathTimer -= dt;
     const route = enemy.droneRoute;
     const waypoint = route?.[Math.min(enemy.droneRouteIdx, route.length - 1)];
     if (waypoint) {
       if (Math.hypot(waypoint.x - enemy.pos.x, waypoint.z - enemy.pos.z) < 1.0) {
         enemy.droneRouteIdx = Math.min(route.length - 1, enemy.droneRouteIdx + 1);
+        enemy.path = null;
       }
       const next = route[Math.min(enemy.droneRouteIdx, route.length - 1)];
-      enemy.moveToward(next.x, next.z, dt, world, enemy.speed * 0.72);
+      if ((!enemy.path || !enemy.pathGoal
+          || Math.hypot(enemy.pathGoal.x - next.x, enemy.pathGoal.z - next.z) > 1)
+          && enemy.repathTimer <= 0) {
+        const routed = enemy.setPath(world, next.x, enemy.pos.y, next.z);
+        // Five shared paths may be claimed per frame. Men outside that frame's budget retry
+        // immediately on the next frame rather than standing still for a full second.
+        enemy.repathTimer = routed ? 1.1 + enemy.random() * 0.5 : 0.04;
+      }
+      // The aerial wave now uses the same nav graph and collision-aware path following as
+      // ground combat. If no route exists it holds and retries instead of running forever
+      // into the first truck, wall or barricade on the direct line.
+      enemy.followPath(dt, world, enemy.speed * 0.72);
     }
     enemy.settle(dt, world);
   }
   for (const vehicle of assault.vehicles || []) vehicle.update(dt, world.solids);
+}
+
+function integrateDroneSurvivors() {
+  const actors = world?.droneAssault?.actors || [];
+  const live = actors.filter(enemy => !enemy.dead && !enemy.surrendered);
+  for (const enemy of live) {
+    enemy.droneTarget = false;
+    enemy.droneRoute = null;
+    enemy.hold = false;
+    enemy.state = 'alert';
+    enemy.lastKnown = {
+      x: player.pos.x, y: player.pos.y, z: player.pos.z,
+    };
+    enemy.path = null;
+    enemy.pathGoal = null;
+    enemy.repathTimer = 0;
+    enemy.reactTimer = Math.max(enemy.reactTimer, 0.35);
+  }
+  if (live.length) {
+    hud.reinf(`${live.length} UAV SURVIVORS JOINING THE GROUND FIGHT`);
+    hud.feed(`GROUND ELEMENT: ${live.length} ASSAULT TROOPS STILL ACTIVE`, '#ffb283');
+  }
+  return live.length;
 }
 
 function suspendGroundCombatForDrone(obj = null) {
@@ -1613,6 +1651,7 @@ function checkObjectives(dt = 0) {
   }
   if (done) {
     if (obj.type === 'drone' && world.drone) {
+      if (world.drone.mode === 'combat') integrateDroneSurvivors();
       spawnReconGroundResponse(obj);
       world.drone.dispose();
       world.drone = null;

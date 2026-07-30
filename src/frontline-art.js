@@ -2653,8 +2653,8 @@ export function addFrontlineMissionArt(scene, levelId) {
   if (levelId === 10) {
     // Two damaged vehicles are still burning, enough motion to establish an active frontline
     // without filling the compound with expensive particle emitters or opaque smoke walls.
-    addBurningWreck(scene, 24, 23, 1);
-    addBurningWreck(scene, -25, -4, 2);
+    addBurningWreck(scene, -17, -1, 1);
+    addBurningWreck(scene, 17, 3, 2);
 
     // Prepared fallback line outside the compound gate.
     const bags = [];
