@@ -85,7 +85,7 @@ def main():
                 componentCount++;
               }
               const actors = [...BP.world.enemies, ...BP.world.civilians]
-                .filter(actor => !actor.perches && !actor.perch)
+                .filter(actor => !actor.perches && !actor.perch && !actor.droneTarget)
                 .map(actor => {
                 const target = nearest(actor.pos.x, actor.pos.y, actor.pos.z);
                 return {
@@ -142,7 +142,23 @@ def main():
                 .flatMap(wave => wave.enemies || [])
                 .map(definition => resolveActorVariant(
                   definition, BP.world.missionVariant));
+              const droneCombatants = BP.world.level.objectives
+                .filter(objective => objective.type === 'drone'
+                  && objective.mode === 'combat')
+                .flatMap(objective => objective.combatWave?.enemies || [])
+                .map(definition => resolveActorVariant(
+                  definition, BP.world.missionVariant));
               const waveEnemies = defenseWaves.map(enemy => {
+                const target = nearest(...enemy.pos);
+                return {
+                  pos: enemy.pos,
+                  patrol: enemy.patrol || [],
+                  node: target.node,
+                  distance: +target.distance.toFixed(2),
+                  reachable: target.node >= 0 && !!visited[target.node],
+                };
+              });
+              const droneEnemies = droneCombatants.map(enemy => {
                 const target = nearest(...enemy.pos);
                 return {
                   pos: enemy.pos,
@@ -169,6 +185,10 @@ def main():
                   pos: enemy.pos,
                   patrol: enemy.patrol || [],
                 })),
+                droneWaveSignature: droneCombatants.map(enemy => ({
+                  pos: enemy.pos,
+                  patrol: enemy.patrol || [],
+                })),
                 streetLayout: BP.world.staticMesh.parent.userData.streetShopLayout || null,
                 nav: {
                   nodes: nav.nodeX.length,
@@ -180,6 +200,7 @@ def main():
                   reachObjectives,
                   reconResponses,
                   waveEnemies,
+                  droneEnemies,
                 },
               };
             }""")
@@ -197,6 +218,7 @@ def main():
             assert rows[0]["civilianSignature"] == rows[3]["civilianSignature"], level
             assert rows[0]["reinforcementSockets"] == rows[3]["reinforcementSockets"], level
             assert rows[0]["defenseWaveSignature"] == rows[3]["defenseWaveSignature"], level
+            assert rows[0]["droneWaveSignature"] == rows[3]["droneWaveSignature"], level
             assert rows[0]["streetLayout"] == rows[3]["streetLayout"], level
             assert len({
                 json.dumps(row["enemySignature"], sort_keys=True)
@@ -246,23 +268,17 @@ def main():
                     and (objective["reachable"] or level == "3")
                     for objective in row["nav"]["reachObjectives"]
                 ), (level, row)
-                if level == "2":
-                    responses = row["nav"]["reconResponses"]
-                    assert [response["lane"] for response in responses] == [
-                        "EAST", "CENTRAL", "WEST"
-                    ], row
-                    assert all(
-                        enemy["node"] >= 0
-                        and enemy["distance"] < 2.8
-                        and enemy["reachable"]
-                        for response in responses
-                        for enemy in response["enemies"]
-                    ), row
                 assert all(
                     enemy["node"] >= 0
                     and enemy["distance"] < 2.8
                     and enemy["reachable"]
                     for enemy in row["nav"]["waveEnemies"]
+                ), (level, row)
+                assert all(
+                    enemy["node"] >= 0
+                    and enemy["distance"] < 2.8
+                    and enemy["reachable"]
+                    for enemy in row["nav"]["droneEnemies"]
                 ), (level, row)
 
         if "2" in results:
@@ -285,6 +301,11 @@ def main():
                 json.dumps(row["defenseWaveSignature"], sort_keys=True)
                 for row in results["10"][:3]
             }) == 3
+        for level in [key for key in ["2", "7"] if key in results]:
+            assert len({
+                json.dumps(row["droneWaveSignature"], sort_keys=True)
+                for row in results[level][:3]
+            }) == 3, level
         print(json.dumps({
             "levels": {
                 level: {
@@ -299,6 +320,10 @@ def main():
                     }),
                     "defenseWaveLayouts": len({
                         json.dumps(row["defenseWaveSignature"], sort_keys=True)
+                        for row in rows[:3]
+                    }),
+                    "droneWaveLayouts": len({
+                        json.dumps(row["droneWaveSignature"], sort_keys=True)
                         for row in rows[:3]
                     }),
                     "streetLayouts": len({

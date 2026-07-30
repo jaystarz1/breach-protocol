@@ -39,6 +39,11 @@ def main():
               const allowedEnemy = new Set(authoredActorSockets(
                 BP.world.level.enemies, BP.world.level.enemySpawns,
               ).map(position => position.map(value => +value.toFixed(3)).join(',')));
+              const droneDefinitions = BP.world.level.objectives
+                .flatMap(objective => objective.combatWave?.enemies || []);
+              const allowedDrone = new Set(authoredActorSockets(
+                droneDefinitions, [],
+              ).map(position => position.map(value => +value.toFixed(3)).join(',')));
               const allowedCivilian = new Set(authoredActorSockets(
                 BP.world.level.civilians, BP.world.level.crowdSpawns,
               ).map(position => position.map(value => +value.toFixed(3)).join(',')));
@@ -107,7 +112,9 @@ def main():
                   .filter(([, roles]) => new Set(roles).size > 1)
                   .map(([position, roles]) => ({ position, roles })),
                 unsafeEnemies: BP.world.enemies
-                  .filter(actor => !allowedEnemy.has(key(actor)))
+                  .filter(actor => actor.droneTarget
+                    ? !allowedDrone.has(key(actor))
+                    : !allowedEnemy.has(key(actor)))
                   .map(key),
                 unsafeCivilians: BP.world.civilians
                   .filter(actor => !allowedCivilian.has(key(actor)))

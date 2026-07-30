@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify OP Bravo's strike transition, authored tower art, and vertical combat route."""
+"""Verify OP Bravo's armed-drone transition, tower art, and vertical combat route."""
 import argparse
 import json
 from pathlib import Path
@@ -31,15 +31,21 @@ def main():
         strike = page.evaluate("""() => {
           const drone = BP.world.drone;
           const targets = drone.targets.length;
-          for (const target of drone.targets) {
-            target.marked = true;
-            target.engaged = true;
+          const combatants = drone.combatants.length;
+          for (const actor of drone.combatants) {
+            drone.onCombatHit(actor, 99999, false);
           }
           drone.complete = true;
           drone.dispose();
           BP.player.locked = false;
           BP.world.objectiveIdx = 1;
-          return { targets, mode: drone.mode };
+          return {
+            targets,
+            combatants,
+            rifle: drone.rifleRounds,
+            grenades: drone.grenadeRounds,
+            mode: drone.mode,
+          };
         }""")
         page.evaluate("""() => {
           for (const actor of [
@@ -106,7 +112,13 @@ def main():
         print(json.dumps(result, indent=2))
 
         assert not errors
-        assert strike == {"targets": 3, "mode": "strike"}
+        assert strike == {
+            "targets": 0,
+            "combatants": 8,
+            "rifle": 100,
+            "grenades": 10,
+            "mode": "combat",
+        }
         batches = scene_state["batches"]
         assert batches["op-bravo-roof-membrane"] == 1
         assert batches["op-bravo-roof-sandbags"] >= 24

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { groundHeight, hasLOS, raycastSolids } from './physics.js';
+import {
+  groundHeight, hasLOS, raycastSolids, raySphere, rayVerticalCapsule,
+} from './physics.js';
 
 const MAX_RANGE = 95;
 const MAX_SPEED = 16;
@@ -17,6 +19,10 @@ const DRONE_FRAGMENT_HOT_MAT = new THREE.MeshBasicMaterial({
 const DRONE_FRAGMENT_DARK_MAT = new THREE.MeshBasicMaterial({
   name: 'drone-strike-fragment-dark', color: 0x252a27,
 });
+const DRONE_TRACER_MAT = new THREE.LineBasicMaterial({
+  name: 'drone-rifle-tracer', color: 0xffe0a1,
+  transparent: true, opacity: 0.92, depthWrite: false,
+});
 for (const geometry of [
   DRONE_MUNITION_GEO,
   DRONE_FLASH_GEO,
@@ -28,6 +34,7 @@ for (const geometry of [
 }
 for (const material of [
   DRONE_MUNITION_MAT, DRONE_FRAGMENT_HOT_MAT, DRONE_FRAGMENT_DARK_MAT,
+  DRONE_TRACER_MAT,
 ]) {
   material.userData.bpPersistent = true;
 }
@@ -171,16 +178,18 @@ function strikeTargetModel(target) {
 }
 
 export function dronePrewarmGroup(definition) {
-  if (definition?.mode !== 'strike') return null;
+  if (!['strike', 'combat'].includes(definition?.mode)) return null;
   const root = new THREE.Group();
   root.name = 'drone-strike-material-prewarm';
   // Keep one representative of every shader state and shared dynamic geometry a strike can
   // introduce. These sit outside the world but bypass frustum culling during the loading
   // render, forcing GPU buffer upload before a live weapon release.
   root.position.y = -10000;
-  root.add(strikeTargetModel({
-    pos: new THREE.Vector3(), kind: 'armor', yaw: 0,
-  }));
+  if (definition.mode === 'strike') {
+    root.add(strikeTargetModel({
+      pos: new THREE.Vector3(), kind: 'armor', yaw: 0,
+    }));
+  }
   root.add(new THREE.Mesh(
     DRONE_MUNITION_GEO,
     DRONE_MUNITION_MAT,
@@ -213,8 +222,16 @@ export function dronePrewarmGroup(definition) {
     DRONE_FRAGMENT_GEO,
     DRONE_FRAGMENT_HOT_MAT,
   ));
+  if (definition.mode === 'combat') {
+    root.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(), new THREE.Vector3(0, 0, -2),
+      ]),
+      DRONE_TRACER_MAT,
+    ));
+  }
   root.traverse(part => {
-    if (part.isMesh) part.frustumCulled = false;
+    if (part.isMesh || part.isLine) part.frustumCulled = false;
   });
   root.userData.dispose = () => disposeObject(root);
   return root;
@@ -240,6 +257,14 @@ export class DroneController {
     this.persistWrecks = !!definition.persistWrecks;
     this.persistIntel = !!definition.persistIntel;
     this.resultText = definition.result || 'ASSAULT ROUTES MAPPED';
+    this.combatants = definition.combatants || [];
+    this.rifleRounds = this.mode === 'combat' ? (definition.rifleRounds ?? 100) : 0;
+    this.grenadeRounds = this.mode === 'combat' ? (definition.grenades ?? 10) : 0;
+    this.rifleCooldown = 0;
+    this.shotsFired = 0;
+    this.onCombatShot = definition.onCombatShot || null;
+    this.onCombatHit = definition.onCombatHit || null;
+    this.onCombatBlast = definition.onCombatBlast || null;
     this.targets = (definition.targets || []).map((entry, index) => ({
       ...(Array.isArray(entry) ? {} : entry),
       pos: new THREE.Vector3(...(Array.isArray(entry) ? entry : entry.pos)),
@@ -315,9 +340,11 @@ export class DroneController {
       <div class="drone-result"></div>
       <div class="drone-label">VEKTOR ISR // ${definition.label || 'TACTICAL UAS'}</div>
       <div class="drone-status"></div>
-      <div class="drone-help">${this.mode === 'strike'
-    ? 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE RELEASE'
-    : 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE MARK'}</div>
+      <div class="drone-help">${this.mode === 'combat'
+    ? 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE RIFLE · G GRENADE'
+    : this.mode === 'strike'
+      ? 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE RELEASE'
+      : 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE MARK'}</div>
     `;
     Object.assign(this.overlay.style, {
       position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: 40,
@@ -403,8 +430,36 @@ export class DroneController {
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.set(this.pitch, this.yaw, this.roll);
 
-    this.updateMunitions(dt);
+    this.updateMunitions(dt, solids);
     this.updateEffects(dt);
+
+    if (this.mode === 'combat') {
+      this.rifleCooldown = Math.max(0, this.rifleCooldown - dt);
+      if (input.fire && this.rifleRounds > 0 && this.rifleCooldown <= 0) {
+        this.fireRifle(solids);
+        this.rifleCooldown = 0.095;
+      }
+      if (input.nadePressed && this.grenadeRounds > 0) this.launchGrenade();
+      const live = this.combatants.filter(actor => !actor.dead && !actor.surrendered);
+      this.lock.textContent = live.length
+        ? 'RIFLE HOT // G LAUNCHES FRAG' : 'ASSAULT ELEMENT DESTROYED';
+      this.status.textContent = [
+        `LINK ${Math.round(this.signal * 100)}%`,
+        `BAT ${Math.round(this.battery)}%`,
+        `RIFLE ${this.rifleRounds}/100`,
+        `FRAG ${this.grenadeRounds}/10`,
+        `HOSTILES ${live.length}/${this.combatants.length}`,
+      ].join('\n');
+      this.overlay.style.opacity = String(0.72 + this.signal * 0.28);
+      if (!live.length && this.combatants.length && !this.complete) {
+        this.complete = true;
+        this.status.textContent += '\nSTREET SECURE';
+        this.result.textContent = this.resultText;
+        this.result.style.opacity = '1';
+        this.completionTimer = setTimeout(() => this.onComplete?.(), 850);
+      }
+      return;
+    }
 
     let candidate = null;
     let bestDot = this.mode === 'strike' ? 0.984 : 0.965;
@@ -454,6 +509,71 @@ export class DroneController {
     }
   }
 
+  fireRifle(solids) {
+    if (this.mode !== 'combat' || this.rifleRounds <= 0) return false;
+    this.rifleRounds--;
+    this.shotsFired++;
+    const direction = this.forward.clone();
+    // A deterministic vibration pattern makes the jury-rigged mount feel mechanical without
+    // disconnecting the centre reticle from the projectile. At normal engagement ranges the
+    // displacement is only a few centimetres.
+    const wobble = this.shotsFired * 2.399963;
+    direction.addScaledVector(this.right, Math.sin(wobble) * 0.0013);
+    direction.y += Math.cos(wobble * 0.73) * 0.0011;
+    direction.normalize();
+    const origin = this.pos.clone().addScaledVector(direction, 0.62);
+    const maxRange = 110;
+    const wallDistance = raycastSolids(
+      solids, origin.x, origin.y, origin.z,
+      direction.x, direction.y, direction.z, maxRange);
+    let hit = null;
+    let hitDistance = wallDistance;
+    let headshot = false;
+    for (const actor of this.combatants) {
+      if (actor.dead || actor.surrendered || actor.exposed === false) continue;
+      const headDistance = raySphere(
+        origin.x, origin.y, origin.z,
+        direction.x, direction.y, direction.z,
+        actor.pos.x, actor.pos.y + 1.64, actor.pos.z, 0.22);
+      const bodyDistance = rayVerticalCapsule(
+        origin.x, origin.y, origin.z,
+        direction.x, direction.y, direction.z,
+        actor.pos.x, actor.pos.y + 0.68, actor.pos.y + 1.4, actor.pos.z, 0.28);
+      const distance = Math.min(headDistance, bodyDistance);
+      if (distance >= hitDistance) continue;
+      hit = actor;
+      hitDistance = distance;
+      headshot = headDistance <= bodyDistance;
+    }
+    const endDistance = Math.min(maxRange, hitDistance);
+    const end = origin.clone().addScaledVector(direction, endDistance);
+    const geometry = new THREE.BufferGeometry().setFromPoints([origin, end]);
+    const tracer = new THREE.Line(geometry, DRONE_TRACER_MAT);
+    tracer.name = 'drone-rifle-tracer';
+    this.scene.add(tracer);
+    this.effects.push({
+      type: 'tracer', root: tracer, life: 0.075, age: 0,
+    });
+    this.onCombatShot?.(origin, end, hit);
+    if (hit) this.onCombatHit?.(hit, headshot ? 99999 : 42, headshot);
+    return true;
+  }
+
+  launchGrenade() {
+    if (this.mode !== 'combat' || this.grenadeRounds <= 0) return false;
+    this.grenadeRounds--;
+    const mesh = new THREE.Mesh(DRONE_MUNITION_GEO, DRONE_MUNITION_MAT);
+    mesh.name = 'drone-launched-grenade';
+    mesh.position.copy(this.pos).addScaledVector(this.forward, 0.72);
+    const velocity = this.forward.clone().multiplyScalar(20);
+    velocity.y += 2.8;
+    this.scene.add(mesh);
+    this.munitions.push({
+      type: 'grenade', mesh, velocity, fuse: 3.1,
+    });
+    return true;
+  }
+
   releaseMunition(target) {
     if (!target || target.marked || target.engaged || this.mode !== 'strike') return false;
     target.engaged = true;
@@ -469,13 +589,43 @@ export class DroneController {
     const speed = 42;
     direction.multiplyScalar(speed / Math.max(0.001, distance));
     this.scene.add(mesh);
-    this.munitions.push({ mesh, velocity: direction, remaining: distance, target });
+    this.munitions.push({
+      type: 'guided', mesh, velocity: direction, remaining: distance, target,
+    });
     return true;
   }
 
-  updateMunitions(dt) {
+  updateMunitions(dt, solids) {
     for (let i = this.munitions.length - 1; i >= 0; i--) {
       const munition = this.munitions[i];
+      if (munition.type === 'grenade') {
+        munition.fuse -= dt;
+        munition.velocity.y -= 9.8 * dt;
+        const speed = munition.velocity.length();
+        const travel = speed * dt;
+        const direction = munition.velocity.clone().multiplyScalar(1 / Math.max(0.001, speed));
+        const hitDistance = raycastSolids(
+          solids,
+          munition.mesh.position.x, munition.mesh.position.y, munition.mesh.position.z,
+          direction.x, direction.y, direction.z, travel + 0.08);
+        munition.mesh.position.addScaledVector(munition.velocity, dt);
+        munition.mesh.rotation.x += dt * 10;
+        munition.mesh.rotation.z += dt * 7;
+        const ground = groundHeight(
+          solids, munition.mesh.position.x, munition.mesh.position.z,
+          0.08, munition.mesh.position.y + 0.35);
+        const impact = hitDistance <= travel + 0.04
+          || (ground !== -Infinity && munition.mesh.position.y <= ground + 0.11)
+          || munition.fuse <= 0;
+        if (!impact) continue;
+        const position = munition.mesh.position.clone();
+        if (ground !== -Infinity) position.y = Math.max(position.y, ground + 0.08);
+        this.scene.remove(munition.mesh);
+        disposeObject(munition.mesh);
+        this.munitions.splice(i, 1);
+        this.combatImpact(position);
+        continue;
+      }
       const travel = munition.velocity.length() * dt;
       munition.mesh.position.addScaledVector(munition.velocity, dt);
       munition.remaining -= travel;
@@ -492,10 +642,21 @@ export class DroneController {
     target.marked = true;
     this.targetMeshes[target.index].visible = false;
     this.targetModels[target.index]?.userData.markDestroyed?.();
+    this.createImpactEffect(
+      target.pos.clone().add(new THREE.Vector3(0, 0.65, 0)),
+      target.index,
+    );
+  }
 
+  combatImpact(position) {
+    this.onCombatBlast?.(position.clone(), 7, 185);
+    this.createImpactEffect(position, this.shotsFired + this.grenadeRounds);
+  }
+
+  createImpactEffect(position, seed = 0) {
     const root = new THREE.Group();
     root.name = 'drone-strike-impact';
-    root.position.copy(target.pos).add(new THREE.Vector3(0, 0.65, 0));
+    root.position.copy(position);
     const flash = new THREE.Mesh(
       DRONE_FLASH_GEO,
       new THREE.MeshBasicMaterial({
@@ -533,7 +694,7 @@ export class DroneController {
         i % 3 ? DRONE_FRAGMENT_HOT_MAT : DRONE_FRAGMENT_DARK_MAT,
       );
       root.add(fragment);
-      const angle = i * 2.399963 + target.index * 0.71;
+      const angle = i * 2.399963 + seed * 0.71;
       fragments.push({
         mesh: fragment,
         velocity: new THREE.Vector3(
@@ -552,6 +713,13 @@ export class DroneController {
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const effect = this.effects[i];
       effect.age += dt;
+      if (effect.type === 'tracer') {
+        if (effect.age < effect.life) continue;
+        this.scene.remove(effect.root);
+        disposeObject(effect.root);
+        this.effects.splice(i, 1);
+        continue;
+      }
       const t = Math.min(1, effect.age / effect.life);
       effect.flash.scale.setScalar(1 + t * 6.8);
       effect.flash.material.opacity = Math.max(0, 1 - t * 1.6);

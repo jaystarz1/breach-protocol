@@ -17,9 +17,21 @@ def finish_drone(page, expected_index, mode="recon", capture=None):
       targets: BP.world.drone.targets.length,
       mode: BP.world.drone.mode,
       models: BP.world.drone.targetModels.filter(Boolean).length,
+      combatants: BP.world.drone.combatants.length,
+      rifle: BP.world.drone.rifleRounds,
+      grenades: BP.world.drone.grenadeRounds,
       locked: BP.player.locked,
     })""")
-    if mode == "strike":
+    if mode == "combat":
+        page.evaluate("""() => {
+          const drone = BP.world.drone;
+          for (const actor of drone.combatants) {
+            drone.onCombatHit(actor, 99999, false);
+          }
+        }""")
+        if capture:
+            page.screenshot(path=str(capture))
+    elif mode == "strike":
         strike_state = page.evaluate("""() => {
           window.__qaStrikeModels = BP.world.drone.targetModels;
           window.__qaStrikeTargets = BP.world.drone.targets;
@@ -58,7 +70,10 @@ def finish_drone(page, expected_index, mode="recon", capture=None):
         }""")
     else:
         page.evaluate("() => BP.world.drone.targets.forEach(target => target.marked = true)")
-    page.wait_for_timeout(1200)
+    if mode == "combat":
+        page.wait_for_function("() => !BP.world.drone", timeout=90000)
+    else:
+        page.wait_for_timeout(1200)
     after = page.evaluate("""() => ({
       restored: !BP.player.locked,
       overlayRemoved: !document.querySelector('.drone-frame'),
@@ -103,7 +118,7 @@ def main():
               const hold = setInterval(() => BP.player.pos.set(-11.2, .1, -41.6), 16);
               setTimeout(() => clearInterval(hold), 700);
             }""")
-            results["level2"] = finish_drone(page, 2)
+            results["level2"] = finish_drone(page, 2, mode="combat")
 
             page.evaluate("() => BP.startLevel(3)")
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
@@ -138,13 +153,8 @@ def main():
         results["level7"] = finish_drone(
             page,
             0,
-            mode="strike",
+            mode="combat",
             capture=output_dir / "op-bravo-impact.png",
-        )
-        page.evaluate("() => BP.startLevel(8)")
-        page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
-        results["level7"]["after"]["wrecksReleasedNextMission"] = page.evaluate(
-            "() => window.__qaStrikeModels.every(model => !model.parent)"
         )
 
         output = {"missions": results, "errors": errors[:8]}
@@ -161,12 +171,17 @@ def main():
             assert after["mode"] == mode
             assert after["restored"] and after["overlayRemoved"]
         if not args.strike_only:
-            assert results["level2"]["before"]["mode"] == "recon"
+            assert results["level2"]["before"]["mode"] == "combat"
+            assert 4 <= results["level2"]["before"]["combatants"] <= 6
+            assert results["level2"]["before"]["rifle"] == 100
+            assert results["level2"]["before"]["grenades"] == 10
             assert results["level3"]["before"]["mode"] == "recon"
-        assert results["level7"]["before"]["mode"] == "strike"
-        assert results["level7"]["before"]["models"] == 3
-        assert results["level7"]["after"]["wrecksPersist"]
-        assert results["level7"]["after"]["wrecksReleasedNextMission"]
+        assert results["level7"]["before"]["mode"] == "combat"
+        assert results["level7"]["before"]["combatants"] == 8
+        assert results["level7"]["before"]["targets"] == 0
+        assert results["level7"]["before"]["models"] == 0
+        assert results["level7"]["before"]["rifle"] == 100
+        assert results["level7"]["before"]["grenades"] == 10
         assert not errors
         browser.close()
 

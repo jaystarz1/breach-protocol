@@ -736,7 +736,8 @@ function startLevel(id) {
   const warmWorld = world;
   const warmScene = scene;
   const droneWarmup = dronePrewarmGroup(
-    L.objectives.find(objective => objective.type === 'drone' && objective.mode === 'strike'),
+    L.objectives.find(objective =>
+      objective.type === 'drone' && ['strike', 'combat'].includes(objective.mode)),
   );
   const combatWarmup = combatPrewarmGroup();
   warmScene.add(combatWarmup);
@@ -789,7 +790,74 @@ function addCombatEffect(effect) {
   world.effects.push(effect);
 }
 
-function suspendGroundCombatForDrone() {
+function spawnDroneCombatWave(obj) {
+  const wave = obj.combatWave;
+  if (!wave?.enemies?.length || world.droneAssault) {
+    return world.droneAssault?.actors || [];
+  }
+  const desired = Math.max(
+    wave.minCount ?? 1,
+    Math.min(
+      wave.maxCount ?? wave.enemies.length,
+      wave.enemies.length,
+      Math.round((wave.baseCount ?? wave.enemies.length) * world.diff.enemyCountMul),
+    ),
+  );
+  const actors = [];
+  for (let index = 0; index < desired; index++) {
+    const authoredIndex = (index + world.missionVariant) % wave.enemies.length;
+    const definition = resolveActorVariant(
+      wave.enemies[authoredIndex], world.missionVariant);
+    const enemy = new Enemy(scene, {
+      ...definition,
+      hold: true,
+      aggro: false,
+      _seed: world.level.id * 830003
+        + world.missionVariant * 8311 + authoredIndex * 109,
+    }, world.diff);
+    enemy.droneTarget = true;
+    enemy.surrenderEligible = false;
+    enemy.droneRoute = (definition.droneRoute || definition.patrol || [])
+      .map(point => ({ x: point[0], z: point[1] }));
+    enemy.droneRouteIdx = 0;
+    enemy.state = 'patrol';
+    world.enemies.push(enemy);
+    actors.push(enemy);
+  }
+  world.droneAssault = {
+    actors,
+    label: wave.label || 'ASSAULT ELEMENT',
+    spawned: actors.length,
+  };
+  if (world.reinf) world.reinf.sent = world.reinf.max;
+  hud.feed(`${actors.length} HOSTILES ENTERING THE STREET — STACK HOLDING`, '#ffb283');
+  hud.reinf(`DRONE INTERDICTION — ${actors.length} HOSTILES`);
+  sfx.contact(player.pos);
+  return actors;
+}
+
+function updateDroneCombatWave(dt) {
+  const assault = world?.droneAssault;
+  if (!assault) return;
+  for (const enemy of assault.actors) {
+    if (enemy.dead || enemy.surrendered) {
+      enemy.update(dt, world);
+      continue;
+    }
+    const route = enemy.droneRoute;
+    const waypoint = route?.[Math.min(enemy.droneRouteIdx, route.length - 1)];
+    if (waypoint) {
+      if (Math.hypot(waypoint.x - enemy.pos.x, waypoint.z - enemy.pos.z) < 1.0) {
+        enemy.droneRouteIdx = Math.min(route.length - 1, enemy.droneRouteIdx + 1);
+      }
+      const next = route[Math.min(enemy.droneRouteIdx, route.length - 1)];
+      enemy.moveToward(next.x, next.z, dt, world, enemy.speed * 0.72);
+    }
+    enemy.settle(dt, world);
+  }
+}
+
+function suspendGroundCombatForDrone(obj = null) {
   if (!world || world.droneGroundVisibility) return;
   // The drone update returns before the infantry effect loop. Without an explicit handoff,
   // whichever tracer or muzzle flash exists on the transition frame freezes in the aerial
@@ -808,9 +876,13 @@ function suspendGroundCombatForDrone() {
   world.grenades.length = 0;
 
   const actors = [...world.enemies, ...world.civilians, ...world.allies]
-    .map(actor => actor.mesh).filter(Boolean);
-  world.droneGroundVisibility = actors.map(mesh => [mesh, mesh.visible]);
-  for (const mesh of actors) mesh.visible = false;
+    .filter(actor => actor.mesh);
+  world.droneGroundVisibility = actors.map(actor => [actor.mesh, actor.mesh.visible]);
+  for (const actor of actors) {
+    const keepTarget = !!actor.droneTarget;
+    const keepStack = !!obj?.keepStackVisible && world.allies.includes(actor);
+    actor.mesh.visible = keepTarget || keepStack;
+  }
 }
 
 function restoreGroundCombatAfterDrone() {
@@ -895,8 +967,39 @@ function setObjective() {
     world.beacon = marker;
   } else if (obj && obj.type === 'drone') {
     player.locked = true;
-    suspendGroundCombatForDrone();
-    world.drone = new DroneController(scene, camera, obj, () => {
+    const combatants = obj.mode === 'combat' ? spawnDroneCombatWave(obj) : [];
+    suspendGroundCombatForDrone(obj);
+    const runtimeDefinition = obj.mode === 'combat' ? {
+      ...obj,
+      combatants,
+      onCombatShot(from, to, directHit) {
+        world.stats.shotsFired++;
+        sfx.rifle();
+        world.registerFriendlyFire(from, to, directHit, 58);
+      },
+      onCombatHit(enemy, damage, headshot) {
+        if (enemy.dead) return;
+        world.stats.shotsHit++;
+        hud.hitmarker();
+        if (headshot) {
+          world.stats.score += 50;
+          hud.feed('DRONE HEADSHOT +50', '#ffd54f');
+          sfx.headshot();
+        }
+        enemy.damage(damage, world, headshot, false);
+      },
+      onCombatBlast(position, radius, damage) {
+        sfx.explosion(position);
+        for (const enemy of combatants) {
+          if (enemy.dead) continue;
+          const distance = enemy.pos.distanceTo(position);
+          if (distance >= radius) continue;
+          enemy.damage(damage * (1 - distance / radius), world, false, false);
+        }
+        world.combatHeat = Math.max(world.combatHeat, 6);
+      },
+    } : obj;
+    world.drone = new DroneController(scene, camera, runtimeDefinition, () => {
       if (!world?.drone) return;
       world.drone.complete = true;
       if (obj.result) hud.feed(obj.result, '#8cecff');
@@ -1560,6 +1663,7 @@ function frame() {
   resetPathBudget();
 
   if (world.drone?.active) {
+    if (world.drone.mode === 'combat') updateDroneCombatWave(dt);
     world.drone.update(dt, input, world.solids);
     checkObjectives();
     renderPipeline.render(scene, camera, { adaptive: true });

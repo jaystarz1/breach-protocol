@@ -686,7 +686,20 @@ export class Enemy {
     if (this.moving) {
       if (this.progress < this.speed * dt * 0.25) this.blocked += dt; else this.blocked = 0;
     } else this.blocked = Math.max(0, this.blocked - dt * 0.5);
+    const beforeSeparation = { x: p.x, z: p.z };
     this.separate(world);
+    // Separation is a movement too. Resolving only the deliberate walk step allowed one
+    // partner to push another through the thin side of a room wall after collision had
+    // already run for the frame.
+    resolveXZ(
+      world.solids, p, 0.46, p.y + 0.6, p.y + 1.6, beforeSeparation);
+    const closedDoors = world.doors?.doors
+      ?.filter(door => !door.breached)
+      .map(door => door.solid) || [];
+    if (closedDoors.length) {
+      resolveXZ(
+        closedDoors, p, 0.78, p.y + 0.6, p.y + 1.6, beforeSeparation);
+    }
     const g = groundHeight(world.solids, p.x, p.z, 0.3, p.y + 0.75);
     p.y += ((g === -Infinity ? 0 : g) - p.y) * Math.min(1, dt * 10);
     this.mesh.rotation.y = this.yaw;
@@ -763,7 +776,19 @@ export class Enemy {
     const p = this.pos;
     const prev = { x: p.x, z: p.z };
     p.x += mx; p.z += mz;
-    resolveXZ(world.solids, p, 0.35, p.y + 0.6, p.y + 1.6, prev);
+    // The authored combatant is shoulder-width, not a point with a narrow torso capsule.
+    // Matching collision to that silhouette prevents a moving actor from appearing to skim
+    // through a room wall while his root technically remains outside it.
+    resolveXZ(world.solids, p, 0.46, p.y + 0.6, p.y + 1.6, prev);
+    // A rifle projects farther than the body capsule. Give an intact breach leaf a larger
+    // personal-space envelope so a man waiting behind it cannot poke his barrel through the
+    // closed panel. Once breached, the leaf is omitted and the normal doorway clearance wins.
+    const closedDoors = world.doors?.doors
+      ?.filter(door => !door.breached)
+      .map(door => door.solid) || [];
+    if (closedDoors.length) {
+      resolveXZ(closedDoors, p, 0.78, p.y + 0.6, p.y + 1.6, prev);
+    }
     this.progress = Math.hypot(p.x - prev.x, p.z - prev.z);
   }
 

@@ -1316,7 +1316,21 @@ export function createCivilianCharacter({
       neckRest: neck?.quaternion.clone(),
     };
   }
-  if (hostage) poseAuthoredHostage(root, root.userData.rig);
+  if (hostage) {
+    poseAuthoredHostage(root, root.userData.rig);
+    const head = findRigObject(visual, 'Head');
+    const neck = findRigObject(visual, 'Neck');
+    // The source sitting clip has a corrupt head track on a subset of exported frames. Bound
+    // actors are intentionally frozen in the long seated hold, so lock these two joints to
+    // that authored hold as well. Otherwise the bad track can drive the face through the
+    // chest even though the rest of the hostage remains motionless.
+    root.userData.rig.hostageStability = {
+      head,
+      neck,
+      headHold: head?.quaternion.clone(),
+      neckHold: neck?.quaternion.clone(),
+    };
+  }
   root.userData.bob = 0;
   return root;
 }
@@ -1331,6 +1345,9 @@ export function animateAuthoredCharacter(
   rig.lastAnimationTime = now;
   if (rig.hostage) {
     rig.mixer.update(dt);
+    const stable = rig.hostageStability;
+    if (stable?.head && stable.headHold) stable.head.quaternion.copy(stable.headHold);
+    if (stable?.neck && stable.neckHold) stable.neck.quaternion.copy(stable.neckHold);
     root.userData.bob = 0;
     return;
   }

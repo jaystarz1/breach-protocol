@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v120-room-safe-variants';
+const CACHE = 'breach-protocol-v121-armed-drone-interdiction';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

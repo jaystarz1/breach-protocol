@@ -94,25 +94,27 @@ def main():
         )
         recon = page.evaluate("""() => {
           const drone = BP.world.drone;
-          drone.markReconTarget(drone.targets[0]);
           drone.pos.set(0, 24, -8);
           drone.yaw = Math.PI;
           drone.pitch = -0.58;
           drone.vel.set(0, 0, 0);
           return {
-            label: drone.targets[0].label,
-            routes: drone.routeModels.length,
-            routeParts: drone.routeModels[0]?.children.length || 0,
-            resultVisible: +drone.result.style.opacity,
+            mode: drone.mode,
+            combatants: drone.combatants.length,
+            rifle: drone.rifleRounds,
+            grenades: drone.grenadeRounds,
             transientAfter: BP.world.effects.filter(effect => effect.combatTransient).length,
-            visibleGroundActors: [
-              ...BP.world.enemies, ...BP.world.civilians, ...BP.world.allies,
-            ].filter(actor => actor.mesh.visible).length,
+            visibleTargets: drone.combatants.filter(actor => actor.mesh.visible).length,
+            visibleStack: BP.world.allies.filter(actor => actor.mesh.visible).length,
+            hiddenOtherActors: [
+              ...BP.world.enemies.filter(actor => !actor.droneTarget),
+              ...BP.world.civilians,
+            ].every(actor => !actor.mesh.visible),
           };
         }""")
         recon["transientBefore"] = transient_before
         page.wait_for_timeout(100)
-        page.screenshot(path=str(output / "recon-consequence.png"))
+        page.screenshot(path=str(output / "armed-drone-consequence.png"))
 
         page.evaluate("() => BP.startLevel(3)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
@@ -271,7 +273,7 @@ def main():
             "sniper": sniper,
             "errors": errors[:8],
             "screenshots": [
-                "civilian-cover.png", "recon-consequence.png", "exterior-door.png"
+                "civilian-cover.png", "armed-drone-consequence.png", "exterior-door.png"
             ],
         }
         print(json.dumps(result, indent=2))
@@ -283,11 +285,12 @@ def main():
         assert correction["cover"]["visualDrop"] > 0.45, result
         assert correction["cover"]["hasCoverBones"], result
         assert correction["backingMasses"] == 4, result
-        assert recon["label"] == "EAST SERVICE LANE", result
-        assert recon["routes"] == 1 and recon["routeParts"] >= 4, result
-        assert recon["resultVisible"] == 1, result
+        assert recon["mode"] == "combat", result
+        assert 4 <= recon["combatants"] <= 6, result
+        assert recon["rifle"] == 100 and recon["grenades"] == 10, result
         assert recon["transientBefore"] > 0 and recon["transientAfter"] == 0, result
-        assert recon["visibleGroundActors"] == 0, result
+        assert recon["visibleTargets"] == recon["combatants"], result
+        assert recon["visibleStack"] == 2 and recon["hiddenOtherActors"], result
         assert doors == {"count": 6, "framed": True, "persistentAfterLeaf": True}, result
         assert head["finite"] and head["panicMax"] < 0.16 and head["coverMax"] < 0.24, result
         assert corpse["complete"] == 1 and 0 <= corpse["torsoClearance"] < 0.24, result
