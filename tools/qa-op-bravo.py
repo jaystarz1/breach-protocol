@@ -32,6 +32,7 @@ def main():
           const drone = BP.world.drone;
           const targets = drone.targets.length;
           const combatants = drone.combatants.length;
+          const vehicles = drone.combatVehicles.length;
           for (const actor of drone.combatants) {
             drone.onCombatHit(actor, 99999, false);
           }
@@ -42,6 +43,7 @@ def main():
           return {
             targets,
             combatants,
+            vehicles,
             rifle: drone.rifleRounds,
             grenades: drone.grenadeRounds,
             mode: drone.mode,
@@ -114,7 +116,8 @@ def main():
         assert not errors
         assert strike == {
             "targets": 0,
-            "combatants": 8,
+            "combatants": 11,
+            "vehicles": 1,
             "rifle": 100,
             "grenades": 10,
             "mode": "combat",

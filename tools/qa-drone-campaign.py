@@ -18,6 +18,7 @@ def finish_drone(page, expected_index, mode="recon", capture=None):
       mode: BP.world.drone.mode,
       models: BP.world.drone.targetModels.filter(Boolean).length,
       combatants: BP.world.drone.combatants.length,
+      vehicles: BP.world.drone.combatVehicles.length,
       rifle: BP.world.drone.rifleRounds,
       grenades: BP.world.drone.grenadeRounds,
       locked: BP.player.locked,
@@ -27,6 +28,9 @@ def finish_drone(page, expected_index, mode="recon", capture=None):
           const drone = BP.world.drone;
           for (const actor of drone.combatants) {
             drone.onCombatHit(actor, 99999, false);
+          }
+          for (const vehicle of drone.combatVehicles) {
+            drone.onCombatVehicleHit(vehicle, 99999);
           }
         }""")
         if capture:
@@ -40,7 +44,7 @@ def finish_drone(page, expected_index, mode="recon", capture=None):
           // each delayed frame to 50 ms. Advance the projectile-only subsystem by its real
           // maximum 1.2-second flight time so this remains a mechanics test rather than a
           // timer test (the high inspection camera is 45m from the two flank targets).
-          BP.world.drone.updateMunitions(1.2);
+          BP.world.drone.updateMunitions(1.2, BP.world.solids);
           BP.world.drone.updateEffects(0.16);
           // Freeze just the controller update for the impact capture. Setting `active=false`
           // would return the main loop to infantry camera control, while letting the normal
@@ -77,6 +81,7 @@ def finish_drone(page, expected_index, mode="recon", capture=None):
     after = page.evaluate("""() => ({
       restored: !BP.player.locked,
       overlayRemoved: !document.querySelector('.drone-frame'),
+      canvasFilter: document.getElementById('game-canvas').style.filter,
       mode: BP.mode,
       objectiveIdx: BP.world.objectiveIdx,
       complete: BP.world.drone?.complete ?? null,
@@ -170,14 +175,17 @@ def main():
             assert after["objectiveIdx"] == objective_index
             assert after["mode"] == mode
             assert after["restored"] and after["overlayRemoved"]
+            assert after["canvasFilter"] == ""
         if not args.strike_only:
             assert results["level2"]["before"]["mode"] == "combat"
-            assert 4 <= results["level2"]["before"]["combatants"] <= 6
+            assert 10 <= results["level2"]["before"]["combatants"] <= 12
+            assert results["level2"]["before"]["vehicles"] == 1
             assert results["level2"]["before"]["rifle"] == 100
             assert results["level2"]["before"]["grenades"] == 10
             assert results["level3"]["before"]["mode"] == "recon"
         assert results["level7"]["before"]["mode"] == "combat"
-        assert results["level7"]["before"]["combatants"] == 8
+        assert 10 <= results["level7"]["before"]["combatants"] <= 12
+        assert results["level7"]["before"]["vehicles"] == 1
         assert results["level7"]["before"]["targets"] == 0
         assert results["level7"]["before"]["models"] == 0
         assert results["level7"]["before"]["rifle"] == 100

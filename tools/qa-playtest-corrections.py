@@ -101,6 +101,7 @@ def main():
           return {
             mode: drone.mode,
             combatants: drone.combatants.length,
+            vehicles: drone.combatVehicles.length,
             rifle: drone.rifleRounds,
             grenades: drone.grenadeRounds,
             transientAfter: BP.world.effects.filter(effect => effect.combatTransient).length,
@@ -286,7 +287,8 @@ def main():
         assert correction["cover"]["hasCoverBones"], result
         assert correction["backingMasses"] == 4, result
         assert recon["mode"] == "combat", result
-        assert 4 <= recon["combatants"] <= 6, result
+        assert 10 <= recon["combatants"] <= 12, result
+        assert recon["vehicles"] == 1, result
         assert recon["rifle"] == 100 and recon["grenades"] == 10, result
         assert recon["transientBefore"] > 0 and recon["transientAfter"] == 0, result
         assert recon["visibleTargets"] == recon["combatants"], result

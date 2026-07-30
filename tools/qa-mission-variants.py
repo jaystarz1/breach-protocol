@@ -148,6 +148,12 @@ def main():
                 .flatMap(objective => objective.combatWave?.enemies || [])
                 .map(definition => resolveActorVariant(
                   definition, BP.world.missionVariant));
+              const droneVehicles = BP.world.level.objectives
+                .filter(objective => objective.type === 'drone'
+                  && objective.mode === 'combat'
+                  && objective.combatWave?.vehicle)
+                .map(objective => resolveActorVariant(
+                  objective.combatWave.vehicle, BP.world.missionVariant));
               const waveEnemies = defenseWaves.map(enemy => {
                 const target = nearest(...enemy.pos);
                 return {
@@ -185,10 +191,16 @@ def main():
                   pos: enemy.pos,
                   patrol: enemy.patrol || [],
                 })),
-                droneWaveSignature: droneCombatants.map(enemy => ({
-                  pos: enemy.pos,
-                  patrol: enemy.patrol || [],
-                })),
+                droneWaveSignature: {
+                  infantry: droneCombatants.map(enemy => ({
+                    pos: enemy.pos,
+                    patrol: enemy.patrol || [],
+                  })),
+                  vehicles: droneVehicles.map(vehicle => ({
+                    pos: vehicle.pos,
+                    route: vehicle.patrol || vehicle.route || [],
+                  })),
+                },
                 streetLayout: BP.world.staticMesh.parent.userData.streetShopLayout || null,
                 nav: {
                   nodes: nav.nodeX.length,

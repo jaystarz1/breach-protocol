@@ -46,12 +46,19 @@ def main():
           rifle: BP.world.drone.rifleRounds,
           grenades: BP.world.drone.grenadeRounds,
           combatants: BP.world.drone.combatants.length,
+          vehicles: BP.world.drone.combatVehicles.length,
           live: BP.world.drone.combatants.filter(actor => !actor.dead).length,
           staticTargets: BP.world.drone.targets.length,
           stackVisible: BP.world.allies.every(actor => actor.mesh.visible),
           positions: BP.world.drone.combatants.map(actor => [
             actor.pos.x, actor.pos.y, actor.pos.z,
           ]),
+          vehiclePosition: BP.world.drone.combatVehicles[0]?.pos.toArray(),
+          optics: {
+            fov: BP.world.drone.camera.fov,
+            canvasFilter: document.getElementById('game-canvas').style.filter,
+            mask: !!document.querySelector('.drone-optic-mask'),
+          },
         })""")
         page.wait_for_timeout(900)
         level2_movement = page.evaluate("""before => {
@@ -62,11 +69,18 @@ def main():
             positions,
             moved: positions.filter((position, index) =>
               Math.hypot(
-                position[0] - before[index][0],
-                position[2] - before[index][2],
+                position[0] - before.positions[index][0],
+                position[2] - before.positions[index][2],
               ) > 0.08).length,
+            vehicleMoved: Math.hypot(
+              BP.world.drone.combatVehicles[0].pos.x - before.vehiclePosition[0],
+              BP.world.drone.combatVehicles[0].pos.z - before.vehiclePosition[2],
+            ) > 0.08,
           };
-        }""", level2_before["positions"])
+        }""", {
+            "positions": level2_before["positions"],
+            "vehiclePosition": level2_before["vehiclePosition"],
+        })
 
         rifle = page.evaluate("""() => {
           const drone = BP.world.drone;
@@ -116,10 +130,26 @@ def main():
             .filter(munition => munition.type === 'grenade').length,
           casualties: BP.world.drone.combatants.filter(actor => actor.dead).length,
         })""")
+        vehicle = page.evaluate("""() => {
+          const drone = BP.world.drone;
+          const vehicle = drone.combatVehicles[0];
+          const before = vehicle.health;
+          drone.onCombatBlast(vehicle.pos.clone(), 7, 185);
+          const afterGrenade = vehicle.health;
+          drone.onCombatVehicleHit(vehicle, 8);
+          return {
+            before,
+            afterGrenade,
+            dead: vehicle.dead,
+          };
+        }""")
         page.evaluate("""() => {
           const drone = BP.world.drone;
           for (const actor of drone.combatants) {
             if (!actor.dead) drone.onCombatHit(actor, 99999, false);
+          }
+          for (const vehicle of drone.combatVehicles) {
+            if (!vehicle.dead) drone.onCombatVehicleHit(vehicle, 99999);
           }
         }""")
         page.wait_for_function(
@@ -143,6 +173,7 @@ def main():
           rifle: BP.world.drone.rifleRounds,
           grenades: BP.world.drone.grenadeRounds,
           combatants: BP.world.drone.combatants.length,
+          vehicles: BP.world.drone.combatVehicles.length,
           staticTargets: BP.world.drone.targets.length,
           targetModels: BP.world.drone.targetModels.length,
           stackVisible: BP.world.allies.every(actor => actor.mesh.visible),
@@ -151,6 +182,9 @@ def main():
           const drone = BP.world.drone;
           for (const actor of drone.combatants) {
             drone.onCombatHit(actor, 99999, false);
+          }
+          for (const vehicle of drone.combatVehicles) {
+            drone.onCombatVehicleHit(vehicle, 99999);
           }
         }""")
         page.wait_for_function(
@@ -168,6 +202,7 @@ def main():
                 "movement": level2_movement,
                 "rifle": rifle,
                 "grenade": {**grenade, **grenade_after},
+                "vehicle": vehicle,
                 "after": level2_after,
             },
             "level7": {
@@ -182,23 +217,31 @@ def main():
         assert level2_before["mode"] == "combat"
         assert level2_before["rifle"] == 100
         assert level2_before["grenades"] == 10
-        assert 4 <= level2_before["combatants"] <= 6
+        assert 10 <= level2_before["combatants"] <= 12
+        assert level2_before["vehicles"] == 1
+        assert level2_before["optics"]["fov"] == 78
+        assert "grayscale(1)" in level2_before["optics"]["canvasFilter"]
+        assert level2_before["optics"]["mask"]
         assert level2_before["staticTargets"] == 0
         assert level2_before["stackVisible"]
         assert level2_movement["moved"] == level2_before["combatants"]
+        assert level2_movement["vehicleMoved"]
         assert rifle["spent"] in (2, 3)
         assert rifle["dead"]
         assert rifle["tracer"]
         assert grenade["launched"]
         assert grenade_after["grenades"] == 9
         assert grenade_after["projectiles"] == 0
+        assert vehicle["afterGrenade"] < vehicle["before"]
+        assert vehicle["dead"]
         assert level2_after["stackRestored"]
         assert level2_after["assaultDead"]
         assert "REGROUP" in level2_after["objective"]
         assert level7_before["mode"] == "combat"
         assert level7_before["rifle"] == 100
         assert level7_before["grenades"] == 10
-        assert level7_before["combatants"] == 8
+        assert 10 <= level7_before["combatants"] <= 12
+        assert level7_before["vehicles"] == 1
         assert level7_before["staticTargets"] == 0
         assert level7_before["targetModels"] == 0
         assert level7_before["stackVisible"]

@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v121-armed-drone-interdiction';
+const CACHE = 'breach-protocol-v122-drone-assault-column';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

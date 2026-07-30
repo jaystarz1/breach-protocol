@@ -117,7 +117,22 @@ function strikeTargetModel(target) {
     return mesh;
   };
 
-  if (target.kind === 'ew') {
+  if (target.kind === 'technical') {
+    // A light assault pickup: readable from altitude, open enough that jury-rigged grenades
+    // remain a believable counter, and much cheaper than loading another authored vehicle.
+    add(new THREE.BoxGeometry(3.9, 0.38, 1.85), olive, [0, 0.68, 0]);
+    add(new THREE.BoxGeometry(1.35, 0.82, 1.72), olive, [-1.0, 1.25, 0]);
+    add(new THREE.BoxGeometry(0.72, 0.42, 1.6), glass, [-1.28, 1.43, 0]);
+    add(new THREE.BoxGeometry(1.45, 0.22, 1.76), olive, [1.05, 0.95, 0]);
+    for (const x of [-1.25, 1.28]) for (const z of [-0.92, 0.92]) {
+      add(new THREE.CylinderGeometry(0.36, 0.36, 0.24, 14), dark,
+        [x, 0.45, z * 0.82], [Math.PI / 2, 0, 0]);
+    }
+    add(new THREE.CylinderGeometry(0.1, 0.14, 0.8, 10), steel, [0.72, 1.48, 0]);
+    add(new THREE.BoxGeometry(0.46, 0.28, 0.3), dark, [0.72, 1.91, 0]);
+    add(new THREE.CylinderGeometry(0.055, 0.075, 1.75, 8), steel,
+      [-0.12, 1.94, 0], [0, 0, Math.PI / 2]);
+  } else if (target.kind === 'ew') {
     add(new THREE.BoxGeometry(3.5, 0.72, 1.75), olive, [0, 0.78, 0]);
     add(new THREE.BoxGeometry(1.15, 1.08, 1.68), olive, [-1.05, 1.58, 0]);
     add(new THREE.BoxGeometry(0.86, 0.42, 1.7), glass, [-1.32, 1.75, 0]);
@@ -177,6 +192,59 @@ function strikeTargetModel(target) {
   return root;
 }
 
+export function createDroneAssaultVehicle(scene, definition = {}) {
+  const pos = new THREE.Vector3(...(definition.pos || [0, 0, 0]));
+  const mesh = strikeTargetModel({
+    pos, kind: definition.kind || 'technical', yaw: definition.yaw || 0,
+  });
+  mesh.name = 'drone-assault-technical';
+  scene.add(mesh);
+  const vehicle = {
+    pos,
+    mesh,
+    maxHealth: definition.health ?? 190,
+    health: definition.health ?? 190,
+    dead: false,
+    route: (definition.route || []).map(point => ({
+      x: point[0],
+      y: point.length > 2 ? point[1] : 0,
+      z: point.length > 2 ? point[2] : point[1],
+    })),
+    routeIdx: 0,
+    speed: definition.speed ?? 4.4,
+    damage(amount) {
+      if (this.dead) return false;
+      this.health = Math.max(0, this.health - amount);
+      if (this.health > 0) return false;
+      this.dead = true;
+      this.mesh.userData.markDestroyed?.();
+      return true;
+    },
+    update(dt, solids) {
+      if (this.dead || !this.route.length) return;
+      const waypoint = this.route[Math.min(this.routeIdx, this.route.length - 1)];
+      const dx = waypoint.x - this.pos.x;
+      const dz = waypoint.z - this.pos.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance < 0.7 && this.routeIdx < this.route.length - 1) {
+        this.routeIdx++;
+        return;
+      }
+      if (distance > 0.001) {
+        const travel = Math.min(distance, this.speed * dt);
+        this.pos.x += dx / distance * travel;
+        this.pos.z += dz / distance * travel;
+        this.mesh.rotation.y = Math.atan2(dz, -dx);
+      }
+      const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.2, this.pos.y + 2);
+      if (ground !== -Infinity) this.pos.y = ground;
+      this.mesh.position.copy(this.pos);
+      this.mesh.position.y += 0.02;
+    },
+  };
+  return vehicle;
+}
+
 export function dronePrewarmGroup(definition) {
   if (!['strike', 'combat'].includes(definition?.mode)) return null;
   const root = new THREE.Group();
@@ -223,6 +291,12 @@ export function dronePrewarmGroup(definition) {
     DRONE_FRAGMENT_HOT_MAT,
   ));
   if (definition.mode === 'combat') {
+    if (definition.combatWave?.vehicle) {
+      root.add(strikeTargetModel({
+        pos: new THREE.Vector3(), kind: definition.combatWave.vehicle.kind || 'technical',
+        yaw: 0,
+      }));
+    }
     root.add(new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(), new THREE.Vector3(0, 0, -2),
@@ -258,12 +332,14 @@ export class DroneController {
     this.persistIntel = !!definition.persistIntel;
     this.resultText = definition.result || 'ASSAULT ROUTES MAPPED';
     this.combatants = definition.combatants || [];
+    this.combatVehicles = definition.combatVehicles || [];
     this.rifleRounds = this.mode === 'combat' ? (definition.rifleRounds ?? 100) : 0;
     this.grenadeRounds = this.mode === 'combat' ? (definition.grenades ?? 10) : 0;
     this.rifleCooldown = 0;
     this.shotsFired = 0;
     this.onCombatShot = definition.onCombatShot || null;
     this.onCombatHit = definition.onCombatHit || null;
+    this.onCombatVehicleHit = definition.onCombatVehicleHit || null;
     this.onCombatBlast = definition.onCombatBlast || null;
     this.targets = (definition.targets || []).map((entry, index) => ({
       ...(Array.isArray(entry) ? {} : entry),
@@ -292,8 +368,13 @@ export class DroneController {
       'health-bar', 'ammo', 'weapon-name', 'squad-line', 'score-line', 'crosshair',
     ].map(id => [document.getElementById(id), document.getElementById(id)?.style.display || '']);
     for (const [element] of this.hiddenHud) if (element) element.style.display = 'none';
-    camera.fov = 92;
+    camera.fov = 78;
     camera.updateProjectionMatrix();
+    this.canvas = document.getElementById('game-canvas');
+    this.savedCanvasFilter = this.canvas?.style.filter || '';
+    if (this.canvas) {
+      this.canvas.style.filter = 'grayscale(1) saturate(0) contrast(1.17) brightness(.84)';
+    }
 
     this.forward = new THREE.Vector3();
     this.right = new THREE.Vector3();
@@ -334,6 +415,8 @@ export class DroneController {
 
     this.overlay = document.createElement('div');
     this.overlay.innerHTML = `
+      <div class="drone-video-filter"></div>
+      <div class="drone-optic-mask"></div>
       <div class="drone-frame"></div>
       <div class="drone-reticle"><i></i><b></b></div>
       <div class="drone-lock"></div>
@@ -350,21 +433,22 @@ export class DroneController {
       position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: 40,
       color: '#a7f3ff', font: '11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace',
       textShadow: '0 1px 4px #000',
-      background: 'repeating-linear-gradient(0deg,rgba(90,220,255,.025) 0,rgba(90,220,255,.025) 1px,transparent 1px,transparent 4px)',
-      boxShadow: 'inset 0 0 120px rgba(0,0,0,.52)',
+      background: 'repeating-linear-gradient(0deg,rgba(210,235,225,.022) 0,rgba(210,235,225,.022) 1px,transparent 1px,transparent 4px)',
     });
     const style = document.createElement('style');
     style.textContent = `
-      .drone-frame{position:absolute;inset:18px;border:1px solid rgba(130,238,255,.34)}
+      .drone-video-filter{position:absolute;inset:0;background:rgba(20,30,27,.1);mix-blend-mode:multiply}
+      .drone-optic-mask{position:absolute;inset:0;background:radial-gradient(ellipse 67% 80% at 50% 49%,transparent 0 54%,rgba(2,5,5,.24) 68%,rgba(1,3,3,.88) 87%,#010202 100%);box-shadow:inset 0 0 90px rgba(0,0,0,.82)}
+      .drone-frame{position:absolute;inset:6.5% 8%;border:1px solid rgba(177,224,215,.28);border-radius:13%/18%}
       .drone-reticle{position:absolute;left:50%;top:50%;width:56px;height:56px;transform:translate(-50%,-50%);border:1px solid rgba(160,245,255,.7);border-radius:50%}
       .drone-reticle i,.drone-reticle b{position:absolute;display:block;background:#baf8ff}
       .drone-reticle i{width:76px;height:1px;left:-10px;top:27px}
       .drone-reticle b{height:76px;width:1px;top:-10px;left:27px}
       .drone-lock{position:absolute;left:50%;top:calc(50% + 48px);transform:translateX(-50%);height:16px;letter-spacing:2px;color:#ffb28e}
       .drone-result{position:absolute;left:50%;top:26%;transform:translateX(-50%);padding:9px 14px;border:1px solid rgba(120,235,255,.5);background:rgba(5,14,20,.78);letter-spacing:2px;opacity:0;transition:opacity .18s}
-      .drone-label{position:absolute;left:34px;top:30px;letter-spacing:2px}
-      .drone-status{position:absolute;right:34px;top:30px;text-align:right;white-space:pre}
-      .drone-help{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);letter-spacing:1px}
+      .drone-label{position:absolute;left:10%;top:8%;letter-spacing:2px}
+      .drone-status{position:absolute;right:10%;top:8%;text-align:right;white-space:pre}
+      .drone-help{position:absolute;left:50%;bottom:8%;transform:translateX(-50%);letter-spacing:1px;white-space:nowrap}
     `;
     this.overlay.appendChild(style);
     document.body.appendChild(this.overlay);
@@ -441,17 +525,19 @@ export class DroneController {
       }
       if (input.nadePressed && this.grenadeRounds > 0) this.launchGrenade();
       const live = this.combatants.filter(actor => !actor.dead && !actor.surrendered);
-      this.lock.textContent = live.length
+      const liveVehicles = this.combatVehicles.filter(vehicle => !vehicle.dead);
+      const liveCount = live.length + liveVehicles.length;
+      this.lock.textContent = liveCount
         ? 'RIFLE HOT // G LAUNCHES FRAG' : 'ASSAULT ELEMENT DESTROYED';
       this.status.textContent = [
         `LINK ${Math.round(this.signal * 100)}%`,
         `BAT ${Math.round(this.battery)}%`,
         `RIFLE ${this.rifleRounds}/100`,
         `FRAG ${this.grenadeRounds}/10`,
-        `HOSTILES ${live.length}/${this.combatants.length}`,
+        `HOSTILES ${liveCount}/${this.combatants.length + this.combatVehicles.length}`,
       ].join('\n');
       this.overlay.style.opacity = String(0.72 + this.signal * 0.28);
-      if (!live.length && this.combatants.length && !this.complete) {
+      if (!liveCount && (this.combatants.length || this.combatVehicles.length) && !this.complete) {
         this.complete = true;
         this.status.textContent += '\nSTREET SECURE';
         this.result.textContent = this.resultText;
@@ -529,6 +615,7 @@ export class DroneController {
     let hit = null;
     let hitDistance = wallDistance;
     let headshot = false;
+    let vehicleHit = false;
     for (const actor of this.combatants) {
       if (actor.dead || actor.surrendered || actor.exposed === false) continue;
       const headDistance = raySphere(
@@ -545,6 +632,18 @@ export class DroneController {
       hitDistance = distance;
       headshot = headDistance <= bodyDistance;
     }
+    for (const vehicle of this.combatVehicles) {
+      if (vehicle.dead) continue;
+      const distance = raySphere(
+        origin.x, origin.y, origin.z,
+        direction.x, direction.y, direction.z,
+        vehicle.pos.x, vehicle.pos.y + 1.05, vehicle.pos.z, 1.45);
+      if (distance >= hitDistance) continue;
+      hit = vehicle;
+      hitDistance = distance;
+      headshot = false;
+      vehicleHit = true;
+    }
     const endDistance = Math.min(maxRange, hitDistance);
     const end = origin.clone().addScaledVector(direction, endDistance);
     const geometry = new THREE.BufferGeometry().setFromPoints([origin, end]);
@@ -555,7 +654,8 @@ export class DroneController {
       type: 'tracer', root: tracer, life: 0.075, age: 0,
     });
     this.onCombatShot?.(origin, end, hit);
-    if (hit) this.onCombatHit?.(hit, headshot ? 99999 : 42, headshot);
+    if (hit && vehicleHit) this.onCombatVehicleHit?.(hit, 8);
+    else if (hit) this.onCombatHit?.(hit, headshot ? 99999 : 42, headshot);
     return true;
   }
 
@@ -755,6 +855,7 @@ export class DroneController {
     if (this.resultTimer) clearTimeout(this.resultTimer);
     this.camera.fov = this.savedFov;
     this.camera.updateProjectionMatrix();
+    if (this.canvas) this.canvas.style.filter = this.savedCanvasFilter;
     for (const [child, visible] of this.childVisibility) child.visible = visible;
     for (const [element, display] of this.hiddenHud) if (element) element.style.display = display;
     for (const mesh of this.targetMeshes) {
@@ -790,6 +891,10 @@ export class DroneController {
     for (const effect of this.effects) {
       this.scene.remove(effect.root);
       disposeObject(effect.root);
+    }
+    for (const vehicle of this.combatVehicles) {
+      this.scene.remove(vehicle.mesh);
+      vehicle.mesh.userData.dispose?.();
     }
     this.munitions.length = 0;
     this.effects.length = 0;

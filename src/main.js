@@ -34,7 +34,9 @@ import {
   campaignSnapshot,
   nextCampaignMission,
 } from './campaign.js';
-import { DroneController, dronePrewarmGroup } from './drone.js';
+import {
+  createDroneAssaultVehicle, DroneController, dronePrewarmGroup,
+} from './drone.js';
 import {
   authoredActorSockets,
   resolveActorVariant,
@@ -824,8 +826,17 @@ function spawnDroneCombatWave(obj) {
     world.enemies.push(enemy);
     actors.push(enemy);
   }
+  const vehicles = [];
+  if (wave.vehicle) {
+    const authoredVehicle = resolveActorVariant(wave.vehicle, world.missionVariant);
+    vehicles.push(createDroneAssaultVehicle(scene, {
+      ...authoredVehicle,
+      route: authoredVehicle.droneRoute || authoredVehicle.route || authoredVehicle.patrol,
+    }));
+  }
   world.droneAssault = {
     actors,
+    vehicles,
     label: wave.label || 'ASSAULT ELEMENT',
     spawned: actors.length,
   };
@@ -855,6 +866,7 @@ function updateDroneCombatWave(dt) {
     }
     enemy.settle(dt, world);
   }
+  for (const vehicle of assault.vehicles || []) vehicle.update(dt, world.solids);
 }
 
 function suspendGroundCombatForDrone(obj = null) {
@@ -968,10 +980,13 @@ function setObjective() {
   } else if (obj && obj.type === 'drone') {
     player.locked = true;
     const combatants = obj.mode === 'combat' ? spawnDroneCombatWave(obj) : [];
+    const combatVehicles = obj.mode === 'combat'
+      ? (world.droneAssault?.vehicles || []) : [];
     suspendGroundCombatForDrone(obj);
     const runtimeDefinition = obj.mode === 'combat' ? {
       ...obj,
       combatants,
+      combatVehicles,
       onCombatShot(from, to, directHit) {
         world.stats.shotsFired++;
         sfx.rifle();
@@ -988,6 +1003,16 @@ function setObjective() {
         }
         enemy.damage(damage, world, headshot, false);
       },
+      onCombatVehicleHit(vehicle, damage) {
+        world.stats.shotsHit++;
+        hud.hitmarker();
+        const destroyed = vehicle.damage(damage);
+        if (destroyed) {
+          world.stats.score += 150;
+          hud.feed('ASSAULT TECHNICAL DESTROYED +150', '#ffd54f');
+          sfx.explosion(vehicle.pos);
+        }
+      },
       onCombatBlast(position, radius, damage) {
         sfx.explosion(position);
         for (const enemy of combatants) {
@@ -995,6 +1020,16 @@ function setObjective() {
           const distance = enemy.pos.distanceTo(position);
           if (distance >= radius) continue;
           enemy.damage(damage * (1 - distance / radius), world, false, false);
+        }
+        for (const vehicle of combatVehicles) {
+          if (vehicle.dead) continue;
+          const distance = vehicle.pos.distanceTo(position);
+          if (distance >= radius) continue;
+          const destroyed = vehicle.damage(damage * (1 - distance / radius));
+          if (destroyed) {
+            world.stats.score += 150;
+            hud.feed('ASSAULT TECHNICAL DESTROYED +150', '#ffd54f');
+          }
         }
         world.combatHeat = Math.max(world.combatHeat, 6);
       },
