@@ -161,6 +161,8 @@ function factionMaterial(original, faction, silhouette, objectName = '') {
 }
 
 const mergedCivilianGeometries = new Map();
+const civilianSleeveGeometries = new Map();
+const civilianSleeveMaterials = new Map();
 const MERGED_CIVILIAN_MATERIAL = new THREE.MeshStandardMaterial({
   name: 'civilian-layered-surface',
   vertexColors: true,
@@ -502,6 +504,127 @@ function mergeCivilianVisual(visual, cacheKey, {
   for (const piece of pieces) piece.parent?.remove(piece);
   visual.add(merged);
   return merged;
+}
+
+function civilianSleeveMaterial(variant) {
+  const key = Math.abs(variant) % CIVILIAN_TOPS.length;
+  if (civilianSleeveMaterials.has(key)) return civilianSleeveMaterials.get(key);
+  const material = new THREE.MeshStandardMaterial({
+    name: `civilian-rounded-sleeves-${key}`,
+    color: CIVILIAN_TOPS[key],
+    roughness: 0.88,
+    metalness: 0.01,
+    normalMap: combatantFabricNormal,
+    normalScale: new THREE.Vector2(0.22, 0.22),
+    roughnessMap: combatantFabricRoughness,
+  });
+  civilianSleeveMaterials.set(key, material);
+  return material;
+}
+
+// The CC0 civilians deliberately use faceted, game-piece limbs. They animate well, but a
+// raised arm seen from first-person distance has a hexagonal outline. Cover the authored arm
+// volume with four smooth, bone-driven sleeve segments. All four capsules merge into one
+// SkinnedMesh, so each close-range actor pays one extra draw rather than four.
+function addRoundedCivilianSleeves(visual, mergedSkin, sourceIndex, variant) {
+  if (!quality.desktop || !mergedSkin?.skeleton) return null;
+  const node = name => findRigObject(visual, name);
+  const chains = [
+    [node('UpperArm.L'), node('LowerArm.L'), node('Wrist.L')],
+    [node('UpperArm.R'), node('LowerArm.R'), node('Wrist.R')],
+  ];
+  if (chains.some(chain => chain.some(part => !part))) return null;
+
+  let geometry = civilianSleeveGeometries.get(sourceIndex);
+  if (!geometry) {
+    visual.updateMatrixWorld(true);
+    mergedSkin.updateMatrixWorld(true);
+    const axis = new THREE.Vector3(0, 1, 0);
+    const toSkinLocal = object => mergedSkin.worldToLocal(
+      object.getWorldPosition(new THREE.Vector3()));
+    const pieces = [];
+    const addSegment = (startBone, endBone, radiusMetres, trimMetres = 0) => {
+      const boneIndex = mergedSkin.skeleton.bones.indexOf(startBone);
+      if (boneIndex < 0) return;
+      const start = toSkinLocal(startBone);
+      const end = toSkinLocal(endBone);
+      const direction = end.clone().sub(start);
+      const length = direction.length();
+      if (length < 0.001) return;
+      const skinScale = mergedSkin.getWorldScale(new THREE.Vector3());
+      const worldScale = Math.max(0.001, (skinScale.x + skinScale.z) * 0.5);
+      const radius = radiusMetres / worldScale;
+      const trim = Math.min(length * 0.18, trimMetres / worldScale);
+      const centre = start.clone().add(end).multiplyScalar(0.5)
+        .addScaledVector(direction.clone().normalize(), -trim * 0.5);
+      const segmentLength = Math.max(radius * 2.2, length - trim);
+      const part = new THREE.CapsuleGeometry(
+        radius,
+        Math.max(radius * 0.2, segmentLength - radius * 2),
+        2,
+        8,
+      );
+      part.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
+        axis, direction.normalize()));
+      part.translate(centre.x, centre.y, centre.z);
+      // `start`/`end` describe the arm in the currently displayed mesh space. A SkinnedMesh
+      // expects source vertices before the bind-pose transform, so reverse this bone's current
+      // skin matrix once. Without this step the shader applies the bind transform a second
+      // time and the four segments appear as detached capsules around the torso and hips.
+      const skinTransform = new THREE.Matrix4()
+        .multiplyMatrices(
+          mergedSkin.bindMatrixInverse,
+          new THREE.Matrix4().multiplyMatrices(
+            startBone.matrixWorld,
+            mergedSkin.skeleton.boneInverses[boneIndex],
+          ),
+        )
+        .multiply(mergedSkin.bindMatrix);
+      part.applyMatrix4(skinTransform.invert());
+      const count = part.attributes.position.count;
+      const indices = new Uint16Array(count * 4);
+      const weights = new Float32Array(count * 4);
+      for (let index = 0; index < count; index++) {
+        indices[index * 4] = boneIndex;
+        weights[index * 4] = 1;
+      }
+      part.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(indices, 4));
+      part.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weights, 4));
+      pieces.push(part);
+    };
+    for (const [upper, lower, wrist] of chains) {
+      addSegment(upper, lower, 0.066);
+      // Stop the sleeve just above the wrist so the corrected hand remains visible.
+      addSegment(lower, wrist, 0.056, 0.035);
+    }
+    geometry = mergeGeometries(pieces, false);
+    for (const piece of pieces) piece.dispose();
+    if (!geometry) return null;
+    geometry.clearGroups();
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    geometry.name = `civilian-rounded-sleeves-source-${sourceIndex}`;
+    geometry.userData.segmentCount = 4;
+    civilianSleeveGeometries.set(sourceIndex, geometry);
+  }
+
+  const sleeves = new THREE.SkinnedMesh(
+    geometry,
+    civilianSleeveMaterial(variant),
+  );
+  sleeves.name = 'civilian-rounded-articulated-sleeves';
+  sleeves.position.copy(mergedSkin.position);
+  sleeves.quaternion.copy(mergedSkin.quaternion);
+  sleeves.scale.copy(mergedSkin.scale);
+  sleeves.bindMode = mergedSkin.bindMode;
+  sleeves.bind(mergedSkin.skeleton, mergedSkin.bindMatrix);
+  sleeves.castShadow = sleeves.receiveShadow = quality.shadows;
+  sleeves.frustumCulled = false;
+  sleeves.userData.roundedCivilianSleeves = true;
+  sleeves.userData.segmentCount = geometry.userData.segmentCount;
+  sleeves.userData.source = sourceIndex;
+  visual.add(sleeves);
+  return sleeves;
 }
 
 function mergedBoxGeometry(parts) {
@@ -1134,6 +1257,8 @@ export function createCivilianCharacter({
   });
   const sourceIndex = civilianSources.indexOf(source);
   const mergedSkin = mergeCivilianVisual(visual, `${sourceIndex}:${variant}`);
+  const roundedSleeves = addRoundedCivilianSleeves(
+    visual, mergedSkin, sourceIndex, variant);
   root.add(visual);
 
   // Concealed shooters use this exact civilian presentation—same source model, palette and
@@ -1170,6 +1295,7 @@ export function createCivilianCharacter({
     panicStyle: Math.abs(sequence) % 3,
     bodyScale: { height: heightScale, width: widthScale },
     mergedSkin,
+    roundedSleeves,
     concealed,
     hostage,
     baseVisualY: visual.position.y,

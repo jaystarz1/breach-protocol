@@ -226,6 +226,18 @@ export class Civilian {
   }
 
   update(dt, world) {
+    const roundedSleeves = this.mesh.userData.rig?.roundedSleeves;
+    if (roundedSleeves) {
+      // Rounded limb cross-sections matter in the first-person identification envelope, not
+      // across the plaza. Hysteresis prevents a civilian hovering near the cutoff from
+      // toggling a draw every frame; the authored body remains visible at every distance.
+      const dx = this.pos.x - world.playerPos.x;
+      const dy = this.pos.y - world.playerPos.y;
+      const dz = this.pos.z - world.playerPos.z;
+      const limit = roundedSleeves.visible ? 6.5 : 5.5;
+      roundedSleeves.visible = dx * dx + dy * dy + dz * dz < limit * limit;
+      roundedSleeves.userData.lodDistance = limit;
+    }
     if (this.dead) {
       this.deathAnim = animateDeathRig(this.mesh, dt);
       settleDeathRig(this.mesh, world.solids, dt);

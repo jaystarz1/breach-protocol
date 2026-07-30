@@ -62,6 +62,10 @@ def main():
                     row.actor.yaw = 0;
                   }
                   const rig = row.actor.mesh.userData.rig;
+                  // The production LOD re-enables rounded sleeves on the next civilian update.
+                  // This inspection freezes the actor immediately after teleporting it into
+                  // close range, so request the same close representation explicitly.
+                  if (rig?.roundedSleeves) rig.roundedSleeves.visible = true;
                   // Advance into the held portion of the active clip, then freeze the selected
                   // actor at the inspection mark. Normal AI resumes on a fresh level load.
                   rig?.mixer?.update(0.55);
@@ -74,6 +78,7 @@ def main():
                   let carriedRifle = null;
                   let combatantSurface = null;
                   let civilianSurface = null;
+                  let civilianSleeves = null;
                   let handRig = null;
                   const tacticalGear = [];
                   row.actor.mesh.traverse(object => {
@@ -166,6 +171,26 @@ def main():
                         fabricVertices: countMasked('fabricMask'),
                       };
                     }
+                    if (object.userData.roundedCivilianSleeves) {
+                      object.geometry.computeBoundingBox();
+                      const box = object.geometry.boundingBox;
+                      const skinIndices = object.geometry.attributes.skinIndex;
+                      const weightedBones = new Set();
+                      for (let index = 0; index < skinIndices.count; index++) {
+                        weightedBones.add(skinIndices.getX(index));
+                      }
+                      civilianSleeves = {
+                        name: object.name,
+                        skinned: object.isSkinnedMesh,
+                        material: object.material?.name || '',
+                        segments: object.userData.segmentCount,
+                        source: object.userData.source,
+                        triangles: Math.round(count / 3),
+                        weightedBones: weightedBones.size,
+                        size: ['x', 'y', 'z'].map(axis => +(
+                          box.max[axis] - box.min[axis]).toFixed(3)),
+                      };
+                    }
                     for (const material of mats) materials.push({
                       object: object.name,
                       material: material?.name || '',
@@ -245,6 +270,7 @@ def main():
                     carriedRifle,
                     combatantSurface,
                     civilianSurface,
+                    civilianSleeves,
                     handRig,
                     tacticalGear,
                     materials,
@@ -365,8 +391,8 @@ def main():
         print(json.dumps(result, indent=2))
         assert not errors, result
         assert all(row and row["authored"] for row in captures.values()), result
-        assert captures["civilian"]["draws"] == 1, result
-        assert captures["concealed"]["draws"] == 1, result
+        assert captures["civilian"]["draws"] == 2, result
+        assert captures["concealed"]["draws"] == 2, result
         for kind in ("civilian", "concealed"):
             surface = captures[kind]["civilianSurface"]
             assert surface and surface["material"] == "civilian-layered-surface", result
@@ -377,6 +403,12 @@ def main():
             assert surface["hairVertices"] > 0, result
             assert surface["eyeVertices"] > 0, result
             assert surface["fabricVertices"] > 0, result
+            sleeves = captures[kind]["civilianSleeves"]
+            assert sleeves and sleeves["skinned"], result
+            assert sleeves["segments"] == 4, result
+            assert sleeves["weightedBones"] == 4, result
+            assert sleeves["triangles"] < 1_000, result
+            assert sleeves["material"].startswith("civilian-rounded-sleeves-"), result
         assert captures["enemy"]["mergedCombatant"], result
         assert captures["friendly"]["mergedCombatant"], result
         assert captures["enemy"]["draws"] <= 3, result
