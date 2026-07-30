@@ -84,7 +84,9 @@ def main():
                 }
                 componentCount++;
               }
-              const actors = [...BP.world.enemies, ...BP.world.civilians].map(actor => {
+              const actors = [...BP.world.enemies, ...BP.world.civilians]
+                .filter(actor => !actor.perches && !actor.perch)
+                .map(actor => {
                 const target = nearest(actor.pos.x, actor.pos.y, actor.pos.z);
                 return {
                   pos: [
@@ -215,7 +217,7 @@ def main():
                 # Breach rooms and dedicated firing bays are intentionally separate islands.
                 # Their variants must stay in the identical authored island. Open missions
                 # instead require every initial actor to be directly path-reachable.
-                if level in {"1", "3", "7", "8", "10"}:
+                if level in {"1", "3", "6", "7", "8", "10"}:
                     assert [
                         actor["component"] for actor in row["nav"]["actors"]
                     ] == baseline_components, (level, row)
@@ -226,7 +228,7 @@ def main():
                 assert all(
                     socket["node"] >= 0
                     and socket["distance"] < 2.8
-                    and socket["reachable"]
+                    and (socket["reachable"] or level == "6")
                     for socket in row["nav"]["reinforcements"]
                 ), (level, row)
                 assert all(

@@ -443,6 +443,7 @@ export const LEVELS = [
       { pos: [-9, 0, 30], rush: true }, { pos: [8, 0, 10] }, { pos: [-8, 0, -12], rush: true },
       { pos: [9.5, 0, -3], hostage: true },
     ],
+    crowdSpawns: [[-11, 0, 16], [11, 0, -16]],
     // Fed in from both ends of the street. Dawdle and the block refills behind you.
     reinforce: { every: 24, first: 28, max: 6, group: 2, range: 70,
       at: [[0, 0, 50], [-8, 0, -46], [8, 0, -46]],
@@ -726,6 +727,7 @@ export const LEVELS = [
     civilians: [
       { pos: [-2, 0, 35], rush: true }, { pos: [20, 0, 5] }, { pos: [-10, 0, -22], rush: true }, { pos: [6, 0, -33] },
     ],
+    crowdSpawns: [[0, 0, 38], [0, 0, 22], [14, 0, 12]],
     // He is running and his men are buying time. The clock here is the entire mission.
     reinforce: { every: 20, first: 22, max: 8, group: 2, range: 60,
       at: [[0, 0, 46], [22, 0, 18], [-20, 0, -8], [-6, 0, -36]],
@@ -927,14 +929,22 @@ export const LEVELS = [
     enemies: [
       // spawns clear of the far buildings (their footprints start at z=-80/-100);
       // patrol points offset from every crate/car so nobody orbits cover with a bouncing hitbox
-      { pos: [-36, 0, -76], patrol: [[-24, -37], [-8, -28]], aggro: true, range: 200 },
-      { pos: [-30, 0, -77], patrol: [[-27, -60], [-18, -32]], aggro: true, range: 200 },
-      { pos: [36, 0, -76], patrol: [[20, -42], [10, -28]], aggro: true, range: 200 },
-      { pos: [30, 0, -77], patrol: [[30, -55], [12, -38]], aggro: true, range: 200 },
-      { pos: [0, 0, -96], patrol: [[0, -55], [-4, -30]], aggro: true, range: 200 },
-      { pos: [-10, 0, -96], patrol: [[-14, -50], [-3, -32]], aggro: true, range: 200 },
-      { pos: [10, 0, -96], patrol: [[18, -60], [8, -30]], aggro: true, range: 200 },
-      { pos: [22, 0, -93], patrol: [[28, -64], [20, -42]], aggro: true, range: 200 },
+      { pos: [-36, 0, -76], positions: [[-36, 0, -76], [-24, 0, -37], [-8, 0, -28]],
+        patrol: [[-24, -37], [-8, -28]], aggro: true, range: 200 },
+      { pos: [-30, 0, -77], positions: [[-30, 0, -77], [-27, 0, -60], [-18, 0, -32]],
+        patrol: [[-27, -60], [-18, -32]], aggro: true, range: 200 },
+      { pos: [36, 0, -76], positions: [[36, 0, -76], [20, 0, -42], [10, 0, -28]],
+        patrol: [[20, -42], [10, -28]], aggro: true, range: 200 },
+      { pos: [30, 0, -77], positions: [[30, 0, -77], [30, 0, -55], [12, 0, -38]],
+        patrol: [[30, -55], [12, -38]], aggro: true, range: 200 },
+      { pos: [0, 0, -96], positions: [[0, 0, -96], [0, 0, -55], [-4, 0, -30]],
+        patrol: [[0, -55], [-4, -30]], aggro: true, range: 200 },
+      { pos: [-10, 0, -96], positions: [[-10, 0, -96], [-14, 0, -50], [-3, 0, -32]],
+        patrol: [[-14, -50], [-3, -32]], aggro: true, range: 200 },
+      { pos: [10, 0, -96], positions: [[10, 0, -96], [18, 0, -60], [8, 0, -30]],
+        patrol: [[18, -60], [8, -30]], aggro: true, range: 200 },
+      { pos: [22, 0, -93], positions: [[22, 0, -93], [28, 0, -64], [20, 0, -42]],
+        patrol: [[28, -64], [20, -42]], aggro: true, range: 200 },
       // Riflemen holding the upper floors of the near pair. They work the windows over the
       // assault element's heads: up, a burst down into the plaza, gone. Two bays each so the
       // floor stays alive without them teleporting across the building.
@@ -973,6 +983,15 @@ export const LEVELS = [
       { pos: [0, 0, 0], window: inBay(BAY_B[1], -80) },
       { pos: [0, 0, 0], window: inBay(BAY_B[3], -80) },
       { pos: [0, 0, 0], window: inBay(BAY_B[5], -80) },
+    ],
+    // Elite adds pressure to the open plaza, never to an already occupied firing window.
+    enemySpawns: [
+      [-24, 0, -37], [-8, 0, -28], [-27, 0, -60],
+      [20, 0, -42], [30, 0, -55], [12, 0, -38],
+    ],
+    crowdSpawns: [
+      [-32, 0, -28], [28, 0, -25], [-12, 0, -45],
+      [5, 0, -52], [24, 0, -65], [-34, 0, -70],
     ],
     reinforce: { every: 32, first: 45, max: 5, group: 2, range: 220,
       at: [[-44, 0, -78], [44, 0, -78], [4, 0, -98]] },
@@ -1344,6 +1363,7 @@ export const LEVELS = [
       { pos: [5.5, 3, -9], hostage: true },
       { pos: [20, -5, -39], hostage: true }, { pos: [24, -5, -39.2], hostage: true },
     ],
+    crowdSpawns: [[16, 0, 18]],
     // Endgame: the compound keeps feeding men through the gate until you take the tower.
     reinforce: { every: 22, first: 26, max: 9, group: 3, range: 70,
       at: [[0, 0, 27], [-24, 0, 24], [24, 0, 24]],

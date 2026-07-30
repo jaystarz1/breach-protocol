@@ -36,6 +36,7 @@ import {
 } from './campaign.js';
 import { DroneController, dronePrewarmGroup } from './drone.js';
 import {
+  authoredActorSockets,
   resolveActorVariant,
   resolveReinforcementVariant,
   seededRandom,
@@ -555,7 +556,10 @@ function startLevel(id) {
   // enemy count scaling
   // Retries rotate only between authored-safe positions. No unconstrained random offset may
   // put an actor inside a wall, outside the nav graph, or on the wrong side of a breach.
-  let defs = L.enemies.map(d => resolveActorVariant(d, missionVariant));
+  let defs = L.enemies.map((definition, sourceIndex) => ({
+    ...resolveActorVariant(definition, missionVariant),
+    _sourceIndex: sourceIndex,
+  }));
   const encounterRandom = seededRandom(
     L.id * 920009 + missionVariant * 9209 + diff.id * 277);
   const mul = diff.enemyCountMul;
@@ -566,10 +570,47 @@ function startLevel(id) {
     }
   } else if (mul > 1) {
     const extra = Math.round(defs.length * (mul - 1));
+    const baseDefs = [...defs];
+    const occupied = new Set(defs.map(definition =>
+      definition.pos.map(value => Number(value).toFixed(3)).join(',')));
+    for (const civilian of L.civilians.map(definition =>
+      resolveActorVariant(definition, missionVariant))) {
+      const position = civilian.window || civilian.pos;
+      occupied.add(position.map(value => Number(value).toFixed(3)).join(','));
+    }
+    const scalable = baseDefs.filter(definition =>
+      !definition.bastion
+      && !definition.hvt
+      && !definition.perches
+      && !definition.teamOnly
+      && !definition.targetPlayer
+      && !definition.tag);
+    const scalableDefinitions = L.enemies.filter(definition =>
+      !definition.bastion
+      && !definition.hvt
+      && !definition.perches
+      && !definition.teamOnly
+      && !definition.targetPlayer
+      && !definition.tag);
+    const sockets = authoredActorSockets(scalableDefinitions, L.enemySpawns)
+      .filter(position => !occupied.has(
+        position.map(value => value.toFixed(3)).join(',')));
     for (let i = 0; i < extra; i++) {
-      const src = defs[Math.floor(encounterRandom() * defs.length)];
-      // spawn at the source's exact position — collision separates them; an offset can clip into walls
-      defs.push({ ...src, pos: [...src.pos] });
+      // Use only unoccupied authored sockets on the same floor as an ordinary scalable actor.
+      // This prevents Elite from creating two bodies in one doorway or duplicating BASTION,
+      // a scripted HVT, a window sniper, or an objective-tagged guard.
+      const candidates = sockets.filter(position =>
+        !occupied.has(position.map(value => value.toFixed(3)).join(','))
+        && scalable.some(definition => Math.abs(definition.pos[1] - position[1]) < 0.25));
+      const socket = candidates.length
+        ? candidates[Math.floor(encounterRandom() * candidates.length)] : null;
+      const templates = socket
+        ? scalable.filter(definition => Math.abs(definition.pos[1] - socket[1]) < 0.25)
+        : scalable;
+      const src = templates[Math.floor(encounterRandom() * templates.length)] || baseDefs[0];
+      const pos = socket || src.pos;
+      occupied.add(pos.map(value => Number(value).toFixed(3)).join(','));
+      defs.push({ ...src, pos: [...pos] });
     }
   }
   world.enemies = defs.map((d, index) => new Enemy(scene, {
@@ -593,24 +634,30 @@ function startLevel(id) {
   // civilian scaling (never scale hostages — they're placed deliberately)
   let cdefs = L.civilians.map(d => resolveActorVariant(d, missionVariant));
   const cmul = diff.civilianMul;
-  const free = cdefs.filter(c => !c.hostage);
+  // Window occupants and hostages are authored set pieces, not density templates. Duplicating
+  // either one stacks bodies in the same firing bay or restraint location.
+  const free = cdefs.filter(c => !c.hostage && !c.window);
   if (cmul > 1 && free.length) {
     const extra = Math.round(free.length * (cmul - 1));
-    const crowdSockets = L.crowdSpawns || [];
+    const occupied = new Set(cdefs.filter(definition => !definition.window)
+      .map(definition =>
+        definition.pos.map(value => Number(value).toFixed(3)).join(',')));
+    const crowdSockets = authoredActorSockets(
+      L.civilians.filter(definition => !definition.hostage && !definition.window),
+      L.crowdSpawns,
+    ).filter(position => !occupied.has(
+      position.map(value => value.toFixed(3)).join(',')));
     const crowdOffset = crowdSockets.length
       ? Math.floor(encounterRandom() * crowdSockets.length) : 0;
     for (let i = 0; i < extra; i++) {
       const src = free[Math.floor(encounterRandom() * free.length)];
-      // Difficulty may increase crowd density, but it may not invent a coordinate. Prefer a
-      // different validated socket authored on this civilian; if none exists, duplicate the
-      // known-safe socket and let the actors' distinct seeded reactions separate them once
-      // contact begins. A free ±2m offset can put a no-shoot inside a facade or collider.
-      const safeSockets = src.positions || [];
+      // Difficulty may increase crowd density, but it may not invent a coordinate. Consume
+      // each validated socket once before falling back to a known-safe occupied coordinate;
+      // the QA gate makes that fallback visible so levels can author enough capacity.
       const safe = crowdSockets.length
-        ? crowdSockets[(crowdOffset + missionVariant * 7 + i) % crowdSockets.length]
-        : safeSockets.length
-          ? safeSockets[(missionVariant + i + 1) % safeSockets.length]
-          : src.pos;
+        ? crowdSockets[(crowdOffset + i) % crowdSockets.length]
+        : src.pos;
+      occupied.add(safe.map(value => Number(value).toFixed(3)).join(','));
       cdefs.push({
         ...src,
         pos: [...safe],
@@ -618,7 +665,7 @@ function startLevel(id) {
     }
   } else if (cmul < 1) {
     let drop = Math.round(free.length * (1 - cmul));
-    cdefs = cdefs.filter(c => c.hostage || (drop-- <= 0));
+    cdefs = cdefs.filter(c => c.hostage || c.window || (drop-- <= 0));
   }
   world.civilians = cdefs.map((d, index) => new Civilian(scene, {
     ...d,

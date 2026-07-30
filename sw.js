@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v117-civilian-arm-rigs';
+const CACHE = 'breach-protocol-v118-authored-density';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

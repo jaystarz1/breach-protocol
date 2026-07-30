@@ -68,3 +68,27 @@ export function resolveReinforcementVariant(definition, value) {
   out.at = sockets.map(point => [...point]);
   return out;
 }
+
+// Count scaling may reuse an actor's behavior, but it must not reuse the actor's occupied
+// coordinate. Build a deduplicated pool exclusively from authored positions already validated
+// for that mission: base definitions, their bounded position sets, variant overrides and any
+// level-level extra sockets.
+export function authoredActorSockets(definitions, extraSockets = []) {
+  const sockets = [];
+  const seen = new Set();
+  const add = position => {
+    if (!Array.isArray(position) || position.length < 3) return;
+    const copy = [Number(position[0]), Number(position[1] ?? 0), Number(position[2])];
+    const key = copy.map(value => value.toFixed(3)).join(',');
+    if (seen.has(key)) return;
+    seen.add(key);
+    sockets.push(copy);
+  };
+  for (const definition of definitions || []) {
+    add(definition.pos);
+    for (const position of definition.positions || []) add(position);
+    for (const variant of definition.variants || []) add(variant.pos);
+  }
+  for (const position of extraSockets || []) add(position);
+  return sockets;
+}
