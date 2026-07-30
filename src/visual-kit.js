@@ -1385,6 +1385,70 @@ function addVehicle(batcher, def) {
   if (def.police) addPoliceVehicleDetails(batcher, parent, type);
 }
 
+function addMilitaryTruck(batcher, def) {
+  const olive = standard('military-truck-olive', 0x3f4938, 0.82, 0.14);
+  const darkOlive = standard('military-truck-dark-olive', 0x252d25, 0.9, 0.08);
+  const chassis = standard('military-truck-chassis', 0x171b18, 0.78, 0.48);
+  const rubber = standard('military-truck-rubber', 0x090b0a, 0.98, 0);
+  const steel = standard('military-truck-steel', 0x59605a, 0.62, 0.58);
+  const glass = standard('military-truck-glass', 0x101b1d, 0.24, 0.22);
+  const canvas = standard('military-truck-canvas', 0x4f553e, 0.98, 0);
+  const lamp = standard('military-truck-lamp', 0xd8cf9b, 0.34, 0.16);
+  const parent = new THREE.Matrix4().compose(
+    new THREE.Vector3(def.x, 0.02, def.z),
+    new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), def.rotZAxis ? Math.PI / 2 : 0),
+    new THREE.Vector3(1, 1, 1),
+  );
+  const paint = def.damage === 0 ? darkOlive : olive;
+
+  // Longitudinal x axis, matching the authored civilian vehicle kit.
+  batcher.add('military-truck-chassis', UNIT_BOX, chassis,
+    instanceMatrix(parent, 0.15, 0.62, 0, 6.35, 0.28, 2.05));
+  batcher.add('military-truck-cab', UNIT_BOX, paint,
+    instanceMatrix(parent, -2.13, 1.43, 0, 1.72, 1.72, 2.12));
+  batcher.add('military-truck-hood', UNIT_BOX, paint,
+    instanceMatrix(parent, -3.0, 0.97, 0, 0.48, 0.78, 2.02, 0, 0, -0.08));
+  batcher.add('military-truck-bed', UNIT_BOX, paint,
+    instanceMatrix(parent, 1.15, 1.02, 0, 3.8, 0.82, 2.18));
+  batcher.add('military-truck-cab-roof', UNIT_BOX, paint,
+    instanceMatrix(parent, -2.1, 2.31, 0, 1.82, 0.16, 2.18));
+  for (const side of [-1, 1]) {
+    batcher.add('military-truck-windows', UNIT_BOX, glass,
+      instanceMatrix(parent, -2.18, 1.75, side * 1.075, 1.12, 0.62, 0.035));
+    batcher.add('military-truck-bed-rails', UNIT_BOX, steel,
+      instanceMatrix(parent, 1.15, 1.67, side * 1.09, 3.72, 0.08, 0.08));
+    for (const x of [-0.56, 0.55, 1.65, 2.7]) {
+      batcher.add('military-truck-bed-stakes', UNIT_BOX, steel,
+        instanceMatrix(parent, x, 1.62, side * 1.09, 0.07, 1.12, 0.07));
+    }
+  }
+  batcher.add('military-truck-windscreen', UNIT_BOX, glass,
+    instanceMatrix(parent, -3.01, 1.76, 0, 0.04, 0.62, 1.78, 0, 0, -0.08));
+  batcher.add('military-truck-grille', UNIT_BOX, steel,
+    instanceMatrix(parent, -3.27, 0.98, 0, 0.06, 0.48, 1.5));
+  for (const side of [-0.72, 0.72]) {
+    batcher.add('military-truck-lamps', VEHICLE_LAMP_GEO, lamp,
+      instanceMatrix(parent, -3.32, 1.18, side, 0.2, 0.2, 0.16));
+  }
+  if (def.canvas !== false) {
+    batcher.add('military-truck-canvas-roof', UNIT_BOX, canvas,
+      instanceMatrix(parent, 1.15, 2.38, 0, 3.72, 0.16, 2.08));
+    for (const side of [-1, 1]) {
+      batcher.add('military-truck-canvas-sides', UNIT_BOX, canvas,
+        instanceMatrix(parent, 1.15, 1.93, side * 1.03, 3.72, 0.82, 0.08));
+    }
+  }
+  for (const x of [-2.28, 0.35, 2.35]) for (const side of [-1, 1]) {
+    batcher.add('military-truck-tyres', TYRE_GEO, rubber,
+      instanceMatrix(parent, x, 0.55, side * 1.11, 1.28, 1.28, 1.22));
+    batcher.add('military-truck-hubs', HUB_GEO, steel,
+      instanceMatrix(parent, x, 0.55, side * 1.16, 1.18, 1.18, 1.18, Math.PI / 2));
+  }
+  batcher.add('military-truck-bumper', VEHICLE_BUMPER_GEO, chassis,
+    instanceMatrix(parent, -3.38, 0.62, 0, 1.35, 1, 1, 0, 0, Math.PI / 2));
+}
+
 function addFacade(batcher, def) {
   const R = rng(def.seed);
   const dx = def.x2 - def.x1, dz = def.z2 - def.z1;
@@ -2680,6 +2744,7 @@ export function addVisualProps(scene, props = []) {
   let marketIndex = 0;
   for (const def of props) {
     if (def.kind === 'vehicle') addVehicle(batcher, def);
+    else if (def.kind === 'military-truck') addMilitaryTruck(batcher, def);
     else if (def.kind === 'facade') addFacade(batcher, def);
     else if (def.kind === 'market-stall') addMarketStall(batcher, scene, def, marketIndex++);
     else if (def.kind === 'supply-crate') addSupplyCrate(batcher, def);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify Hold District's authored assault waves and network-enabled strike transition."""
+"""Verify Level 10's rooftop gunship, support strike, and pre-freed shield completion."""
 import argparse
 import json
 from pathlib import Path
@@ -30,39 +30,59 @@ def main():
         page.evaluate("() => BP.startLevel(10)")
         page.wait_for_function("() => BP.mode === 'playing'")
 
-        objective_contract = page.evaluate("""() => ({
-          types: BP.world.level.objectives.map(objective => objective.type),
-          brief: BP.world.level.brief,
-          duration: BP.world.level.objectives.find(
-            objective => objective.type === 'defend')?.duration,
-          waves: BP.world.level.objectives.find(
-            objective => objective.type === 'defend')?.waves.length,
-          strikeTargets: BP.world.level.objectives.find(
-            objective => objective.type === 'drone')?.targets.map(target => target.kind),
-          bunkerUnlockObjective: BP.world.level.doors.find(
-            door => door.pos[1] === -5)?.unlockObjective,
-          postStrikeText: BP.world.level.objectives[4]?.text,
-        })""")
+        contract = page.evaluate("""() => {
+          const objectives = BP.world.level.objectives;
+          return {
+            types: objectives.map(objective => objective.type),
+            towerRequiresRoof: objectives[1].requireReach,
+            combat: {
+              mode: objectives[2].mode,
+              rifle: objectives[2].rifleRounds,
+              grenades: objectives[2].grenades,
+              infantrySockets: objectives[2].combatWave.enemies.length,
+              vehicle: objectives[2].combatWave.vehicle.kind,
+            },
+            strikeKinds: objectives[3].targets.map(target => target.kind),
+            strikePositions: objectives[3].targets.map(target => target.pos),
+            strikeFiring: objectives[3].targets.map(target => target.firing),
+            bunkerUnlockObjective: BP.world.level.doors.find(
+              door => door.pos[1] === -5).unlockObjective,
+            shieldText: objectives[4].text,
+            militaryTrucks: BP.scene.children.find(
+              child => child.name === 'military-truck-chassis')?.count || 0,
+            burningWrecks: BP.scene.children.filter(
+              child => child.name.startsWith('compound-burning-wreck-')).length,
+          };
+        }""")
         bunker_lock = page.evaluate("""() => {
           const door = BP.world.doors.doors.find(row => row.def.unlockObjective === 4);
           BP.player.pos.copy(door.mesh.position);
           return {
-            beforeStrike: BP.world.doors.nearBreachable(
+            beforeNetworkStrike: BP.world.doors.nearBreachable(
               BP.player.pos, BP.player.yaw, 3) === null,
-            afterStrike: BP.world.doors.nearBreachable(
+            afterNetworkStrike: BP.world.doors.nearBreachable(
               BP.player.pos, BP.player.yaw, 4) === door,
-            directBreachRejected: BP.world.doors.breach(
-              door, {...BP.world, objectiveIdx: 3}) === false,
-            stillClosed: !door.breached,
           };
         }""")
-        # Remove only the authored opening force. The defense code must create and own every
-        # attacker counted below; bunker personnel remain alive but below the surface.
+        page.evaluate("""() => {
+          BP.player.pos.set(0, 0, 27);
+          BP.player.yaw = 0;
+          BP.player.pitch = -0.08;
+        }""")
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(output / "military-compound.png"))
+        page.evaluate("""() => {
+          BP.player.pos.set(22, 0, -15.2);
+          BP.player.yaw = 0;
+          BP.player.pitch = -0.42;
+        }""")
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(output / "bunker-entrance.png"))
+
+        # Clear the authored courtyard/tower force, then stand on the roof. The objective must
+        # not hand control over until both conditions are true.
         page.evaluate("""() => {
           BP.player.health = 100000;
-          BP.player.pos.set(0, 6.1, -10);
-          BP.player.yaw = Math.PI;
-          BP.player.pitch = -0.08;
           if (BP.world.reinf) BP.world.reinf.sent = BP.world.reinf.max;
           for (const ally of BP.world.allies) ally.update = () => {};
           for (const enemy of BP.world.enemies) {
@@ -73,164 +93,92 @@ def main():
               enemy.update = () => {};
             }
           }
-        }""")
-        page.wait_for_function(
-            "() => BP.world.objectiveIdx === 2"
-            " && BP.world.objectiveState?.type === 'defend'"
-        )
-        programs_before = page.evaluate("() => BP.performance.resources.programs")
-        roof_art = page.evaluate("""() => {
-          const root = BP.world.staticMesh.parent;
-          const row = name => {
-            const object = root.getObjectByName(name);
-            return object ? {
-              exists: true,
-              instances: object.count || object.userData.instanceCount || 1,
-              children: object.children.length,
-              vertices: object.geometry?.attributes?.position?.count || 0,
-            } : { exists: false, instances: 0, children: 0, vertices: 0 };
-          };
-          return {
-            equipment: {
-              ...row('final-fire-control-equipment-merged'),
-              components: root.getObjectByName(
-                'final-fire-control-equipment-merged'
-              )?.geometry?.userData?.components || 0,
-              droneSourceMeshes: root.getObjectByName(
-                'final-fire-control-equipment-merged'
-              )?.geometry?.userData?.droneSourceMeshes || 0,
-              vertexColors: root.getObjectByName(
-                'final-fire-control-equipment-merged'
-              )?.geometry?.attributes?.color?.count || 0,
-            },
-            cable: row('final-fire-control-signal-cable'),
-          };
-        }""")
-        paused = page.evaluate("""async () => {
-          BP.player.pos.set(0, 0, 38);
-          await new Promise(resolve => setTimeout(resolve, 240));
-          const before = BP.world.objectiveState.elapsed;
-          await new Promise(resolve => setTimeout(resolve, 240));
-          const after = BP.world.objectiveState.elapsed;
-          const row = {
-            before,
-            after,
-            delta: +(after - before).toFixed(4),
-            atPost: BP.world.objectiveState.atPost,
-            objective: document.querySelector('#objective')?.textContent,
-            reinforcement: document.querySelector('#reinf-warn')?.textContent,
-          };
           BP.player.pos.set(0, 6.1, -10);
-          return row;
-        }""")
-
-        waves = []
-        for threshold, expected in ((0.2, 1), (11.1, 2), (22.1, 3)):
-            page.evaluate(
-                """threshold => {
-                  BP.world.objectiveState.elapsed = threshold;
-                  BP.player.health = 100000;
-                }""",
-                threshold,
-            )
-            page.wait_for_function(
-                f"() => BP.world.objectiveState.wavesSent === {expected}"
-            )
-            movement = None
-            if expected == 1:
-                page.evaluate("""() => {
-                  window.__qaWaveStarts = BP.world.enemies
-                    .filter(enemy => !enemy.dead
-                      && enemy.defenseObjective === BP.world.objectiveIdx)
-                    .map(enemy => enemy.pos.clone());
-                }""")
-                page.wait_for_timeout(900)
-                movement = page.evaluate("""() => {
-                  const actors = BP.world.enemies.filter(enemy => !enemy.dead
-                    && enemy.defenseObjective === BP.world.objectiveIdx);
-                  const distances = actors.map((enemy, index) =>
-                    enemy.pos.distanceTo(window.__qaWaveStarts[index]));
-                  return {
-                    moved: distances.filter(distance => distance > 0.08).length,
-                    maxDistance: +Math.max(...distances).toFixed(3),
-                  };
-                }""")
-            row = page.evaluate("""() => ({
-              wavesSent: BP.world.objectiveState.wavesSent,
-              spawned: BP.world.objectiveState.spawned,
-              live: BP.world.enemies.filter(enemy =>
-                !enemy.dead && enemy.defenseObjective === BP.world.objectiveIdx).length,
-              alert: BP.world.enemies.filter(enemy =>
-                !enemy.dead && enemy.defenseObjective === BP.world.objectiveIdx)
-                .every(enemy => enemy.state === 'alert' || enemy.state === 'hunt'
-                  || enemy.state === 'cover'),
-              objective: document.querySelector('#objective')?.textContent,
-              reinforcement: document.querySelector('#reinf-warn')?.textContent,
-            })""")
-            row["movement"] = movement
-            waves.append(row)
-            # Freeze only this wave after its state has been observed. This keeps the QA camera
-            # alive while retaining all attackers for the cumulative ownership assertion.
-            page.evaluate("""() => {
-              for (const enemy of BP.world.enemies) {
-                if (!enemy.dead && enemy.defenseObjective === BP.world.objectiveIdx) {
-                  enemy.update = () => {};
-                }
-              }
-            }""")
-
-        page.screenshot(path=str(output / "tower-defense.png"), timeout=90000)
-        page.evaluate("""() => {
-          for (const enemy of BP.world.enemies) {
-            if (enemy.defenseObjective === BP.world.objectiveIdx) {
-              enemy.dead = true;
-              enemy.mesh.visible = false;
-            }
-          }
-          BP.world.objectiveState.elapsed = 32.1;
         }""")
         page.wait_for_function(
-            "() => BP.world.objectiveIdx === 3 && !!BP.world.drone"
+            "() => BP.world.objectiveIdx === 2 && BP.world.drone?.mode === 'combat'"
+        )
+        combat_before = page.evaluate("""() => ({
+          infantry: BP.world.drone.combatants.length,
+          vehicles: BP.world.drone.combatVehicles.length,
+          rifle: BP.world.drone.rifleRounds,
+          grenades: BP.world.drone.grenadeRounds,
+          thermal: BP.world.drone.thermalSignatures.length,
+          positions: BP.world.drone.combatants.map(actor => actor.pos.toArray()),
+          vehiclePosition: BP.world.drone.combatVehicles[0].pos.toArray(),
+          stackVisible: BP.world.allies.every(actor => actor.mesh.visible),
+        })""")
+        page.wait_for_timeout(800)
+        movement = page.evaluate("""before => ({
+          infantryMoved: BP.world.drone.combatants.filter((actor, index) =>
+            Math.hypot(
+              actor.pos.x - before.positions[index][0],
+              actor.pos.z - before.positions[index][2],
+            ) > 0.08).length,
+          vehicleMoved: Math.hypot(
+            BP.world.drone.combatVehicles[0].pos.x - before.vehiclePosition[0],
+            BP.world.drone.combatVehicles[0].pos.z - before.vehiclePosition[2],
+          ) > 0.08,
+        })""", combat_before)
+        page.screenshot(path=str(output / "rooftop-armed-uav.png"))
+
+        page.evaluate("""() => {
+          const drone = BP.world.drone;
+          for (const actor of drone.combatants) {
+            drone.onCombatHit(actor, 99999, false);
+          }
+          for (const vehicle of drone.combatVehicles) {
+            drone.onCombatVehicleHit(vehicle, 99999);
+          }
+        }""")
+        page.wait_for_function(
+            "() => BP.world.objectiveIdx === 3 && BP.world.drone?.mode === 'strike'"
         )
         strike_before = page.evaluate("""() => ({
-          mode: BP.world.drone.mode,
-          label: document.querySelector('.drone-label')?.textContent,
           targets: BP.world.drone.targets.length,
           kinds: BP.world.drone.targets.map(target => target.kind),
           models: BP.world.drone.targetModels.filter(Boolean).length,
-          locked: BP.player.locked,
-          programs: BP.performance.resources.programs,
+          firingModels: BP.world.drone.targetModels.filter(
+            model => !!model?.userData.update).length,
+          crews: BP.world.drone.targetModels.map(
+            model => model?.userData.crew?.length || 0),
         })""")
-        page.screenshot(path=str(output / "network-strike.png"), timeout=90000)
-
         page.evaluate("""() => {
-          window.__qaFinalWrecks = BP.world.drone.targetModels;
+          BP.world.drone.pos.set(0, 14, -35);
+          BP.world.drone.yaw = 0;
+          BP.world.drone.pitch = -0.22;
+        }""")
+        page.wait_for_timeout(300)
+        page.screenshot(path=str(output / "artillery-battery.png"))
+
+        # Reproduce the reported order exactly: the bunker shields have already been cut loose
+        # while the support strike is still active. Entering objective 4 must recognize that
+        # persistent state and advance without asking for an actor who no longer exists.
+        prefreed = page.evaluate("""() => {
+          const shields = BP.world.civilians.filter(civilian =>
+            civilian.wasHostage && civilian.spawnPos.y < -2);
+          for (const shield of shields) shield.rescue('you');
+          return {
+            count: shields.length,
+            allFreed: shields.every(shield =>
+              shield.rescued && !shield.hostage),
+          };
+        }""")
+        page.evaluate("""() => {
           for (const target of BP.world.drone.targets) {
             BP.world.drone.releaseMunition(target);
           }
-          BP.world.drone.updateMunitions(2);
+          BP.world.drone.updateMunitions(2, BP.world.solids);
           BP.world.drone.updateEffects(0.12);
         }""")
-        page.wait_for_timeout(1200)
-        page.wait_for_function("() => BP.world.objectiveIdx === 4")
-        strike_after = page.evaluate("""() => ({
-          objectiveIdx: BP.world.objectiveIdx,
-          restored: !BP.player.locked,
-          overlayRemoved: !document.querySelector('.drone-frame'),
-          wrecksPersist: window.__qaFinalWrecks.every(
-            model => model.userData.destroyed && !!model.parent),
-          programs: BP.performance.resources.programs,
-          compiledDuringWindow: BP.performance.resources.compiledDuringWindow,
-        })""")
-        completion = page.evaluate("""() => {
-          for (const civilian of BP.world.civilians) {
-            if (civilian.hostage && civilian.pos.y < -2) civilian.rescue('you');
-          }
-          return { rescued: BP.world.civilians.filter(
-            civilian => civilian.wasHostage && civilian.pos.y < -2
-              && civilian.rescued).length };
-        }""")
         page.wait_for_function("() => BP.world.objectiveIdx === 5")
+        shield_transition = page.evaluate("""() => ({
+          objectiveIdx: BP.world.objectiveIdx,
+          text: BP.world.level.objectives[BP.world.objectiveIdx].text,
+          droneDisposed: BP.world.drone === null,
+          playerRestored: !BP.player.locked,
+        })""")
+
         page.evaluate("""() => {
           for (const enemy of BP.world.enemies) {
             if (!enemy.hvt && enemy.pos.y < -2) {
@@ -246,65 +194,65 @@ def main():
           bastion.mesh.visible = false;
         }""")
         page.wait_for_function("() => BP.mode === 'debrief' && BP.world.won")
-        completion.update(page.evaluate("""() => ({
-          finalObjectiveIdx: BP.world.objectiveIdx,
-          won: BP.world.won,
-        })"""))
 
         result = {
-            "contract": objective_contract,
+            "contract": contract,
             "bunkerLock": bunker_lock,
-            "waves": waves,
-            "pausedAwayFromPost": paused,
-            "roofArt": roof_art,
-            "programsBefore": programs_before,
+            "combatBefore": combat_before,
+            "movement": movement,
             "strikeBefore": strike_before,
-            "strikeAfter": strike_after,
-            "completion": completion,
-            "screenshots": ["tower-defense.png", "network-strike.png"],
+            "prefreed": prefreed,
+            "shieldTransition": shield_transition,
+            "won": page.evaluate("() => BP.world.won"),
+            "screenshots": [
+                "military-compound.png",
+                "bunker-entrance.png",
+                "rooftop-armed-uav.png",
+                "artillery-battery.png",
+            ],
             "errors": errors[:8],
         }
         print(json.dumps(result, indent=2))
 
-        assert objective_contract["types"] == [
-            "clear", "clear", "defend", "drone", "rescue", "clear", "target"
-        ], result
-        assert objective_contract["bunkerUnlockObjective"] == 4, result
-        assert "HUMAN SHIELDS" in objective_contract["postStrikeText"], result
-        assert all(bunker_lock.values()), result
-        assert objective_contract["duration"] == 32, result
-        assert objective_contract["waves"] == 3, result
-        assert objective_contract["strikeTargets"] == [
-            "armor", "artillery", "ew"
-        ], result
-        assert "three assault waves" in objective_contract["brief"], result
-        assert [row["wavesSent"] for row in waves] == [1, 2, 3], result
-        assert [row["spawned"] for row in waves] == [3, 6, 9], result
-        assert [row["live"] for row in waves] == [3, 6, 9], result
-        assert all(row["alert"] for row in waves), result
-        assert waves[0]["movement"]["moved"] >= 2, result
-        assert waves[0]["movement"]["maxDistance"] > 0.1, result
-        assert not paused["atPost"] and paused["delta"] < 0.04, result
-        assert "RETURN TO FIRE-CONTROL TOWER" in paused["objective"], result
-        assert "LINK PAUSED" in paused["reinforcement"], result
-        assert roof_art["equipment"]["instances"] == 1, result
-        assert roof_art["equipment"]["droneSourceMeshes"] >= 14, result
-        assert roof_art["equipment"]["components"] >= 22, result
-        assert roof_art["equipment"]["vertexColors"] == \
-            roof_art["equipment"]["vertices"], result
-        assert roof_art["cable"]["vertices"] == 18, result
-        assert strike_before["mode"] == "strike", result
-        assert strike_before["targets"] == 3 and strike_before["models"] == 3, result
-        assert strike_before["locked"], result
-        assert strike_after["objectiveIdx"] == 4, result
-        assert strike_after["restored"] and strike_after["overlayRemoved"], result
-        assert strike_after["wrecksPersist"], result
-        assert strike_before["programs"] == programs_before, result
-        assert strike_after["programs"] == programs_before, result
-        assert strike_after["compiledDuringWindow"] == 0, result
-        assert completion["rescued"] == 2, result
-        assert completion["won"] and completion["finalObjectiveIdx"] == 7, result
         assert not errors, result
+        assert contract["types"] == [
+            "clear", "clear", "drone", "drone", "rescue", "clear", "target"
+        ], result
+        assert contract["towerRequiresRoof"] == [0, -10, 8, 6], result
+        assert contract["combat"] == {
+            "mode": "combat",
+            "rifle": 100,
+            "grenades": 10,
+            "infantrySockets": 12,
+            "vehicle": "technical",
+        }, result
+        assert contract["strikeKinds"] == ["artillery", "artillery", "artillery"], result
+        assert all(position[2] < -50 for position in contract["strikePositions"]), result
+        assert contract["strikeFiring"] == [True, True, True], result
+        assert contract["militaryTrucks"] == 3, result
+        assert contract["burningWrecks"] == 2, result
+        assert contract["bunkerUnlockObjective"] == 4, result
+        assert "HUMAN SHIELDS" in contract["shieldText"], result
+        assert all(bunker_lock.values()), result
+        assert 10 <= combat_before["infantry"] <= 12, result
+        assert combat_before["vehicles"] == 1, result
+        assert combat_before["rifle"] == 100 and combat_before["grenades"] == 10, result
+        assert combat_before["thermal"] == combat_before["infantry"] + 1, result
+        assert combat_before["stackVisible"], result
+        assert movement["infantryMoved"] == combat_before["infantry"], result
+        assert movement["vehicleMoved"], result
+        assert strike_before == {
+            "targets": 3,
+            "kinds": ["artillery", "artillery", "artillery"],
+            "models": 3,
+            "firingModels": 3,
+            "crews": [3, 3, 3],
+        }, result
+        assert prefreed == {"count": 2, "allFreed": True}, result
+        assert shield_transition["objectiveIdx"] == 5, result
+        assert "BUNKER GUARD" in shield_transition["text"], result
+        assert shield_transition["droneDisposed"] and shield_transition["playerRestored"], result
+        assert result["won"], result
         browser.close()
 
 

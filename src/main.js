@@ -457,7 +457,7 @@ function startLevel(id) {
     hostageCommand: 'follow',
     objectiveIdx: 0, won: false, over: false,
     stats: {
-      kills: 0, surrenders: 0, detaineeKills: 0,
+      kills: 0, surrenders: 0, detaineesSecured: 0, detaineeKills: 0,
       shotsFired: 0, shotsHit: 0, civKills: 0, rescued: 0,
       startTime: performance.now(), score: 0,
     },
@@ -481,10 +481,21 @@ function startLevel(id) {
       this.stats.surrenders++;
       this.stats.score += 140;
       hud.feed(
-        reason === 'flash' ? 'HOSTILE SURRENDERED — FLASHED +140' : 'HOSTILE SURRENDERED +140',
+        reason === 'flash'
+          ? 'HOSTILE SURRENDERED — APPROACH TO SECURE +140'
+          : 'HOSTILE SURRENDERED — APPROACH TO SECURE +140',
         '#b2dfdb',
       );
       this.combatHeat = Math.max(this.combatHeat, 2);
+    },
+    onEnemySecured(e, by) {
+      this.stats.detaineesSecured++;
+      this.stats.score += 40;
+      hud.feed(
+        by === 'you' ? 'DETAINEE SECURED +40' : `${by}: DETAINEE SECURED +40`,
+        '#b2dfdb',
+      );
+      sfx.objective();
     },
     onAllyDown(a) {
       hud.feed(`${a.name} IS DOWN`, '#ef9a9a');
@@ -554,6 +565,11 @@ function startLevel(id) {
       tracer(a, b, 0xffb060, 7);
     },
   };
+  // Mission art is constructed before the gameplay world so it can participate in shader
+  // prewarming. Adopt its persistent low-cost animators once the world exists.
+  if (scene.userData.frontlineEffects?.length) {
+    world.effects.push(...scene.userData.frontlineEffects);
+  }
 
   // enemy count scaling
   // Retries rotate only between authored-safe positions. No unconstrained random offset may
@@ -737,17 +753,27 @@ function startLevel(id) {
   hud.objective('PREPARING TACTICAL SHADERS…');
   const warmWorld = world;
   const warmScene = scene;
-  const droneWarmup = dronePrewarmGroup(
-    L.objectives.find(objective =>
-      objective.type === 'drone' && ['strike', 'combat'].includes(objective.mode)),
-  );
+  // Level 10 owns both combat and strike UAVs. Prewarm every distinct drone mode now; using
+  // `.find()` only prepared the first one and moved the strike-model shader hitch into the
+  // middle of the final mission.
+  const droneWarmup = new THREE.Group();
+  droneWarmup.name = 'all-mission-drone-material-prewarm';
+  for (const objective of L.objectives.filter(candidate =>
+    candidate.type === 'drone' && ['strike', 'combat'].includes(candidate.mode))) {
+    const child = dronePrewarmGroup(objective);
+    if (child) droneWarmup.add(child);
+  }
+  droneWarmup.userData.dispose = () => {
+    for (const child of droneWarmup.children) child.userData.dispose?.();
+  };
+  const hasDroneWarmup = droneWarmup.children.length > 0;
   const combatWarmup = combatPrewarmGroup();
   warmScene.add(combatWarmup);
   // Retaining these material owners is as important as compiling them. Three releases a
   // program when its last material disappears; keeping one hidden line/flash/explosion
   // instance alive prevents the first live tracer or impact from rebuilding that shader.
   warmScene.userData.combatWarmup = combatWarmup;
-  if (droneWarmup) {
+  if (hasDroneWarmup) {
     warmScene.add(droneWarmup);
     // Keep these invisible material owners alive until the next mission. Disposing them here
     // would let Three release the just-compiled programs, forcing the same variants to compile
@@ -756,7 +782,7 @@ function startLevel(id) {
   }
   renderPipeline.prewarm(scene, camera).then(async firstResult => {
     combatWarmup.visible = false;
-    if (droneWarmup) droneWarmup.visible = false;
+    if (hasDroneWarmup) droneWarmup.visible = false;
     if (loadId !== levelLoadId || world !== warmWorld) return;
     setObjective();
     let result = firstResult;
@@ -1189,7 +1215,8 @@ function updateDefenseObjective(obj, dt) {
     state.wavesSent++;
   }
   const threats = world.enemies.filter(enemy =>
-    !enemy.dead && !enemy.surrendered && enemy.defenseObjective === world.objectiveIdx);
+    !enemy.dead && (!enemy.surrendered || !enemy.secured)
+    && enemy.defenseObjective === world.objectiveIdx);
   const seconds = Math.ceil(state.remaining);
   if (!atPost) {
     const distance = Math.round(Math.hypot(
@@ -1217,7 +1244,8 @@ function objectiveWatchdog(dt) {
   if (!obj) return;
   world.objStuckTime = (world.objStuckTime || 0) + dt;
   if (obj.type !== 'clear') return;
-  const live = world.enemies.filter(e => !e.dead && !e.surrendered);
+  const live = world.enemies.filter(e =>
+    !e.dead && (!e.surrendered || !e.secured));
   // A stalled clear gets a coarse radio callout, never an x-ray marker. The direction is
   // relative and the range is deliberately broad: command can report a sector, not a head.
   if (world.objStuckTime > 60 && live.length
@@ -1549,7 +1577,8 @@ function checkObjectives(dt = 0) {
   if (obj.type === 'clear') {
     const [zx, zz, zr, zy] = obj.zone || [];
     done = world.enemies.every(e => {
-      if (e.dead || e.surrendered || (obj.excludeHvt && e.hvt)) return true;
+      if (e.dead || (e.surrendered && e.secured)
+          || (obj.excludeHvt && e.hvt)) return true;
       if (!obj.zone) return false;
       const dy = zy !== undefined ? Math.abs(e.pos.y - zy) : 0;
       return Math.hypot(e.pos.x - zx, e.pos.z - zz) > zr || dy > 4 ? true : false;
@@ -1557,13 +1586,20 @@ function checkObjectives(dt = 0) {
     if (obj.zone) {
       // zone-clear: no live enemy inside the zone
       done = !world.enemies.some(e => {
-        if (e.dead || e.surrendered || (obj.excludeHvt && e.hvt)) return false;
+        if (e.dead || (e.surrendered && e.secured)
+            || (obj.excludeHvt && e.hvt)) return false;
         const dy = zy !== undefined ? Math.abs(e.pos.y - zy) : Math.abs(e.pos.y - player.pos.y) * 0;
         return Math.hypot(e.pos.x - zx, e.pos.z - zz) <= zr && dy < 4;
       });
     }
+    if (done && obj.requireReach) done = inZone(player.pos, obj.requireReach);
   } else if (obj.type === 'rescue') {
-    done = !world.civilians.some(c => c.hostage && !c.dead && !c.rescued && inZone(c.pos, obj.zone));
+    // Bind the objective to the authored hostage group, not a transient current pose. A
+    // shield cut loose during the preceding firefight may already be escorting the player
+    // when this phase appears; `rescued` or an already-removed restraint must satisfy it.
+    const rescueTargets = world.civilians.filter(c =>
+      c.wasHostage && (!obj.zone || inZone(c.spawnPos, obj.zone)));
+    done = rescueTargets.every(c => c.dead || c.rescued || !c.hostage);
   } else if (obj.type === 'target') {
     done = world.enemies.every(e => !e.hvt || e.dead);
   } else if (obj.type === 'reach') {
@@ -1642,6 +1678,7 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     const rows = [
       ['Hostiles eliminated', world.stats.kills],
       ['Hostiles surrendered', world.stats.surrenders],
+      ['Detainees secured', world.stats.detaineesSecured],
       ['Detainee casualties', world.stats.detaineeKills],
       ['Accuracy', Math.round(acc * 100) + '%'],
       ['Civilian casualties', world.stats.civKills],
@@ -1854,6 +1891,16 @@ function frame() {
   for (const e of world.enemies) e.update(sdt, world);
   for (const a of world.allies) a.update(sdt, world);
   for (const c of world.civilians) c.update(sdt, world);
+  // Securing is physical, like cutting loose a hostage: close the final metre and the
+  // surrendered soldier drops to both knees. Until then he remains a compliant but
+  // unsecured person whose location still matters to the clear objective.
+  for (const enemy of world.enemies) {
+    if (!enemy.surrendered || enemy.secured || enemy.dead) continue;
+    if (Math.abs(player.pos.y - enemy.pos.y) > 2.0) continue;
+    if (Math.hypot(
+      player.pos.x - enemy.pos.x, player.pos.z - enemy.pos.z) > 1.65) continue;
+    enemy.secure(world, 'you');
+  }
   for (let i = world.effects.length - 1; i >= 0; i--) if (world.effects[i](dt)) world.effects.splice(i, 1);
 
   // markers on whatever the current objective actually wants from you
@@ -1927,8 +1974,12 @@ function frame() {
   hud.ammo(weapons.ammo.mag, weapons.ammo.reserve, weapons.grenades, weapons.flashes);
   hud.weapon(weapons.spec.name + (weapons.reloading > 0 ? ' — RELOADING' : ''));
   const remaining = world.enemies.filter(e => !e.dead && !e.surrendered).length;
-  const detained = world.enemies.filter(e => e.surrendered).length;
+  const awaitingSecurity = world.enemies.filter(
+    e => !e.dead && e.surrendered && !e.secured).length;
+  const detained = world.enemies.filter(
+    e => !e.dead && e.surrendered && e.secured).length;
   let scoreLine = `HOSTILES: ${remaining}`;
+  if (awaitingSecurity) scoreLine += ` · SURRENDERED: ${awaitingSecurity}`;
   if (detained) scoreLine += ` · DETAINED: ${detained}`;
   scoreLine += ` · SCORE: ${Math.max(0, world.stats.score)}`;
   if (world.ctMission) scoreLine += ` · TEAM: ${world.allies.filter(a => !a.dead).length}/${world.allies.length}`;
@@ -1958,6 +2009,7 @@ for (const b of document.querySelectorAll('.menu-btn, #menu-refresh')) {
 // expose for debugging + QA
 window.BP = {
   get world() { return world; },
+  get scene() { return scene; },
   get player() { return player; },
   get weapons() { return weapons; },
   get mode() { return mode; },

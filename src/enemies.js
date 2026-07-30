@@ -51,6 +51,7 @@ export class Enemy {
     this.diff = diff;
     this.dead = false;
     this.surrendered = false;
+    this.secured = false;
     this.executed = false;
     this.deathAnim = 0;
     this.patrol = (def.patrol || []).map(p => ({ x: p[0], z: p[1] }));
@@ -172,6 +173,7 @@ export class Enemy {
     const stunnedEnough = reason === 'flash' && this.suppression >= 0.78;
     if (!force && !hurtEnough && !stunnedEnough) return false;
     this.surrendered = true;
+    this.secured = false;
     this.state = 'surrender';
     this.path = null;
     this.pathGoal = null;
@@ -186,6 +188,16 @@ export class Enemy {
     dropWeaponRig(this.mesh, this.scene, floor === -Infinity ? this.pos.y : floor);
     surrenderPoseRig(this.mesh);
     world.onEnemySurrendered?.(this, reason);
+    return true;
+  }
+
+  secure(world, by = 'you') {
+    if (this.dead || !this.surrendered || this.secured) return false;
+    this.secured = true;
+    this.state = 'secured';
+    this.moving = false;
+    surrenderPoseRig(this.mesh, true);
+    world.onEnemySecured?.(this, by);
     return true;
   }
 

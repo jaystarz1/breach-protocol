@@ -690,10 +690,10 @@ export function kneelRig(g, k) {
   // the rest of the body. Nothing to do here, and adding a second offset would double it.
 }
 
-export function surrenderPoseRig(g) {
+export function surrenderPoseRig(g, secured = false) {
   const r = g.userData.rig;
   if (!r) return false;
-  if (r.authored) return poseAuthoredSurrender(g);
+  if (r.authored) return poseAuthoredSurrender(g, secured);
   r.lLeg.rotation.x = -0.72;
   r.lLeg.userData.shin.rotation.x = 1.25;
   r.rLeg.rotation.x = -1.05;
@@ -704,7 +704,7 @@ export function surrenderPoseRig(g) {
   r.rArm.userData.fore.rotation.x = -1.18;
   if (!r.surrenderBaseY) r.surrenderBaseY = g.children.map(c => c.position.y);
   for (let i = 0; i < g.children.length; i++) {
-    g.children[i].position.y = r.surrenderBaseY[i] - 0.28;
+    g.children[i].position.y = r.surrenderBaseY[i] - (secured ? 0.46 : 0.28);
   }
   return true;
 }
@@ -1096,6 +1096,32 @@ export function car(x, z, rotZAxis = false, color = null, opts = {}) {
   B(0.15, -0.92, 0.95, 1.9, 0.06, 0.06, trim);          // side rubbing strips
   B(0.15, 0.92, 0.95, 1.9, 0.06, 0.06, trim);
   return out;
+}
+
+// A full-size military cargo truck. Collision stays deliberately simple and authoritative;
+// the desktop visual layer replaces it with a detailed six-wheel cab, chassis and canvas bed.
+export function militaryTruck(x, z, rotZAxis = false, opts = {}) {
+  const color = opts.color ?? 0x3f4938;
+  if (window.__bpVisualProps) {
+    window.__bpVisualProps.push({
+      kind: 'military-truck',
+      x, z, rotZAxis, color,
+      damage: opts.damage ?? 1,
+      canvas: opts.canvas !== false,
+    });
+    return [[
+      x, 1.35, z,
+      rotZAxis ? 2.45 : 6.6, 2.7,
+      rotZAxis ? 6.6 : 2.45,
+      color, true, false, false,
+    ]];
+  }
+  return [[
+    x, 1.35, z,
+    rotZAxis ? 2.45 : 6.6, 2.7,
+    rotZAxis ? 6.6 : 2.45,
+    color, true,
+  ]];
 }
 
 // Marked unit. Same shell, black-and-white livery, push bar, and a light bar whose lenses are

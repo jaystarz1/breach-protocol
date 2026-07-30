@@ -1,4 +1,6 @@
-import { C, floorSlab, wall, stairs, crate, car, policeCar, marketStall } from '../levelgen.js';
+import {
+  C, floorSlab, wall, stairs, crate, car, militaryTruck, policeCar, marketStall,
+} from '../levelgen.js';
 import { quality } from '../quality.js';
 import { streetShopLayout } from '../mission-variants.js';
 import {
@@ -1315,7 +1317,7 @@ export const LEVELS = [
   // ---------------------------------------------------------------- 10
   {
     id: 10, name: 'HOLD DISTRICT',
-    brief: 'The main assault has begun. Breach the forward compound and hold its fire-control tower through three assault waves so OP Alpha, OP Bravo and the captured relay can rebuild the drone link. Use that network to break the armour, guns and jammer supporting the attack, then clear BASTION’s bunker. He is using detained civilians as a last screen.',
+    brief: 'The main assault has begun. Breach the forward compound and seize the armed drone on its fire-control roof. Use its rifle and jury-rigged grenades to break the infantry wave, then use the rebuilt observation network against the armour, guns and jammer supporting the attack. Clear BASTION’s bunker; he is using detained civilians as a last screen.',
     weapons: ['pistol', 'm4'], grenades: 4, flashes: 4, squad: 3,
     sky: 0x1e2835, fog: [0x1e2835, 40, 170], ambient: 0.85, sun: 1.15,
     start: [0, 0, 42, 0],
@@ -1334,8 +1336,16 @@ export const LEVELS = [
       g.push(...wall(-30, 30, -30, -40, 4, C.concrete));
       g.push(...wall(30, 30, 30, -40, 4, C.concrete));
       g.push(...wall(-30, -40, 30, -40, 4, C.concrete));
-      // courtyard cover
-      g.push(...car(-8, 20)); g.push(...car(10, 16, true)); g.push(...crate(0, 10), ...crate(-14, 6), ...crate(14, 2));
+      // A working military yard, not an empty slab. The trucks form two offset sweep lanes:
+      // each has enough space to clear both sides, but none offers a straight sightline from
+      // the gate to the tower. Two damaged staff cars keep the compound from looking staged.
+      g.push(...militaryTruck(-20, 18, true, { damage: 2 }));
+      g.push(...militaryTruck(20, 10, true, { damage: 1 }));
+      g.push(...militaryTruck(-12, 1, false, { damage: 3, canvas: false }));
+      g.push(...car(11, 20, false, null, { variant: 2, damage: 2 }));
+      g.push(...car(24, 23, true, 0x4a4938, { variant: 2, damage: 0 }));
+      g.push(...car(-25, -4, true, 0x343a33, { variant: 2, damage: 0 }));
+      g.push(...crate(0, 13), ...crate(-14, 9), ...crate(14, 2));
       // the tower (2 floors + roof) at courtyard north
       g.push(...tower(0, -10, 16, 14, 2));
       // stair trench down: from courtyard level at z=-16 descending south to bunker door at z=-24
@@ -1350,7 +1360,10 @@ export const LEVELS = [
       g.push(...wall(14, -24, 14, -44, 4.98, C.tunnel, [], -5));
       g.push(...wall(30, -24, 30, -44, 4.98, C.tunnel, [], -5));
       g.push(...wall(14, -44, 30, -44, 4.98, C.tunnel, [], -5));
-      g.push(...wall(14, -24, 30, -24, 4.98, C.tunnel, [{ off: 7, w: 2.4, h: 2.6 }], -5));
+      // Opening centre is x=22.2, exactly matching the authored blast door below. The old
+      // x=21 opening left 1.2m of brick in front of the door and made it appear wall-less
+      // from one side while remaining bypassable from the other.
+      g.push(...wall(14, -24, 30, -24, 4.98, C.tunnel, [{ off: 8.2, w: 2.4, h: 2.6 }], -5));
       g.push(...floorSlab(22, -34, 16, 20, 0.2, 0.4, C.concrete)); // bunker ceiling / courtyard surface
       // Compound wall tags and bunker-interior boards: the bunker is the climax room and it
       // was four flat panels of tunnel grey.
@@ -1422,17 +1435,41 @@ export const LEVELS = [
       ] },
     objectives: [
       { type: 'clear', zone: [0, 10, 34], text: 'TAKE THE COURTYARD' },
-      { type: 'clear', zone: [0, -10, 14, 8], text: 'CLEAR THE TOWER' },
       {
-        type: 'defend',
-        text: 'HOLD FIRE-CONTROL TOWER — KEEP THE DRONE LINK ONLINE',
-        zone: [0, -10, 10, 6],
-        duration: 32,
-        waves: [
-          {
-            at: 0,
-            baseCount: 3,
-            enemies: [
+        type: 'clear',
+        zone: [0, -10, 14, 8],
+        requireReach: [0, -10, 8, 6],
+        text: 'CLEAR THE TOWER — REACH THE ROOFTOP DRONE',
+      },
+      {
+        type: 'drone',
+        mode: 'combat',
+        label: 'FIRE-CONTROL ROOF // ARMED UAS',
+        text: 'TAKE CONTROL OF THE ROOFTOP DRONE — BREAK THE ASSAULT WAVE',
+        launch: [0, 6.45, -10],
+        yaw: Math.PI,
+        keepStackVisible: true,
+        rifleRounds: 100,
+        grenades: 10,
+        result: 'GROUND ASSAULT BROKEN — SUPPORT GROUP EXPOSED',
+        combatWave: {
+          label: 'FINAL ASSAULT WAVE',
+          baseCount: 11,
+          minCount: 10,
+          maxCount: 12,
+          vehicle: {
+            kind: 'technical',
+            health: 190,
+            speed: 4,
+            pos: [0, 0, 35],
+            positions: [[0, 0, 35], [-6, 0, 33], [6, 0, 34]],
+            patrols: [
+              [[0, 29], [0, 18], [0, 7]],
+              [[-6, 28], [-4, 17], [-2, 6]],
+              [[6, 29], [4, 18], [2, 7]],
+            ],
+          },
+          enemies: [
               { pos: [-24, 0, 26], positions: [[-24, 0, 26], [-10, 0, 28], [-26, 0, 15]],
                 patrols: [[[-24, 26], [-8, 14]], [[-10, 28], [-3, 12]], [[-26, 15], [-10, 8]]] },
               { pos: [24, 0, 26], positions: [[24, 0, 26], [25, 0, 15], [11, 0, 28]],
@@ -1441,12 +1478,6 @@ export const LEVELS = [
                 patrols: [[[0, 28], [0, 12]], [[-20, 25], [-5, 9]], [[20, 25], [5, 9]]] },
               { pos: [-18, 0, 28], positions: [[-18, 0, 28], [18, 0, 28], [0, 0, 27]],
                 patrols: [[[-18, 28], [-4, 10]], [[18, 28], [4, 10]], [[0, 27], [0, 8]]] },
-            ],
-          },
-          {
-            at: 11,
-            baseCount: 3,
-            enemies: [
               { pos: [-29, 0, 16], positions: [[-29, 0, 16], [-25, 0, 9], [-12, 0, 28]],
                 patrols: [[[-29, 16], [-12, 2]], [[-25, 9], [-9, 1]], [[-12, 28], [-5, 7]]] },
               { pos: [29, 0, 14], positions: [[29, 0, 14], [13, 0, 28], [25, 0, 8]],
@@ -1455,12 +1486,6 @@ export const LEVELS = [
                 patrols: [[[0, 29], [6, 8]], [[-20, 26], [-6, 5]], [[20, 26], [6, 5]]] },
               { pos: [22, 0, 27], positions: [[22, 0, 27], [0, 0, 27], [-22, 0, 27]],
                 patrols: [[[22, 27], [4, 4]], [[0, 27], [0, 5]], [[-22, 27], [-4, 4]]] },
-            ],
-          },
-          {
-            at: 22,
-            baseCount: 3,
-            enemies: [
               { pos: [-26, 0, 25], positions: [[-26, 0, 25], [-15, 0, 28], [-27, 0, 10]],
                 patrols: [[[-26, 25], [-6, -2]], [[-15, 28], [-5, 1]], [[-27, 10], [-9, -2]]] },
               { pos: [26, 0, 24], positions: [[26, 0, 24], [27, 0, 10], [15, 0, 28]],
@@ -1469,9 +1494,8 @@ export const LEVELS = [
                 patrols: [[[-4, 29], [0, -4]], [[20, 26], [5, -3]], [[-20, 26], [-5, -3]]] },
               { pos: [16, 0, 29], positions: [[16, 0, 29], [-16, 0, 29], [0, 0, 28]],
                 patrols: [[[16, 29], [5, -5]], [[-16, 29], [-5, -5]], [[0, 28], [0, -4]]] },
-            ],
-          },
-        ],
+          ],
+        },
       },
       {
         type: 'drone',
@@ -1481,10 +1505,12 @@ export const LEVELS = [
         text: 'NETWORK ONLINE — BREAK THE SUPPORT GROUP',
         launch: [0, 6.45, -10],
         yaw: Math.PI,
+        // The battery is north of the compound, away from the player's southern insertion.
+        // All three targets are crewed firing positions, rather than abstract barricades.
         targets: [
-          { pos: [-18, 0.1, 47], kind: 'armor', label: 'ASSAULT ARMOUR', yaw: 0.15 },
-          { pos: [0, 0.1, 52], kind: 'artillery', label: 'FIRE SUPPORT', yaw: -0.18 },
-          { pos: [19, 0.1, 46], kind: 'ew', label: 'MOBILE JAMMER', yaw: 0.32 },
+          { pos: [-18, 0.1, -54], kind: 'artillery', label: 'GUN ONE', yaw: -0.12, firing: true },
+          { pos: [0, 0.1, -56], kind: 'artillery', label: 'GUN TWO', yaw: 0.08, firing: true },
+          { pos: [18, 0.1, -54], kind: 'artillery', label: 'GUN THREE', yaw: 0.16, firing: true },
         ],
       },
       { type: 'rescue', zone: [22, -34, 16, -5], text: 'BREACH THE BUNKER — CUT THE HUMAN SHIELDS LOOSE' },

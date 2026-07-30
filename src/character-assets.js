@@ -1565,11 +1565,44 @@ export function kneelAuthoredCharacter(root, amount) {
   rig.visual.rotation.x = -0.16 * amount;
 }
 
+function ensureSurrenderGloves(root, rig, bones) {
+  if (!rig.surrenderGloves) {
+    const material = new THREE.MeshStandardMaterial({
+      name: 'surrender-rounded-tactical-glove',
+      color: 0x171c18, roughness: 0.94, metalness: 0.01,
+    });
+    const geometry = new THREE.CapsuleGeometry(0.055, 0.075, 5, 10);
+    rig.surrenderGloves = [
+      [bones.wristL, findRigObject(rig.visual, 'Palm.L')],
+      [bones.wristR, findRigObject(rig.visual, 'Palm.R')],
+    ].filter(([wrist]) => wrist).map(([wrist, palm]) => {
+      const glove = new THREE.Mesh(geometry, material);
+      glove.name = 'surrender-rounded-glove';
+      glove.castShadow = glove.receiveShadow = quality.shadows;
+      root.add(glove);
+      return { glove, wrist, palm };
+    });
+  }
+  for (const { glove, wrist, palm } of rig.surrenderGloves) {
+    glove.visible = true;
+    root.updateMatrixWorld(true);
+    const start = root.worldToLocal(wrist.getWorldPosition(new THREE.Vector3()));
+    const end = palm
+      ? root.worldToLocal(palm.getWorldPosition(new THREE.Vector3()))
+      : start.clone().add(new THREE.Vector3(0, 0.16, 0));
+    const direction = end.clone().sub(start);
+    if (direction.lengthSq() < 0.001) direction.set(0, 1, 0);
+    glove.position.copy(start).lerp(end, 0.7);
+    glove.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0), direction.normalize());
+  }
+}
+
 // A surrender must read differently from both the civilian panic pose and a death sprawl.
 // Keep the torso upright and put the hands beside the head with bent elbows. The short arm
 // silhouette is intentional: a straight overhead V recreates the
 // rubber-limbed look that the authored civilian pass was meant to remove.
-export function poseAuthoredSurrender(root) {
+export function poseAuthoredSurrender(root, secured = false) {
   const rig = root.userData.rig;
   if (!rig?.authored || !rig.combatant) return false;
   rig.mixer.stopAllAction();
@@ -1577,19 +1610,33 @@ export function poseAuthoredSurrender(root) {
   const b = {
     upperL: node('UpperArm.L'), lowerL: node('LowerArm.L'), wristL: node('Wrist.L'),
     upperR: node('UpperArm.R'), lowerR: node('LowerArm.R'), wristR: node('Wrist.R'),
+    thighL: node('UpperLeg.L'), shinL: node('LowerLeg.L'),
+    thighR: node('UpperLeg.R'), shinR: node('LowerLeg.R'),
     head: node('Head'), spine: node('Spine2') || node('Spine1'),
   };
-  // Retain the clip's planted lower body. Forcing a generic skeleton into a kneel without a
-  // matching authored clip produces a split-legged contortion on some proportions; an
-  // upright, motionless detainee with both hands clearly off the weapon is the cleaner tell.
-  rig.visual.position.y = rig.baseVisualY;
-  rig.visual.rotation.set(0, 0, 0);
-  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(-0.46, 1.34, 0.08));
-  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(-0.18, 1.61, 0.02));
-  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(0.46, 1.34, 0.08));
-  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(0.18, 1.61, 0.02));
-  if (b.spine) b.spine.rotateX(-0.1);
-  if (b.head) b.head.rotateX(0.08);
+  const handY = secured ? 1.36 : 1.61;
+  const elbowY = secured ? 1.1 : 1.34;
+  rig.visual.position.y = rig.baseVisualY - (secured ? 0.4 : 0);
+  rig.visual.rotation.set(secured ? -0.12 : 0, 0, 0);
+  // These rigs name anatomical left/right from the actor's perspective. Their left shoulder
+  // is on positive root X, so same-sign targets keep both arms open instead of crossing them
+  // through the chest—the source of the old broken-looking surrender hands.
+  aimBone(root, b.upperL, b.lowerL, new THREE.Vector3(0.48, elbowY, 0.08));
+  aimBone(root, b.lowerL, b.wristL, new THREE.Vector3(0.2, handY, 0.02));
+  aimBone(root, b.upperR, b.lowerR, new THREE.Vector3(-0.48, elbowY, 0.08));
+  aimBone(root, b.lowerR, b.wristR, new THREE.Vector3(-0.2, handY, 0.02));
+  ensureSurrenderGloves(root, rig, b);
+  if (secured) {
+    // Fold both legs under the body only after the player reaches the detainee. The visual
+    // root sink keeps the feet on the floor while the bent thighs/shins read as a controlled
+    // kneel rather than a death fall.
+    b.thighL?.rotateX(-0.72);
+    b.shinL?.rotateX(1.25);
+    b.thighR?.rotateX(-0.9);
+    b.shinR?.rotateX(1.48);
+  }
+  if (b.spine) b.spine.rotateX(secured ? -0.18 : -0.1);
+  if (b.head) b.head.rotateX(secured ? 0.15 : 0.08);
   root.userData.bob = 0;
   return true;
 }

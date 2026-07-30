@@ -308,12 +308,7 @@ def main():
                 json.dumps(row["reinforcementSockets"], sort_keys=True)
                 for row in rows[:3]
             }) == 3, level
-        if "10" in results:
-            assert len({
-                json.dumps(row["defenseWaveSignature"], sort_keys=True)
-                for row in results["10"][:3]
-            }) == 3
-        for level in [key for key in ["2", "7"] if key in results]:
+        for level in [key for key in ["2", "7", "10"] if key in results]:
             assert len({
                 json.dumps(row["droneWaveSignature"], sort_keys=True)
                 for row in results[level][:3]

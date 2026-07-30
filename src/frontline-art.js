@@ -1875,6 +1875,83 @@ function addRelayRooftop(scene) {
   opticLens.name = 'relay-spotter-objective-lens';
 }
 
+function addBurningWreck(scene, x, z, seed = 0) {
+  const root = new THREE.Group();
+  root.name = `compound-burning-wreck-${seed}`;
+  root.position.set(x, 0, z);
+  const flameMaterial = new THREE.MeshBasicMaterial({
+    name: 'compound-wreck-flame',
+    color: 0xff7a2f,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const hotMaterial = new THREE.MeshBasicMaterial({
+    name: 'compound-wreck-flame-core',
+    color: 0xffd37a,
+    transparent: true,
+    opacity: 0.82,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const smokeMaterial = new THREE.MeshStandardMaterial({
+    name: 'compound-wreck-drifting-smoke',
+    color: 0x252a2a,
+    roughness: 1,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.2,
+    depthWrite: false,
+  });
+  const flames = [];
+  for (let i = 0; i < 4; i++) {
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.22 + i * 0.035, 0.9 + i * 0.12, 9),
+      i === 0 ? hotMaterial : flameMaterial,
+    );
+    flame.position.set(-0.55 + i * 0.36, 1.36 + (i % 2) * 0.13, (i % 2 ? 0.18 : -0.2));
+    flame.rotation.z = (i - 1.5) * 0.08;
+    flame.frustumCulled = false;
+    root.add(flame);
+    flames.push(flame);
+  }
+  const smoke = [];
+  for (let i = 0; i < 5; i++) {
+    const puff = new THREE.Mesh(
+      new THREE.SphereGeometry(0.48, 10, 7), smokeMaterial);
+    puff.frustumCulled = false;
+    root.add(puff);
+    smoke.push(puff);
+  }
+  scene.add(root);
+  let clock = seed * 0.71;
+  (scene.userData.frontlineEffects ||= []).push(dt => {
+    clock += dt;
+    for (let i = 0; i < flames.length; i++) {
+      const pulse = 0.82 + Math.sin(clock * (8.2 + i * 0.7) + i * 1.9) * 0.18;
+      flames[i].scale.set(0.8 + pulse * 0.28, pulse, 0.8 + pulse * 0.2);
+      flames[i].rotation.y = clock * (0.9 + i * 0.11);
+    }
+    for (let i = 0; i < smoke.length; i++) {
+      const phase = (clock * 0.12 + i / smoke.length) % 1;
+      puffPosition(smoke[i], phase, i);
+    }
+    return false;
+  });
+
+  function puffPosition(puff, phase, index) {
+    puff.visible = phase > 0.03;
+    puff.position.set(
+      -0.45 + phase * 1.65 + Math.sin(clock * 0.7 + index) * 0.13,
+      1.65 + phase * 5.2,
+      (index % 2 ? 0.24 : -0.2) + phase * 0.72,
+    );
+    const size = 0.5 + phase * 1.55;
+    puff.scale.set(size * 1.18, size, size);
+  }
+}
+
 export function addFrontlineMissionArt(scene, levelId) {
   if (!quality.desktop) return;
   const frontline = frontlineMaterials();
@@ -2574,6 +2651,11 @@ export function addFrontlineMissionArt(scene, levelId) {
   }
 
   if (levelId === 10) {
+    // Two damaged vehicles are still burning, enough motion to establish an active frontline
+    // without filling the compound with expensive particle emitters or opaque smoke walls.
+    addBurningWreck(scene, 24, 23, 1);
+    addBurningWreck(scene, -25, -4, 2);
+
     // Prepared fallback line outside the compound gate.
     const bags = [];
     for (const side of [-1, 1]) for (let i = 0; i < 9; i++) {

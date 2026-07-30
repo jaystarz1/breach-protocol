@@ -115,6 +115,42 @@ def main():
         }""")
         page.wait_for_timeout(100)
         page.screenshot(path=str(output / "surrender-state.png"), timeout=90000)
+        page.evaluate("""() => {
+          const candidate = window.__QA_SURRENDERED;
+          BP.player.pos.set(candidate.pos.x, candidate.pos.y, candidate.pos.z + 0.7);
+        }""")
+        page.wait_for_function("() => window.__QA_SURRENDERED.secured")
+        security = page.evaluate("""async () => {
+          const THREE = await import('./lib/three.module.js');
+          const candidate = window.__QA_SURRENDERED;
+          const rig = candidate.mesh.userData.rig;
+          const find = name => {
+            let result = null;
+            const expected = name.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            rig.visual.traverse(object => {
+              const actual = (object.name || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+              if (!result && (actual === expected || actual.endsWith(expected))) result = object;
+            });
+            return result;
+          };
+          const local = object => candidate.mesh.worldToLocal(
+            object.getWorldPosition(new THREE.Vector3())).toArray()
+              .map(value => +value.toFixed(3));
+          candidate.mesh.updateMatrixWorld(true);
+          window.__QA_SECURE_SCORE = BP.world.stats.score;
+          return {
+            secured: candidate.secured,
+            state: candidate.state,
+            visualDrop: +(rig.baseVisualY - rig.visual.position.y).toFixed(3),
+            wristL: local(find('Wrist.L')),
+            wristR: local(find('Wrist.R')),
+            stats: {
+              surrenders: BP.world.stats.surrenders,
+              detaineesSecured: BP.world.stats.detaineesSecured,
+            },
+          };
+        }""")
+        page.screenshot(path=str(output / "secured-kneel.png"), timeout=90000)
         execution = page.evaluate("""() => {
           const candidate = window.__QA_SURRENDERED;
           candidate.damage(99999, BP.world, true, false);
@@ -123,7 +159,7 @@ def main():
               surrenders: BP.world.stats.surrenders,
               detaineeKills: BP.world.stats.detaineeKills,
               kills: BP.world.stats.kills,
-              scoreDelta: BP.world.stats.score - window.__QA_SURRENDER_SCORE,
+              scoreDelta: BP.world.stats.score - window.__QA_SECURE_SCORE,
             },
             actor: {
               dead: candidate.dead,
@@ -132,6 +168,7 @@ def main():
             },
           };
         }""")
+        result["security"] = security
         result["execution"] = execution
         result["errors"] = errors[:10]
         result["screenshot"] = str(output / "surrender-state.png")
@@ -145,12 +182,24 @@ def main():
         assert result["posture"]["wristL"] and result["posture"]["wristR"], result
         assert result["posture"]["wristL"][1] > 1.45, result
         assert result["posture"]["wristR"][1] > 1.45, result
+        assert result["posture"]["wristL"][0] > 0, result
+        assert result["posture"]["wristR"][0] < 0, result
         assert result["posture"]["elbowL"][1] < result["posture"]["wristL"][1], result
         assert result["posture"]["elbowR"][1] < result["posture"]["wristR"][1], result
         assert result["ignoredBySquad"], result
         assert result["refusedWithSupport"], result
         assert result["statsBeforeExecution"] == {
             "surrenders": 1, "detaineeKills": 0, "kills": 0,
+        }, result
+        assert result["security"]["secured"], result
+        assert result["security"]["state"] == "secured", result
+        assert result["security"]["visualDrop"] > 0.35, result
+        assert result["security"]["wristL"][1] > 1.15, result
+        assert result["security"]["wristR"][1] > 1.15, result
+        assert result["security"]["wristL"][0] > 0, result
+        assert result["security"]["wristR"][0] < 0, result
+        assert result["security"]["stats"] == {
+            "surrenders": 1, "detaineesSecured": 1,
         }, result
         assert result["execution"]["stats"]["surrenders"] == 1, result
         assert result["execution"]["stats"]["detaineeKills"] == 1, result

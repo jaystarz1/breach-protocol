@@ -59,6 +59,22 @@ def main():
             canvasFilter: document.getElementById('game-canvas').style.filter,
             mask: !!document.querySelector('.drone-optic-mask'),
           },
+          thermal: (() => {
+            const actor = BP.world.drone.combatants[0];
+            const meshVisible = actor.mesh.visible;
+            actor.mesh.visible = false;
+            BP.world.drone.updateThermalSignatures();
+            const survivesHiddenMesh = BP.world.drone.thermalSignatures[0].visible;
+            actor.mesh.visible = meshVisible;
+            return {
+              count: BP.world.drone.thermalSignatures.length,
+              visible: BP.world.drone.thermalSignatures
+                .filter(signature => signature.visible).length,
+              survivesHiddenMesh,
+              depthTested: BP.world.drone.thermalSignatures.every(signature =>
+                signature.children.every(mesh => mesh.material.depthTest)),
+            };
+          })(),
         })""")
         page.wait_for_timeout(900)
         level2_movement = page.evaluate("""before => {
@@ -222,6 +238,10 @@ def main():
         assert level2_before["optics"]["fov"] == 78
         assert "grayscale(1)" in level2_before["optics"]["canvasFilter"]
         assert level2_before["optics"]["mask"]
+        assert level2_before["thermal"]["count"] == level2_before["combatants"] + 1
+        assert level2_before["thermal"]["visible"] == level2_before["thermal"]["count"]
+        assert level2_before["thermal"]["survivesHiddenMesh"]
+        assert level2_before["thermal"]["depthTested"]
         assert level2_before["staticTargets"] == 0
         assert level2_before["stackVisible"]
         assert level2_movement["moved"] == level2_before["combatants"]
