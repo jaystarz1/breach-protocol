@@ -509,7 +509,7 @@ function box(scene, w, h, d, material, x, y, z) {
   return mesh;
 }
 
-function facade(scene, x, normal, material, batches) {
+function facade(scene, x, normal, material, seedOffset, batches) {
   // wall() is a 30cm-thick box, so its street face is already 15cm proud of the authored
   // centreline. Clear that face by 12mm or the finish plane sits invisibly inside the wall.
   plane(scene, 110, 8.9, material, x + normal * 0.162, 4.5, 0, 0,
@@ -518,6 +518,9 @@ function facade(scene, x, normal, material, batches) {
   // grazing light. Texture detail cannot repair an unbroken box silhouette by itself.
   for (const y of [3.0, 6.0, 8.75]) {
     batches.stone.push({ x: x + normal * 0.20, y, z: 0, w: 0.22, h: 0.14, d: 110 });
+  }
+  for (let z = -52 + seedOffset; z < 53; z += 12.8) {
+    batches.trim.push({ x: x + normal * 0.21, y: 4.45, z, w: 0.24, h: 8.8, d: 0.28 });
   }
   plane(scene, 110, 0.75, materials().damp, x + normal * 0.166, 0.5, 0, 0,
     normal > 0 ? Math.PI / 2 : -Math.PI / 2);
@@ -608,16 +611,18 @@ function streetLights(scene) {
 export function addStreetSweepArt(scene, solids, missionVariant = 0) {
   if (!quality.pbr) return;
   const m = materials();
-  const facadeBatches = { stone: [] };
+  const facadeBatches = { stone: [], trim: [] };
   plane(scene, 60, 130, m.asphalt, 0, 0.006, 0);
   plane(scene, 8, 120, m.sidewalk, -12, 0.156, 0);
   plane(scene, 8, 120, m.sidewalk, 12, 0.156, 0);
   box(scene, 0.22, 0.15, 120, m.curb, -8.03, 0.075, 0);
   box(scene, 0.22, 0.15, 120, m.curb, 8.03, 0.075, 0);
-  facade(scene, -16, 1, m.brick, facadeBatches);
-  facade(scene, 16, -1, m.plaster, facadeBatches);
+  facade(scene, -16, 1, m.brick, 0, facadeBatches);
+  facade(scene, 16, -1, m.plaster, 5.5, facadeBatches);
   instanceBatch(scene, 'facade-floor-bands', new THREE.BoxGeometry(1, 1, 1),
     m.stone, facadeBatches.stone);
+  instanceBatch(scene, 'facade-pilasters', new THREE.BoxGeometry(1, 1, 1),
+    m.trim, facadeBatches.trim);
   storefronts(scene, solids, missionVariant);
   roadDamage(scene);
   roadMarkings(scene);

@@ -218,9 +218,18 @@ def main():
                 # Their variants must stay in the identical authored island. Open missions
                 # instead require every initial actor to be directly path-reachable.
                 if level in {"1", "3", "6", "7", "8", "10"}:
-                    assert [
+                    actor_components = [
                         actor["component"] for actor in row["nav"]["actors"]
-                    ] == baseline_components, (level, row)
+                    ]
+                    assert actor_components == baseline_components, (
+                        level,
+                        {
+                            "variant": row["variant"],
+                            "baselineComponents": baseline_components,
+                            "actorComponents": actor_components,
+                            "actors": row["nav"]["actors"],
+                        },
+                    )
                 else:
                     assert all(
                         actor["reachable"] for actor in row["nav"]["actors"]
