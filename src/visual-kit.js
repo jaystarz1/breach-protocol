@@ -1427,8 +1427,12 @@ function addMilitaryTruck(batcher, def) {
       metalness: 0.16,
       clearcoat: 0.12,
       clearcoatRoughness: 0.72,
+      // The procedural loft shares rings between both flanks. Render both windings so the
+      // camera always receives the near hull surface as an occluder; with front faces only,
+      // an oblique side view could expose the opposite axle through the culled flank.
+      side: THREE.DoubleSide,
     }));
-  const chassis = standard('military-truck-chassis', 0x171b18, 0.78, 0.48);
+  const chassis = standard('military-truck-chassis', 0x293028, 0.8, 0.38);
   const rubber = standard('military-truck-rubber', 0x090b0a, 0.98, 0);
   const steel = standard('military-truck-steel', 0x59605a, 0.62, 0.58);
   const glass = standard('military-truck-glass', 0x101b1d, 0.24, 0.22);
@@ -1466,8 +1470,12 @@ function addMilitaryTruck(batcher, def) {
     // Unlike the first blockout, the cab is a single curved loft with tapered nose, shoulders
     // and roof. It uses the same authored-surface method as the sedan/SUV kit.
     batcher.add('military-truck-authored-cab', MILITARY_TRUCK_CAB_GEO, paint, parent);
+    // A continuous opaque belly sits just inboard of the tyres. The earlier wafer-thin rail
+    // left open air beneath the cab and load body, allowing the far-side wheels to project
+    // through the shell at close first-person angles. Its side faces now act as the real
+    // chassis/wheel-well backing while the near tyres remain proud of it.
     batcher.add('military-chassis-boxes', UNIT_BOX, chassis,
-      instanceMatrix(parent, 0.12, 0.62, 0, 6.35, 0.24, 2.02));
+      instanceMatrix(parent, 0.12, 0.68, 0, 6.35, 0.62, 2.02));
     for (const side of [-1, 1]) {
       batcher.add('military-glass-boxes', UNIT_BOX, glass,
         instanceMatrix(parent, -2.15, 1.78, side * 1.086, 1.12, 0.64, 0.026));
@@ -1553,6 +1561,10 @@ function addMilitaryTruck(batcher, def) {
 
   if (family === 8) {
     batcher.add('military-wheeled-apc-hull', MILITARY_APC_HULL_GEO, paint, parent);
+    // Opaque lower hull: prevents the wheels on the opposite side from being visible through
+    // the shallow lower section of the loft while retaining the exposed BTR wheel silhouette.
+    batcher.add('military-chassis-boxes', UNIT_BOX, chassis,
+      instanceMatrix(parent, 0, 0.64, 0, 6.3, 0.64, 2.32));
     wheels([-2.55, -0.85, 0.85, 2.55], 1.42, 1.18);
     for (const side of [-0.48, 0.48]) {
       batcher.add('military-glass-boxes', UNIT_BOX, glass,
@@ -1568,6 +1580,8 @@ function addMilitaryTruck(batcher, def) {
     }
   } else {
     batcher.add('military-bmp-hull', MILITARY_BMP_HULL_GEO, paint, parent);
+    batcher.add('military-chassis-boxes', UNIT_BOX, chassis,
+      instanceMatrix(parent, 0, 0.64, 0, 6.0, 0.64, 2.36));
     for (const side of [-1, 1]) {
       batcher.add('military-bmp-tracks', MILITARY_TRACK_GEO, rubber,
         instanceMatrix(parent, 0, 0.58, side * 1.39, 1.02, 1.42, 0.72, 0, 0, Math.PI / 2));

@@ -93,6 +93,21 @@ def main():
         }""")
         page.wait_for_timeout(250)
         page.screenshot(path=str(output / "military-compound.png"))
+        # Close side views catch far-side wheel bleed that is invisible in the wide compound
+        # establishing shot. These place the camera square to the tanker, BTR and BMP lower
+        # hulls so their opaque wheel-well backing can be reviewed directly.
+        for filename, position, yaw in [
+            ("military-tanker-wheel-occlusion.png", [-19, 0, 8], 1.5708),
+            ("military-apc-wheel-occlusion.png", [0, 0, 6], 3.14159),
+            ("military-bmp-track-occlusion.png", [19, 0, 16], -1.5708),
+        ]:
+            page.evaluate("""view => {
+              BP.player.pos.set(...view.position);
+              BP.player.yaw = view.yaw;
+              BP.player.pitch = -0.08;
+            }""", {"position": position, "yaw": yaw})
+            page.wait_for_timeout(160)
+            page.screenshot(path=str(output / filename))
         page.evaluate("""() => {
           BP.player.pos.set(-0.8, 0, 1.2);
           BP.player.yaw = 0;
@@ -246,6 +261,9 @@ def main():
             "won": page.evaluate("() => BP.world.won"),
             "screenshots": [
                 "military-compound.png",
+                "military-tanker-wheel-occlusion.png",
+                "military-apc-wheel-occlusion.png",
+                "military-bmp-track-occlusion.png",
                 "tower-front-door.png",
                 "bunker-entrance.png",
                 "rooftop-armed-uav.png",
