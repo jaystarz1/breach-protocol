@@ -1336,26 +1336,33 @@ export const LEVELS = [
       g.push(...wall(-30, 30, -30, -40, 4, C.concrete));
       g.push(...wall(30, 30, 30, -40, 4, C.concrete));
       g.push(...wall(-30, -40, 30, -40, 4, C.concrete));
-      // Twenty-vehicle supply compound. Every slot receives a distinct configuration:
-      // canvas cargo, open troop carrier, fuel bowser, command van, ambulance, loaded flatbed,
-      // recovery truck, launcher carrier, wheeled APC or tracked BMP. Rows hug the perimeter
-      // while three departure-lane vehicles point toward the gate, leaving 3–6m search aisles.
+      // Battalion motor pool: cargo trucks are backed toward the perimeter, side by side.
+      // Six-metre spacing leaves roughly 3.5m between bodies, and their centres sit far enough
+      // inboard to form a narrow wall-side work lane. Reinforcement sockets live in those lanes,
+      // fully occluded by the trucks, so arriving troops emerge through visible vehicle gaps.
       const motorPool = [
-        // west wall, nose-to-tail
-        [-25, 24, true], [-25, 16, true], [-25, 8, true], [-25, 0, true],
-        [-25, -8, true], [-25, -16, true], [-25, -24, true], [-25, -32, true],
-        // east wall stops before the bunker excavation
-        [25, 24, true], [25, 16, true], [25, 8, true], [25, 0, true], [25, -8, true],
-        // southern marshalling line, preserving the central gate
-        [-18, 24, false], [-10, 24, false], [10, 24, false], [18, 24, false],
-        // three vehicles staged to pull out
-        [-13, 12, false], [0, 12, false], [13, 12, false],
+        // west wall: rear ends toward x=-30, cabs facing into the yard
+        [-24, 24, false, true], [-24, 18, false, true],
+        [-24, 12, false, true], [-24, 6, false, true],
+        [-24, 0, false, true], [-24, -6, false, true],
+        [-24, -12, false, true], [-24, -18, false, true],
+        [-24, -24, false, true],
+        // east wall stops above the bunker excavation and stair trench
+        [24, 24, false, false], [24, 18, false, false], [24, 12, false, false],
+        [24, 6, false, false], [24, 0, false, false], [24, -6, false, false],
+        [24, -12, false, false],
+        // gate wall, split around the entrance; rears toward z=30
+        [-18, 24, true, true], [-12, 24, true, true], [-7, 24, true, true],
+        [7, 24, true, true], [12, 24, true, true], [18, 24, true, true],
+        // rear-wall overflow west of the bunker; rears toward z=-40
+        [-24, -34, true, false], [-18, -34, true, false], [-12, -34, true, false],
       ];
-      motorPool.forEach(([x, z, turned], variant) => {
+      motorPool.forEach(([x, z, turned, reverse], variant) => {
         g.push(...militaryTruck(x, z, turned, {
           variant,
           damage: 1 + variant % 4,
           canvas: variant % 10 === 0,
+          reverse,
         }));
       });
       // Only untarped civilian wrecks burn. They use the recognizable sedan/SUV shell with
@@ -1410,15 +1417,6 @@ export const LEVELS = [
     ],
     enemies: [
       // courtyard
-      // Two open troop carriers each hold a three-man ready detail. They remain visibly in
-      // the beds until the player approaches or gunfire starts, then dismount into individual
-      // clear-space sockets in the sweep aisles.
-      { pos: [-24.5, 1.4, 15.6], vehicleExit: [-22, 0, 17], yaw: 90 },
-      { pos: [-25, 1.4, 14.8], vehicleExit: [-22, 0, 15], yaw: 90 },
-      { pos: [-25.5, 1.4, 13.8], vehicleExit: [-22, 0, 13], yaw: 90 },
-      { pos: [25.5, 1.4, -0.4], vehicleExit: [22, 0, 2], yaw: -90 },
-      { pos: [25, 1.4, -1.2], vehicleExit: [22, 0, 0], yaw: -90 },
-      { pos: [24.5, 1.4, -2.2], vehicleExit: [22, 0, -2], yaw: -90 },
       { pos: [-6, 0, 18], positions: [[-6, 0, 18], [5, 0, 20], [-14, 0, 13]],
         patrols: [[[-6, 18], [6, 18]], [[5, 20], [-9, 20]], [[-14, 13], [-3, 9]]] },
       { pos: [12, 0, 8], positions: [[12, 0, 8], [16, 0, 14], [10, 0, 22]],
@@ -1458,13 +1456,29 @@ export const LEVELS = [
       { pos: [20, -5, -39], hostage: true }, { pos: [24, -5, -39.2], hostage: true },
     ],
     crowdSpawns: [[16, 0, 18]],
-    // Endgame: the compound keeps feeding men through the gate until you take the tower.
+    // Workers and ready troops respond in three waves from behind the parked trucks. These
+    // exact wall-side sockets are hidden-spawn-only: if the player is looking into one lane,
+    // that wave selects another occluded row or waits rather than beaming a soldier into view.
     reinforce: { every: 22, first: 26, max: 9, group: 3, range: 70,
-      at: [[0, 0, 27], [-24, 0, 24], [24, 0, 24]],
+      hidden: true, scatter: 0, minDistance: 10,
+      at: [
+        [-28.6, 0, 15], [-28.6, 0, -9],
+        [28.6, 0, 15], [28.6, 0, -9],
+        [-9, 0, 28.6], [-15, 0, -38.6],
+      ],
       atVariants: [
-        [[0, 0, 27], [-24, 0, 24], [24, 0, 24]],
-        [[-9, 0, 27], [23, 0, 20], [-22, 0, 13]],
-        [[9, 0, 27], [-23, 0, 20], [25, 0, 13]],
+        [
+          [-28.6, 0, 15], [28.6, 0, -9], [-9, 0, 28.6],
+          [28.6, 0, 15], [-28.6, 0, -9], [-15, 0, -38.6],
+        ],
+        [
+          [28.6, 0, 15], [-28.6, 0, -9], [-15, 0, -38.6],
+          [-28.6, 0, 15], [28.6, 0, -9], [-9, 0, 28.6],
+        ],
+        [
+          [-9, 0, 28.6], [-15, 0, -38.6], [-28.6, 0, 15],
+          [28.6, 0, 15], [-28.6, 0, -9], [28.6, 0, -9],
+        ],
       ] },
     objectives: [
       { type: 'clear', zone: [0, 10, 34], text: 'TAKE THE COURTYARD' },

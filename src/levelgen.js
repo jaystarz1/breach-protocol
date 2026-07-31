@@ -1118,6 +1118,7 @@ export function militaryTruck(x, z, rotZAxis = false, opts = {}) {
       variant,
       damage: opts.damage ?? 1,
       canvas: opts.canvas ?? family === 0,
+      reverse: !!opts.reverse,
     });
     return [[
       x, height / 2, z,

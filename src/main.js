@@ -1118,7 +1118,8 @@ function blackoutTrigger() {
 }
 
 // Timed reinforcements. Spawns are refused on the LAST objective so the mission always
-// converges, and refused within 22m of the player so nobody materialises in front of him.
+// converges. A hidden reinforcement set may use authored, physically occluded staging sockets:
+// if the player can currently see every one of them, the wave waits instead of materialising.
 function reinforcements(dt) {
   const r = world.reinf;
   if (!r || world.over) return;
@@ -1132,17 +1133,30 @@ function reinforcements(dt) {
     return;
   }
   const group = Math.min(r.group ?? 2, r.max - r.sent);
-  const spots = r.at.filter(s => Math.hypot(s[0] - player.pos.x, s[2] - player.pos.z) > 22);
-  const pool = spots.length ? spots : r.at;
+  const distant = r.at.filter(s =>
+    Math.hypot(s[0] - player.pos.x, s[2] - player.pos.z) > (r.minDistance ?? 22));
+  const hidden = distant.filter(s => !hasLOS(
+    world.solids,
+    player.pos.x, player.pos.y + 1.5, player.pos.z,
+    s[0], s[1] + 1.5, s[2],
+  ));
+  if (r.hidden && hidden.length < group) {
+    r.timer = 1;
+    hud.reinf('REINFORCEMENTS REPOSITIONING');
+    return;
+  }
+  const pool = r.hidden ? hidden : (distant.length ? distant : r.at);
   let made = 0;
   for (let i = 0; i < group; i++) {
     const s = pool[(r.sent + i) % pool.length];
     const spawnIndex = r.sent + i;
     const e = new Enemy(scene, {
-      pos: [
-        s[0] + (world.random() - 0.5) * 2,
+      // Concealed motor-pool sockets are tight wall-side work lanes. Keep those coordinates
+      // exact; generic open-map arrivals retain their small formation scatter.
+      pos: r.scatter === 0 ? [...s] : [
+        s[0] + (world.random() - 0.5) * (r.scatter ?? 2),
         s[1],
-        s[2] + (world.random() - 0.5) * 2,
+        s[2] + (world.random() - 0.5) * (r.scatter ?? 2),
       ],
       aggro: true, range: Math.min(r.range ?? 70, world.darkRange ?? 1e9),
       patrol: r.patrol || null, hold: !r.patrol,
@@ -1152,6 +1166,7 @@ function reinforcements(dt) {
     // They arrive already looking for you — a reinforcement that stands around defeats
     // the entire point of putting a clock on the mission.
     e.state = 'alert';
+    e.reinforcementOrigin = [...s];
     e.lastKnown = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
     world.enemies.push(e);
     made++;

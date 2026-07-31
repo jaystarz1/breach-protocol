@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v128-military-wheel-occlusion';
+const CACHE = 'breach-protocol-v130-authored-motor-pool';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -37,6 +37,7 @@ const ASSETS = [
   'assets/vehicles/BrokenCar.glb',
   'assets/vehicles/kiri_sedan/kiri10.glb',
   'assets/vehicles/generic_suv/generic_suv.glb',
+  'assets/vehicles/military_transport/military-transport.glb',
   'assets/vehicles/covered_car/covered_car_1k.gltf',
   'assets/vehicles/covered_car/covered_car.bin',
   'assets/vehicles/covered_car/textures/covered_car_diff_1k.jpg',

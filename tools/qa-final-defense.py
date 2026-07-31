@@ -51,23 +51,27 @@ def main():
               door => door.pos[1] === 0).pos,
             shieldText: objectives[4].text,
             motorPoolVehicles: [
-              'military-truck-authored-cab',
+              'military-transport-authored',
               'military-wheeled-apc-hull',
               'military-bmp-hull',
             ].reduce((count, name) => count + (
               BP.scene.children.find(child => child.name === name)?.count || 0), 0),
             motorPoolFamilies: [
-              'military-truck-canvas-roof',
-              'military-troop-benches',
-              'military-fuel-tanker',
-              'military-command-body',
-              'military-flatbed-load',
-              'military-steel-tubes',
-              'military-launcher-tubes',
+              'military-transport-authored',
               'military-wheeled-apc-hull',
               'military-bmp-hull',
             ].filter(name => BP.scene.children.some(child => child.name === name)).length,
-            mountedTroops: BP.world.enemies.filter(enemy => enemy.mounted).length,
+            reinforcementWave: {
+              initiallyPresent: BP.world.enemies.filter(
+                enemy => enemy.reinforcementOrigin).length,
+              max: BP.world.reinf.max,
+              group: BP.world.reinf.group,
+              hidden: BP.world.reinf.hidden,
+              scatter: BP.world.reinf.scatter,
+              sockets: BP.world.reinf.at,
+              socketsBehindRows: BP.world.reinf.at.every(socket =>
+                Math.abs(socket[0]) >= 28 || socket[2] >= 28 || socket[2] <= -38),
+            },
             burningWrecks: BP.scene.children.filter(
               child => child.name.startsWith('compound-burning-wreck-')).length,
             render: {
@@ -93,13 +97,12 @@ def main():
         }""")
         page.wait_for_timeout(250)
         page.screenshot(path=str(output / "military-compound.png"))
-        # Close side views catch far-side wheel bleed that is invisible in the wide compound
-        # establishing shot. These place the camera square to the tanker, BTR and BMP lower
-        # hulls so their opaque wheel-well backing can be reviewed directly.
+        # Three-quarter views show both the authored vehicle silhouettes and their opaque
+        # lower hulls. The transport view also verifies the usable service lane behind its row.
         for filename, position, yaw in [
-            ("military-tanker-wheel-occlusion.png", [-19, 0, 8], 1.5708),
-            ("military-apc-wheel-occlusion.png", [0, 0, 6], 3.14159),
-            ("military-bmp-track-occlusion.png", [19, 0, 16], -1.5708),
+            ("military-transport-close.png", [-28, 0, 3], -2.2),
+            ("military-apc-wheel-occlusion.png", [-17, 0, -24], 1.5708),
+            ("military-bmp-track-occlusion.png", [16, 0, 17], -2.25),
         ]:
             page.evaluate("""view => {
               BP.player.pos.set(...view.position);
@@ -122,6 +125,48 @@ def main():
         }""")
         page.wait_for_timeout(250)
         page.screenshot(path=str(output / "bunker-entrance.png"))
+
+        reinforcement_before = page.evaluate("""() => {
+          BP.player.health = 100000;
+          BP.player.pos.set(0, 0, 27);
+          for (const enemy of BP.world.enemies) {
+            enemy.update = () => {};
+          }
+          BP.world.reinf.timer = 0;
+          return {
+            count: BP.world.enemies.length,
+            sent: BP.world.reinf.sent,
+          };
+        }""")
+        page.wait_for_function("before => BP.world.reinf.sent >= before.sent + 3",
+                               arg=reinforcement_before)
+        reinforcement_spawn = page.evaluate("""before => {
+          const wave = BP.world.enemies.slice(before.count);
+          return {
+            count: wave.length,
+            origins: wave.map(enemy => enemy.reinforcementOrigin),
+            positions: wave.map(enemy => enemy.pos.toArray()),
+            allBehindRows: wave.every(enemy =>
+              Math.abs(enemy.reinforcementOrigin[0]) >= 28
+              || enemy.reinforcementOrigin[2] >= 28
+              || enemy.reinforcementOrigin[2] <= -38),
+          };
+        }""", reinforcement_before)
+        page.wait_for_timeout(8000)
+        reinforcement_emergence = page.evaluate("""spawn => {
+          const wave = BP.world.enemies.filter(enemy => enemy.reinforcementOrigin);
+          return {
+            moved: wave.filter((enemy, index) => Math.hypot(
+              enemy.pos.x - spawn.positions[index][0],
+              enemy.pos.z - spawn.positions[index][2]) > 0.5).length,
+            enteredYard: wave.filter(enemy =>
+              Math.abs(enemy.pos.x) < 28 && enemy.pos.z < 28 && enemy.pos.z > -38).length,
+            actors: wave.map(enemy => ({
+              pos: enemy.pos.toArray(), state: enemy.state,
+              path: !!enemy.path, blocked: enemy.blocked,
+            })),
+          };
+        }""", reinforcement_spawn)
 
         # Clear the authored courtyard/tower force, then stand on the roof. The objective must
         # not hand control over until both conditions are true.
@@ -253,6 +298,8 @@ def main():
         result = {
             "contract": contract,
             "bunkerLock": bunker_lock,
+            "reinforcementSpawn": reinforcement_spawn,
+            "reinforcementEmergence": reinforcement_emergence,
             "combatBefore": combat_before,
             "movement": movement,
             "strikeBefore": strike_before,
@@ -261,7 +308,7 @@ def main():
             "won": page.evaluate("() => BP.world.won"),
             "screenshots": [
                 "military-compound.png",
-                "military-tanker-wheel-occlusion.png",
+                "military-transport-close.png",
                 "military-apc-wheel-occlusion.png",
                 "military-bmp-track-occlusion.png",
                 "tower-front-door.png",
@@ -288,9 +335,18 @@ def main():
         assert contract["strikeKinds"] == ["artillery", "artillery", "artillery"], result
         assert all(position[2] < -50 for position in contract["strikePositions"]), result
         assert contract["strikeFiring"] == [True, True, True], result
-        assert contract["motorPoolVehicles"] == 20, result
-        assert contract["motorPoolFamilies"] == 9, result
-        assert contract["mountedTroops"] == 6, result
+        assert contract["motorPoolVehicles"] == 25, result
+        assert contract["motorPoolFamilies"] == 3, result
+        reinforcement_wave = contract["reinforcementWave"]
+        assert reinforcement_wave["initiallyPresent"] == 0, result
+        assert reinforcement_wave["max"] == 9 and reinforcement_wave["group"] == 3, result
+        assert reinforcement_wave["hidden"] and reinforcement_wave["scatter"] == 0, result
+        assert len(reinforcement_wave["sockets"]) == 6, result
+        assert reinforcement_wave["socketsBehindRows"], result
+        assert result["reinforcementSpawn"]["count"] == 3, result
+        assert result["reinforcementSpawn"]["allBehindRows"], result
+        assert result["reinforcementEmergence"]["moved"] == 3, result
+        assert result["reinforcementEmergence"]["enteredYard"] >= 1, result
         assert contract["burningWrecks"] == 2, result
         assert contract["render"]["calls"] < 450, result
         assert contract["render"]["triangles"] < 1_500_000, result

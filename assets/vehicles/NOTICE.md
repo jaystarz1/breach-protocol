@@ -45,3 +45,12 @@ licensed under CC BY 4.0:
 Its downloaded 2K PNG material set is checked in as mechanically resized 1K WebP maps for
 browser delivery. Geometry, UVs and authored deterioration are unchanged. The full attribution
 text is retained beside the model in `abandoned_sedan/license.txt`.
+
+The Level 10 logistics rows use “Military Truck – 2D/3D Collab” by Alex Safayan under
+CC BY. The source model contributes its authored multi-part cab, cargo body, suspension,
+engine hardware, lights and wheels; instances are merged into the game’s shared desktop
+vehicle material pipeline without altering the source geometry.
+
+- Source: https://www.get3dmodels.com/vehicles/military-truck-2d3d-collab/
+- Author: Alex Safayan
+- License identified by the distributor: CC BY

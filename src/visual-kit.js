@@ -12,6 +12,7 @@ if (quality.desktop) {
     const loader = new GLTFLoader();
     const [
       fallbackSedan, fallbackSuv, wreck, covered, abandonedSedan, intactSedan, intactSuv,
+      militaryTransport,
     ] = await Promise.all([
       loader.loadAsync('./assets/vehicles/CarSedan.glb'),
       loader.loadAsync('./assets/vehicles/CarSUV.glb'),
@@ -34,6 +35,11 @@ if (quality.desktop) {
       loader.loadAsync('./assets/vehicles/generic_suv/generic_suv.glb')
         .catch(error => {
           console.warn('[bp] detailed intact SUV unavailable; using blockout SUV', error);
+          return null;
+        }),
+      loader.loadAsync('./assets/vehicles/military_transport/military-transport.glb')
+        .catch(error => {
+          console.warn('[bp] authored military transport unavailable; using procedural truck', error);
           return null;
         }),
     ]);
@@ -93,7 +99,20 @@ if (quality.desktop) {
         materialKey: 'covered',
         materialTint: 0xd5d0c5,
       },
+      militaryTransport: militaryTransport ? {
+        // Source bounds are 2.64m wide, 2.4m high and 5.85m long. Rotate into the game's
+        // local -X-forward convention and fit the authoritative 6.6 x 2.45m truck collider.
+        scene: militaryTransport.scene,
+        bodyMaterials: new Set([
+          'Truck', 'TruckDark', 'TruckDark.001', 'TruckTop', 'GrayLight',
+        ]),
+        scale: new THREE.Vector3(1.12, 1.1, 0.93),
+        rotationY: -Math.PI / 2,
+      } : null,
     };
+    if (!authoredVehicleSources.militaryTransport) {
+      delete authoredVehicleSources.militaryTransport;
+    }
     for (const source of Object.values(authoredVehicleSources)) {
       source.scene.updateMatrixWorld(true);
       source.cache = new Map();
@@ -1452,7 +1471,8 @@ function addMilitaryTruck(batcher, def) {
   const parent = new THREE.Matrix4().compose(
     new THREE.Vector3(def.x, 0.02, def.z),
     new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0), def.rotZAxis ? Math.PI / 2 : 0),
+      new THREE.Vector3(0, 1, 0),
+      (def.rotZAxis ? Math.PI / 2 : 0) + (def.reverse ? Math.PI : 0)),
     new THREE.Vector3(1, 1, 1),
   );
 
@@ -1467,6 +1487,27 @@ function addMilitaryTruck(batcher, def) {
   };
 
   if (family < 8) {
+    const transportGeometry = authoredVehicleGeometry('militaryTransport', 0x2f392b);
+    if (transportGeometry) {
+      // One merged 38-part source model retains the authored cab, suspension, tyres, lamps,
+      // engine hardware and cargo body while instancing the entire logistics row in one draw.
+      // This replaces the generated cab/box assembly rather than layering detail onto it.
+      batcher.add(
+        'military-transport-authored',
+        transportGeometry,
+        authoredVehicleMaterial(false),
+        parent,
+      );
+      for (const x of [-2.28, 0.15, 2.15]) {
+        for (const side of [-1, 1]) {
+          batcher.add('vehicle-soft-contact-shadows', VEHICLE_CONTACT_GEO,
+            vehicleContactMaterial(),
+            instanceMatrix(parent, x, 0.018, side * 0.88,
+              0.9, 0.46, 1, -Math.PI / 2, 0, 0));
+        }
+      }
+      return;
+    }
     // Unlike the first blockout, the cab is a single curved loft with tapered nose, shoulders
     // and roof. It uses the same authored-surface method as the sedan/SUV kit.
     batcher.add('military-truck-authored-cab', MILITARY_TRUCK_CAB_GEO, paint, parent);
