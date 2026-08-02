@@ -108,7 +108,16 @@ export const CAMPAIGN_MISSIONS = [
     target: 'Morozov is confirmed inside the bunker with no prepared evacuation route.',
     intel: 'OP Alpha, OP Bravo and the captured relay agree: Anton Morozov is physically present in the forward bunker.',
     result: 'BASTION is neutralized, the forward command collapses and the assault loses its coordinated air picture.',
-    nextLead: 'CORRIDOR HELD — Vektor drone operations remain active across the district.',
+    nextLead: 'DEEP FENCE — take the drone war past the fields to the 37th’s echelon.',
+  },
+  {
+    node: 'DEEP FENCE',
+    sitrep: 'The district holds, but the 37th’s echelon — armour patrols, a BTR screening the kolkhoz, and a fuel siding on the eastern rail line — is intact beyond the fields. Nothing on foot can reach it. The drones can.',
+    purpose: 'Fly long-range strike sorties from the treeline OP: kill the patrol tank, kill the BTR, and burn the fuel siding before the next assault fills its tanks.',
+    target: 'With Morozov dead, the 37th’s logistics officer is holding the echelon together from the rail head.',
+    intel: 'Recovered bunker traffic maps the patrol routes, both jammer positions and the siding timetable to the metre.',
+    result: 'The tank, the BTR and the siding are burning. The 37th cannot mount another coordinated assault this season.',
+    nextLead: 'FENCE HELD — Vektor’s drone crews own everything within fifteen kilometres.',
   },
 ];
 

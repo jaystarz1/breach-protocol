@@ -1960,4 +1960,203 @@ export const LEVELS = [
       { id: 'l10-roof-control', kind: 'launch', label: 'FIRE-CONTROL ROOF LAUNCH TABLE', actionLabel: 'ARM', pos: [0, 6.45, -10] },
     ],
   },
+
+  // ---------------------------------------------------------------- 11
+  // The drone-warfare testbed. No ground fight: the operator never leaves the treeline OP.
+  // Three sorties over kilometres of open farmland — two kamikaze FPV hunts and one heavy
+  // bomber run — teaching the doctrine directly: terrain masking beats altitude, jammer
+  // bubbles are terrain, cope cages make aspect matter, battery is the fuel plan, and a
+  // drop munition is led like a bomb, not aimed like a gun. Distances are compressed
+  // (metersPerUnit 3.5): the 1,700-unit rail leg reads as the ~6 km sortie it stands for.
+  {
+    id: 11, name: 'DEEP FENCE',
+    brief: 'BASTION is gone but the 37th’s echelon is intact beyond the fields. Fly the fence: kill the road patrol tank, the BTR at the kolkhoz, and burn the fuel siding feeding their next assault. You never leave the treeline.',
+    weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
+    lockPlayer: true,
+    cameraFar: 2600,
+    sky: 0x2b2733, fog: [0x35303c, 500, 2250], ambient: 0.8, sun: 0.85,
+    skylineTint: 0x232028,
+    start: [0, 0, 462, 0],
+    geo: () => {
+      const g = [];
+      const r = rng(1101);
+      // One continuous field plain. floorSlab keeps it a real solid for ground checks.
+      g.push(...floorSlab(0, -480, 920, 2040, 0, 1, 0x4a4636));
+      // Crop-strip patches: alternating tones so kilometres of plain read as farmland, and
+      // so the pilot can navigate by field boundaries the way real FPV crews do.
+      const strips = [0x51502f, 0x474a30, 0x555037, 0x424636, 0x4e4b2e];
+      let sz = 380;
+      let stripIndex = 0;
+      while (sz > -1420) {
+        const depth = 90 + r() * 130;
+        g.push([r() * 120 - 60, 0.06, sz - depth / 2, 820, 0.1,
+          depth - 14, strips[stripIndex++ % strips.length], false]);
+        sz -= depth;
+      }
+      // Main supply road north, and the east-west road the tank patrols.
+      g.push([-6, 0.1, -480, 8, 0.1, 1960, 0x3b3833, false]);
+      g.push([-20, 0.1, -700, 320, 0.1, 9, 0x3b3833, false]);
+      g.push([150, 0.1, -1030, 9, 0.1, 660, 0x3b3833, false]);
+      // A tree: trunk and canopy, both SOLID. Clipping a windbreak at 60 km/h is how real
+      // airframes die, and the mission wants that lesson available.
+      const tree = (x, z, s = 1) => {
+        g.push([x, 1.5 * s, z, 0.5 * s, 3 * s, 0.5 * s, 0x453727]);
+        g.push([x, 3.7 * s, z, 2.8 * s, 2.9 * s, 2.8 * s, 0x2c4023]);
+      };
+      const treeRow = (x1, z1, x2, z2, step) => {
+        const length = Math.hypot(x2 - x1, z2 - z1);
+        const n = Math.max(2, Math.round(length / step));
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          tree(
+            x1 + (x2 - x1) * t + (r() - 0.5) * 5,
+            z1 + (z2 - z1) * t + (r() - 0.5) * 5,
+            0.85 + r() * 0.5,
+          );
+        }
+      };
+      // Friendly treeline the OP hides in.
+      treeRow(-210, 428, -16, 430, 15);
+      treeRow(14, 430, 210, 428, 15);
+      // Windbreaks marching north — the low covered routes past the jammer bubbles.
+      treeRow(-330, -160, -40, -166, 17);
+      treeRow(30, -166, 330, -160, 17);
+      treeRow(-330, -382, -70, -378, 17);
+      treeRow(60, -378, 330, -384, 17);
+      treeRow(-330, -940, -60, -936, 17);
+      treeRow(110, -936, 330, -940, 17);
+      treeRow(-84, -430, -80, -880, 17);
+      treeRow(62, -560, 58, -1000, 17);
+      treeRow(-330, -1150, -30, -1146, 17);
+      // Village at the crossroads: the first jammer lives here.
+      const house = (x, z, w, d, h, col) => {
+        g.push([x, h / 2, z, w, h, d, col]);
+        g.push([x, h + 0.35, z, w + 0.8, 0.7, d + 0.8, 0x33302c]);
+      };
+      house(-52, -498, 10, 8, 3.4, 0x5d5548);
+      house(-34, -540, 12, 9, 3.8, 0x555c4e);
+      house(-58, -556, 9, 8, 3.2, 0x5d5548);
+      house(14, -502, 11, 8, 3.6, 0x605646);
+      house(30, -544, 10, 9, 3.4, 0x555c4e);
+      house(4, -556, 9, 7, 3.1, 0x5d5548);
+      g.push([-11, 2.6, -524, 1.1, 5.2, 1.1, 0x3a3f3a]);   // the jammer mast
+      g.push([-11, 5.5, -524, 2.4, 0.5, 0.6, 0x2c3130]);
+      // The kolkhoz: barn, house and a walled yard the BTR crawls around.
+      house(128, -1042, 16, 11, 5.2, 0x59503f);
+      house(158, -1008, 10, 8, 3.5, 0x5d5548);
+      g.push(...wall(96, -1072, 172, -1072, 2.2, 0x4c463a));
+      g.push(...wall(96, -988, 96, -1072, 2.2, 0x4c463a));
+      // Rail line east: two rails on a ballast bed, a parked box wagon pair, the siding.
+      g.push([330, 0.25, -860, 8, 0.5, 1250, 0x3f3b34]);
+      g.push([327.4, 0.61, -860, 0.5, 0.22, 1250, 0x50524f, false]);
+      g.push([332.6, 0.61, -860, 0.5, 0.22, 1250, 0x50524f, false]);
+      g.push([330, 1.8, -1130, 3.2, 2.6, 11, 0x4a423a]);
+      g.push([330, 1.8, -1108, 3.2, 2.6, 11, 0x45483e]);
+      // The operator's OP: trench cut, sandbag lip, work table, antenna mast, camo net.
+      g.push(...floorSlab(0, 462, 26, 14, 0.02, 0.5, 0x413d31));
+      g.push(...sandbags(-6, 452, 6, 2, false, 71), ...sandbags(7, 452, 5, 2, false, 72));
+      g.push(...table(-3, 461, 2.6, 1.1, 0x554a38), ...table(3.4, 461, 1.8, 1.0, 0x4c4234));
+      g.push(...crate(8, 464), ...crate(-8.5, 464, 0, 0.85), ...crate(-7.6, 465.1, 0.85, 0.7));
+      g.push([12, 4.2, 458, 0.5, 8.4, 0.5, 0x3a3f3a]);
+      g.push([12, 8.6, 458, 3.4, 0.4, 0.5, 0x2c3130]);
+      g.push([0, 4.4, 460, 30, 0.18, 16, 0x36402e, false]);   // camo net canopy
+      for (const [px, pz] of [[-14, 454], [14, 466], [-14, 466], [14, 454]]) {
+        g.push([px, 2.2, pz, 0.22, 4.4, 0.22, 0x453727, false]);
+      }
+      // Power line following the supply road — the landmark home when the OSD arrow is
+      // all that survives the static.
+      for (let pz = 420; pz > -1400; pz -= 210) {
+        g.push(...poleWire(-16, pz, -16, pz - 210, 7.2, 6));
+      }
+      return g;
+    },
+    doors: [],
+    enemies: [],
+    civilians: [],
+    objectives: [
+      phase('fence-armor', 'KILL THE PATROL TANK', [
+        {
+          type: 'drone',
+          mode: 'fpv',
+          noHandoff: true,
+          label: 'FPV STRIKE ONE',
+          text: 'FPV ONE — KILL THE PATROL TANK. IT IS CAGED: TAKE THE REAR ARC.',
+          launch: [6, 0, 455],
+          yaw: 0,
+          metersPerUnit: 3.5,
+          maxRange: 2400,
+          airframes: 3,
+          ceiling: 55,
+          maxSpeed: 18,
+          accel: 24,
+          batteryDrain: 0.28,
+          jammers: [{ x: -11, z: -524, r: 190 }],
+          vehicles: [{
+            kind: 'tank', label: 'T-72B3', cage: true, health: 500,
+            pos: [-120, 0, -700], yaw: 0, speed: 3.1, loop: true,
+            route: [[-120, -700], [80, -700], [-120, -700]],
+          }],
+          startMessage: 'CAGED ARMOR ON THE WEST ROAD — TOP HITS FEED THE SLATS. HUNT THE REAR.',
+          result: 'ARMOR DOWN — THE WEST ROAD IS BLIND',
+          handoffMessage: 'AIRFRAME PREPPED — THE BTR AT THE KOLKHOZ IS NEXT',
+        },
+      ]),
+      phase('fence-btr', 'KILL THE BTR AT THE KOLKHOZ', [
+        {
+          type: 'drone',
+          mode: 'fpv',
+          noHandoff: true,
+          label: 'FPV STRIKE TWO',
+          text: 'FPV TWO — KILL THE BTR AT THE KOLKHOZ. TWO BUBBLES ON THE DIRECT LINE.',
+          launch: [6, 0, 455],
+          yaw: 0,
+          metersPerUnit: 3.5,
+          maxRange: 2700,
+          airframes: 2,
+          ceiling: 55,
+          maxSpeed: 18,
+          accel: 24,
+          batteryDrain: 0.3,
+          jammers: [{ x: -11, z: -524, r: 190 }, { x: 62, z: -880, r: 175 }],
+          vehicles: [{
+            kind: 'apc', label: 'BTR-82A', health: 320,
+            pos: [134, 0, -1030], yaw: 0, speed: 3.6, loop: true,
+            route: [[134, -1030], [104, -1030], [104, -1000], [150, -1000], [150, -1052], [110, -1058]],
+          }],
+          startMessage: 'TWO BUBBLES BETWEEN YOU AND THE FARM — FLY THE TREELINES LOW.',
+          result: 'BTR BURNING IN THE YARD — THE KOLKHOZ IS QUIET',
+          handoffMessage: 'HERON SPOOLING UP — THE FUEL SIDING IS THE LAST CALL',
+        },
+      ]),
+      phase('fence-rail', 'BURN THE FUEL SIDING', [
+        {
+          type: 'drone',
+          mode: 'bomber',
+          noHandoff: true,
+          label: 'HERON HEAVY BOMBER',
+          text: 'HERON — BURN THE THREE FUEL WAGONS ON THE SIDING. DROP FROM ALTITUDE.',
+          launch: [-3, 0, 455],
+          yaw: 0,
+          metersPerUnit: 3.5,
+          maxRange: 3100,
+          airframes: 1,
+          ceiling: 95,
+          maxSpeed: 10,
+          accel: 12,
+          batteryDrain: 0.12,
+          bombs: 6,
+          thermalPersistent: true,
+          fov: 84,
+          jammers: [{ x: -11, z: -524, r: 190 }, { x: 62, z: -880, r: 175 }],
+          vehicles: [
+            { kind: 'fuelcar', label: 'FUEL WAGON ONE', health: 220, pos: [330, 0.5, -1225], yaw: Math.PI / 2 },
+            { kind: 'fuelcar', label: 'FUEL WAGON TWO', health: 220, pos: [330, 0.5, -1237], yaw: Math.PI / 2 },
+            { kind: 'fuelcar', label: 'FUEL WAGON THREE', health: 220, pos: [330, 0.5, -1249], yaw: Math.PI / 2 },
+          ],
+          startMessage: 'HEAVY BOMBER UP — THERMAL ON N. LEAD THE DRIFT, THE BOMB FALLS WITH YOU.',
+          result: 'SIDING BURNING — THE 37TH FIGHTS ITS NEXT ASSAULT ON EMPTY TANKS',
+        },
+      ]),
+    ],
+  },
 ];

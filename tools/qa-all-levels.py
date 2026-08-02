@@ -24,7 +24,7 @@ def main():
         page.wait_for_function("() => !!window.BP", timeout=90000)
 
         levels = []
-        for level in range(1, 11):
+        for level in range(1, 12):
             page.evaluate("(id) => BP.startLevel(id)", level)
             page.wait_for_function(
                 "(id) => BP.mode === 'playing' && BP.campaign.currentMission === id",
@@ -50,13 +50,15 @@ def main():
         result = {"levels": levels, "errors": errors[:12]}
         print(json.dumps(result, indent=2))
         assert not errors
-        assert len(levels) == 10
+        assert len(levels) == 11
         assert all(item["mode"] == "playing" for item in levels)
         assert all(item["objectives"] == 3 for item in levels)
         assert all(len(item["phaseSteps"]) == 3 for item in levels)
         assert all(item["calls"] < 450 for item in levels)
         assert all(item["triangles"] < 1_500_000 for item in levels)
-        assert all(item["enemies"] > 0 and item["objectives"] > 0 for item in levels)
+        # Level 11 is the drone-only testbed: an empty ground order of battle is authored.
+        assert all(item["enemies"] > 0 or item["level"] == 11 for item in levels)
+        assert all(item["objectives"] > 0 for item in levels)
         browser.close()
 
 

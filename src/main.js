@@ -118,7 +118,7 @@ function showBrief(id) {
   const mission = campaignMission(id);
   $('brief-num').textContent = `MISSION ${String(id).padStart(2, '0')} · ${DIFFICULTIES[S.difficulty].name}`;
   $('brief-title').textContent = L.name;
-  $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/10 NODES SECURED`;
+  $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/${LEVELS.length} NODES SECURED`;
   $('brief-target-status').textContent = mission.target;
   $('brief-evidence').textContent = `CURRENT INTELLIGENCE — ${mission.intel}`;
   const phasePlan = (L.objectives || []).map((phaseDef, index) =>
@@ -519,7 +519,11 @@ function startLevel(id) {
   player.spawn(...L.start, diff);
   player.locked = !!L.lockPlayer;
   scene.add(camera);
-  camera.fov = 70; camera.updateProjectionMatrix();
+  camera.fov = 70;
+  // Long-range drone maps see kilometres of field; street maps keep the tight far plane
+  // their fog was authored against.
+  camera.far = L.cameraFar ?? 500;
+  camera.updateProjectionMatrix();
 
   weapons = new Weapons(camera);
   weapons.setLoadout(L.weapons, L.grenades ?? 0, L.flashes ?? 0);
@@ -1405,9 +1409,27 @@ function setObjective() {
     }
     const combatants = obj.mode === 'combat' ? spawnDroneCombatWave(obj) : [];
     const combatVehicles = obj.mode === 'combat'
-      ? (world.droneAssault?.vehicles || []) : [];
+      ? (world.droneAssault?.vehicles || [])
+      : ['fpv', 'bomber'].includes(obj.mode)
+        ? (obj.vehicles || []).map(definition => createDroneAssaultVehicle(scene, definition))
+        : [];
     suspendGroundCombatForDrone(obj);
-    const runtimeDefinition = obj.mode === 'combat' ? {
+    const runtimeDefinition = ['fpv', 'bomber'].includes(obj.mode) ? {
+      ...obj,
+      combatVehicles,
+      onCombatBlast(position) {
+        sfx.explosion(position);
+        world.combatHeat = Math.max(world.combatHeat, 5);
+      },
+      onVehicleKilled(vehicle) {
+        world.stats.score += 250;
+        world.stats.kills++;
+        hud.feed(`${vehicle.label || 'VEHICLE'} DESTROYED +250`, '#ffd54f');
+      },
+      onFailed(reason) {
+        failMission(`${reason} — THE SORTIE IS OVER`);
+      },
+    } : obj.mode === 'combat' ? {
       ...obj,
       droneInteriorThreshold: obj.combatWave?.droneInteriorThreshold ?? 2,
       combatants,
@@ -2217,7 +2239,9 @@ function checkObjectives(dt = 0) {
   if (done) {
     if (obj.type === 'drone' && world.drone) {
       const next = nextObjectiveStep();
-      if (next?.type === 'drone') {
+      // noHandoff: consecutive sorties fly DIFFERENT airframes (an FPV cannot become a
+      // bomber mid-air), so the aircraft state must not carry across the phase boundary.
+      if (next?.type === 'drone' && !obj.noHandoff) {
         world.droneHandoff = {
           pos: world.drone.pos.clone(),
           vel: world.drone.vel.clone(),
@@ -2232,7 +2256,7 @@ function checkObjectives(dt = 0) {
       // A drone handoff is a phase transition, not a silent camera reset. Level 6 starts as a
       // locked sniper post, but the ground-clear / rescue work belongs to the operator on foot.
       // Tell the player exactly what changed while restoring movement for the next objective.
-      hud.feed('DRONE HANDOFF COMPLETE — CLEAR THE EXTRACTION CORRIDOR', '#8cecff');
+      hud.feed(obj.handoffMessage || 'DRONE HANDOFF COMPLETE — CLEAR THE EXTRACTION CORRIDOR', '#8cecff');
       spawnReconGroundResponse(obj);
       world.drone.dispose();
       world.drone = null;

@@ -5,6 +5,7 @@ import {
 
 const MAX_RANGE = 95;
 const MAX_SPEED = 16;
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
 const THERMAL_BURST_SECONDS = 3;
 const THERMAL_RECHARGE_SECONDS = 5;
 const DRONE_MUNITION_GEO = new THREE.SphereGeometry(0.12, 10, 7);
@@ -388,6 +389,55 @@ function strikeTargetModel(target) {
       };
     }
     root.userData.crew = crew;
+  } else if (target.kind === 'tank') {
+    // A main battle tank with a welded cope cage. The cage is the doctrine lesson made
+    // visible from FPV distance: the roof is screened, so the drone has to come in on the
+    // rear arc where the standoff frame is open and the engine deck is thin.
+    add(new THREE.BoxGeometry(4.6, 0.72, 2.55), olive, [0, 0.92, 0]);
+    add(new THREE.BoxGeometry(3.4, 0.3, 2.4), olive, [-0.35, 1.35, 0], [0, 0, -0.03]);
+    for (const z of [-1.22, 1.22]) {
+      add(new THREE.BoxGeometry(4.4, 0.58, 0.42), dark, [0, 0.58, z]);
+      for (const x of [-1.7, -0.85, 0, 0.85, 1.7]) {
+        add(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 14), steel,
+          [x, 0.56, z * 1.01], [Math.PI / 2, 0, 0]);
+      }
+    }
+    add(new THREE.CylinderGeometry(0.95, 1.1, 0.55, 14), olive, [0.25, 1.72, 0]);
+    add(new THREE.BoxGeometry(1.5, 0.45, 1.4), olive, [0.25, 2.0, 0]);
+    add(new THREE.CylinderGeometry(0.1, 0.14, 3.9, 10), steel,
+      [-2.05, 1.95, 0], [0, 0, Math.PI / 2]);
+    // Rear engine deck: intake grilles, the aim point the mission teaches.
+    add(new THREE.BoxGeometry(1.15, 0.16, 2.2), dark, [1.65, 1.34, 0]);
+    // The cope cage: four standoff posts and a slat roof over the turret, open at the rear.
+    const cage = new THREE.MeshStandardMaterial({
+      name: 'drone-strike-cage',
+      color: 0x2b302a, roughness: 0.9, metalness: 0.55,
+    });
+    for (const [px, pz] of [[-0.8, -0.95], [-0.8, 0.95], [1.15, -0.95], [1.15, 0.95]]) {
+      add(new THREE.BoxGeometry(0.08, 1.0, 0.08), cage, [px, 2.35, pz]);
+    }
+    for (const z of [-0.95, -0.55, -0.15, 0.25, 0.65]) {
+      add(new THREE.BoxGeometry(2.35, 0.05, 0.14), cage, [0.18, 2.86, z + 0.15]);
+    }
+    add(new THREE.BoxGeometry(0.1, 0.5, 2.1), cage, [-0.85, 2.6, 0]);
+  } else if (target.kind === 'fuelcar') {
+    // A rail tank wagon: flat frame over bogies, a long horizontal tank, filler dome. Built
+    // to read as strategic logistics from bomber altitude, and to burn convincingly.
+    add(new THREE.BoxGeometry(9.2, 0.3, 2.4), dark, [0, 1.05, 0]);
+    for (const x of [-3.4, 3.4]) {
+      for (const wx of [-0.55, 0.55]) {
+        add(new THREE.CylinderGeometry(0.34, 0.34, 0.2, 12), steel,
+          [x + wx, 0.55, 0], [Math.PI / 2, 0, 0]);
+      }
+    }
+    add(new THREE.CylinderGeometry(1.15, 1.15, 8.4, 16), olive,
+      [0, 2.35, 0], [0, 0, Math.PI / 2]);
+    for (const x of [-4.2, 4.2]) {
+      add(new THREE.CylinderGeometry(1.15, 1.15, 0.12, 16), steel,
+        [x, 2.35, 0], [0, 0, Math.PI / 2]);
+    }
+    add(new THREE.CylinderGeometry(0.42, 0.42, 0.5, 12), steel, [0, 3.6, 0]);
+    add(new THREE.BoxGeometry(0.9, 0.1, 1.2), steel, [4.1, 1.28, 0]);
   } else {
     // An IFV-like silhouette: sloped hull, continuous tracks, turret and cannon. At drone
     // altitude the outline and moving shadow matter more than tiny vehicle trim.
@@ -445,6 +495,9 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     mesh,
     maxHealth: definition.health ?? 190,
     health: definition.health ?? 190,
+    // FPV target attributes: `cage` arms the rear-aspect rule, `label` names the kill feed.
+    cage: !!definition.cage,
+    label: definition.label || null,
     dead: false,
     route: (definition.route || []).map(point => ({
       x: point[0],
@@ -452,6 +505,7 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
       z: point.length > 2 ? point[2] : point[1],
     })),
     routeIdx: 0,
+    loop: !!definition.loop,
     speed: definition.speed ?? 4.4,
     damage(amount) {
       if (this.dead) return false;
@@ -467,9 +521,10 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
       const dx = waypoint.x - this.pos.x;
       const dz = waypoint.z - this.pos.z;
       const distance = Math.hypot(dx, dz);
-      if (distance < 0.7 && this.routeIdx < this.route.length - 1) {
-        this.routeIdx++;
-        return;
+      if (distance < 0.7) {
+        if (this.routeIdx < this.route.length - 1) { this.routeIdx++; return; }
+        // A patrol route loops; an ingress route parks at its last waypoint.
+        if (this.loop) { this.routeIdx = 0; return; }
       }
       if (distance > 0.001) {
         const travel = Math.min(distance, this.speed * dt);
@@ -487,7 +542,7 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
 }
 
 export function dronePrewarmGroup(definition) {
-  if (!['strike', 'combat'].includes(definition?.mode)) return null;
+  if (!['strike', 'combat', 'fpv', 'bomber'].includes(definition?.mode)) return null;
   const root = new THREE.Group();
   root.name = 'drone-strike-material-prewarm';
   // Keep one representative of every shader state and shared dynamic geometry a strike can
@@ -536,6 +591,14 @@ export function dronePrewarmGroup(definition) {
     DRONE_FRAGMENT_GEO,
     DRONE_FRAGMENT_HOT_MAT,
   ));
+  if (['fpv', 'bomber'].includes(definition.mode)) {
+    for (const vehicle of definition.vehicles || []) {
+      root.add(strikeTargetModel({
+        pos: new THREE.Vector3(), kind: vehicle.kind || 'tank', yaw: 0,
+      }));
+    }
+    root.add(thermalSignature({ dead: false, pos: new THREE.Vector3() }, true));
+  }
   if (definition.mode === 'combat') {
     if (definition.combatWave?.vehicle) {
       root.add(strikeTargetModel({
@@ -570,6 +633,7 @@ export class DroneController {
     this.pos.y += 1.7;
     this.vel = new THREE.Vector3();
     this.yaw = definition.yaw ?? Math.PI;
+    this.launchYaw = this.yaw;
     this.pitch = -0.08;
     this.roll = 0;
     this.battery = 100;
@@ -599,6 +663,29 @@ export class DroneController {
     this.onCombatBlast = definition.onCombatBlast || null;
     this.onIncomingFire = definition.onIncomingFire || null;
     this.incomingPressure = 0;
+    // Long-range strike modes ('fpv' kamikaze quad, 'bomber' heavy hexacopter). The numbers
+    // are authored per mission; metersPerUnit converts compressed map units into the real
+    // distances the OSD reports, so a 1400-unit leg reads as the ~5 km sortie it represents.
+    this.isFpvFamily = this.mode === 'fpv' || this.mode === 'bomber';
+    this.metersPerUnit = definition.metersPerUnit ?? 1;
+    this.airframes = definition.airframes ?? 1;
+    this.airframesLost = 0;
+    this.jammers = definition.jammers || [];
+    this.ceiling = definition.ceiling ?? 34;
+    this.batteryDrain = definition.batteryDrain ?? 0.72;
+    this.maxSpeed = definition.maxSpeed ?? MAX_SPEED;
+    this.accel = definition.accel ?? 19;
+    this.bombs = this.mode === 'bomber' ? (definition.bombs ?? 6) : 0;
+    this.bombsTotal = this.bombs;
+    this.craftName = definition.craftName || (this.mode === 'bomber' ? 'HW-16 HERON' : 'VMS-7 KESTREL');
+    this.thermalPersistent = !!definition.thermalPersistent;
+    this.onFailed = definition.onFailed || null;
+    this.onVehicleKilled = definition.onVehicleKilled || null;
+    this.flightTime = 0;
+    this.jamFactor = 1;
+    this.linkLowTimer = 0;
+    this.failedOut = false;
+    this.detonated = false;
     this.targets = (definition.targets || []).map((entry, index) => ({
       ...(Array.isArray(entry) ? {} : entry),
       pos: new THREE.Vector3(...(Array.isArray(entry) ? entry : entry.pos)),
@@ -635,7 +722,9 @@ export class DroneController {
       'health-bar', 'ammo', 'weapon-name', 'squad-line', 'score-line', 'crosshair',
     ].map(id => [document.getElementById(id), document.getElementById(id)?.style.display || '']);
     for (const [element] of this.hiddenHud) if (element) element.style.display = 'none';
-    camera.fov = 78;
+    // A real FPV camera is a wide fisheye — the periphery is how the pilot judges speed
+    // near the ground. The bomber flies a sedate gimbal view closer to the ISR optics.
+    camera.fov = definition.fov ?? (this.mode === 'fpv' ? 106 : 78);
     camera.updateProjectionMatrix();
     this.canvas = document.getElementById('game-canvas');
     this.savedCanvasFilter = this.canvas?.style.filter || '';
@@ -702,7 +791,20 @@ export class DroneController {
         this.targetBoxes.push(box);
       }
     }
+    if (this.isFpvFamily) {
+      // Thermal blobs only, no targeting boxes: the FPV pilot finds the target with their
+      // eyes and the map brief, exactly like the real thing. Thermal is the night aid.
+      for (const vehicle of this.combatVehicles) {
+        const signature = thermalSignature(vehicle, true);
+        scene.add(signature);
+        this.thermalSignatures.push(signature);
+      }
+    }
 
+    if (this.isFpvFamily) {
+      this.buildFpvOverlay(definition);
+      return;
+    }
     this.overlay = document.createElement('div');
     this.overlay.innerHTML = `
       <div class="drone-video-filter"></div>
@@ -748,6 +850,86 @@ export class DroneController {
     this.help = this.overlay.querySelector('.drone-help');
   }
 
+  // The FPV skin is modelled on what the feed actually is: an analog camera with Betaflight
+  // OSD characters composited over it — blocky white glyphs with a hard shadow, battery
+  // voltage and per-cell voltage, mAh drawn, flight timer, link quality/RSSI, home arrow.
+  // The video degrades the analog way: snow and tear bars that thicken as SNR falls, never
+  // a clean digital freeze. (Analog is what strike crews fly precisely because it fails soft.)
+  buildFpvOverlay(definition) {
+    this.overlay = document.createElement('div');
+    this.overlay.innerHTML = `
+      <canvas class="fpv-noise"></canvas>
+      <div class="fpv-tear"></div>
+      <div class="fpv-cross">+</div>
+      <div class="fpv-name">${this.craftName}</div>
+      <div class="fpv-mode">${this.mode === 'bomber' ? 'ANGLE // PAYLOAD' : 'ACRO // ARMED'}</div>
+      <div class="fpv-timer">00:00</div>
+      <div class="fpv-dist"></div>
+      <div class="fpv-batt"></div>
+      <div class="fpv-link"></div>
+      <div class="fpv-warn"></div>
+      <div class="drone-result fpv-result"></div>
+      <div class="fpv-help">${this.mode === 'bomber'
+    ? 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP BOMB · N THERMAL'
+    : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FLY INTO THE TARGET'}</div>
+    `;
+    Object.assign(this.overlay.style, {
+      position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: 40,
+      color: '#e9efe9',
+      font: '700 15px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace',
+      letterSpacing: '1px',
+      textShadow: '1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000',
+    });
+    const style = document.createElement('style');
+    style.textContent = `
+      .fpv-noise{position:absolute;inset:0;width:100%;height:100%;opacity:0;mix-blend-mode:screen}
+      .fpv-tear{position:absolute;left:0;right:0;height:0;background:rgba(235,240,235,.5);opacity:0;filter:blur(1px)}
+      .fpv-cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);font-size:22px;font-weight:400}
+      .fpv-name{position:absolute;left:6%;top:5%}
+      .fpv-mode{position:absolute;left:6%;top:calc(5% + 22px);font-size:12px;color:#cfd8cf}
+      .fpv-timer{position:absolute;right:6%;top:5%}
+      .fpv-dist{position:absolute;left:50%;top:5%;transform:translateX(-50%);text-align:center;white-space:pre}
+      .fpv-batt{position:absolute;left:6%;bottom:7%;white-space:pre;font-size:17px}
+      .fpv-link{position:absolute;right:6%;bottom:7%;text-align:right;white-space:pre}
+      .fpv-warn{position:absolute;left:50%;top:63%;transform:translateX(-50%);color:#ffd8b0;font-size:18px;letter-spacing:3px;animation:fpvblink 0.6s steps(2) infinite}
+      .fpv-help{position:absolute;left:50%;bottom:2.5%;transform:translateX(-50%);font-size:11px;font-weight:400;letter-spacing:1px;white-space:nowrap;color:#c9d2c9}
+      .fpv-result{position:absolute;left:50%;top:26%;transform:translateX(-50%);padding:9px 14px;border:1px solid rgba(233,239,233,.5);background:rgba(8,10,8,.78);letter-spacing:2px;opacity:0;transition:opacity .18s}
+      @keyframes fpvblink{50%{opacity:0.15}}
+    `;
+    this.overlay.appendChild(style);
+    document.body.appendChild(this.overlay);
+    this.status = null;
+    this.lock = null;
+    this.help = this.overlay.querySelector('.fpv-help');
+    this.result = this.overlay.querySelector('.fpv-result');
+    this.osd = {
+      timer: this.overlay.querySelector('.fpv-timer'),
+      dist: this.overlay.querySelector('.fpv-dist'),
+      batt: this.overlay.querySelector('.fpv-batt'),
+      link: this.overlay.querySelector('.fpv-link'),
+      warn: this.overlay.querySelector('.fpv-warn'),
+      tear: this.overlay.querySelector('.fpv-tear'),
+    };
+    // Analog snow: a tiny noise canvas stretched over the screen, redrawn at television
+    // cadence. Opacity rides (1 - link) so jamming looks like jamming, not like lag.
+    this.noiseCanvas = this.overlay.querySelector('.fpv-noise');
+    this.noiseCanvas.width = 160;
+    this.noiseCanvas.height = 96;
+    this.noiseCtx = this.noiseCanvas.getContext('2d');
+    this.noiseClock = 0;
+    // The analog cameras strike crews fly are colour-thin and contrast-hot.
+    if (this.canvas) {
+      this.canvas.style.filter = 'saturate(.62) contrast(1.14) brightness(.94)';
+    }
+    if (definition.startMessage) {
+      this.result.textContent = definition.startMessage;
+      this.result.style.opacity = '1';
+      this.resultTimer = setTimeout(() => {
+        if (!this.complete) this.result.style.opacity = '0';
+      }, 2600);
+    }
+  }
+
   markReconTarget(target) {
     if (!target || target.marked || this.mode === 'strike') return false;
     target.marked = true;
@@ -766,22 +948,32 @@ export class DroneController {
 
   update(dt, input, solids) {
     if (!this.active) return;
+    if (this.frozen) {
+      // Expended or lost: the feed is dead. Keep the explosion animating under the snow.
+      this.updateEffects(dt);
+      if (this.isFpvFamily) this.updateFpvOsd(dt);
+      return;
+    }
+    this.flightTime += dt;
     this.updateThermalBurst(dt, input);
-    this.yaw -= input.lookDelta.x * 0.72;
-    this.pitch = Math.max(-1.15, Math.min(0.72, this.pitch - input.lookDelta.y * 0.62));
+    // Jamming degrades the CONTROL link too, not just the picture: inside a bubble the
+    // stick response goes mushy before it dies. Legacy modes fly with a clean link.
+    const control = this.isFpvFamily ? 0.3 + 0.7 * Math.max(this.signal, 0.05) : 1;
+    this.yaw -= input.lookDelta.x * 0.72 * control;
+    this.pitch = Math.max(-1.15, Math.min(0.72, this.pitch - input.lookDelta.y * 0.62 * control));
     this.roll += ((-input.move.x * 0.42) - this.roll) * Math.min(1, dt * 6);
 
     const cp = Math.cos(this.pitch);
     this.forward.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
     this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const thrust = -input.move.y;
-    this.vel.addScaledVector(this.forward, thrust * 19 * dt);
-    this.vel.addScaledVector(this.right, input.move.x * 11 * dt);
-    if (input.ads) this.vel.y += 10 * dt;
+    this.vel.addScaledVector(this.forward, thrust * this.accel * control * dt);
+    this.vel.addScaledVector(this.right, input.move.x * this.accel * 0.58 * control * dt);
+    if (input.ads) this.vel.y += 10 * control * dt;
     if (input.crouch) this.vel.y -= 9 * dt;
     const damping = Math.exp(-1.45 * dt);
     this.vel.multiplyScalar(damping);
-    if (this.vel.length() > MAX_SPEED) this.vel.setLength(MAX_SPEED);
+    if (this.vel.length() > this.maxSpeed) this.vel.setLength(this.maxSpeed);
 
     this.next.copy(this.pos).addScaledVector(this.vel, dt);
     this.move.copy(this.next).sub(this.pos);
@@ -792,15 +984,42 @@ export class DroneController {
         solids, this.pos.x, this.pos.y, this.pos.z,
         this.move.x, this.move.y, this.move.z, distance + 0.16);
       if (hit > distance) this.pos.copy(this.next);
-      else this.vel.multiplyScalar(-0.18);
+      else if (this.mode === 'fpv') {
+        // An armed FPV does not bounce off a wall. Whatever it touches, it touches once.
+        this.fpvDetonate(this.pos.clone().addScaledVector(this.move, Math.max(0, hit - 0.05)));
+        return;
+      } else this.vel.multiplyScalar(-0.18);
     }
     const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.12, this.pos.y + 1);
-    this.pos.y = Math.max((ground === -Infinity ? 0 : ground) + 0.65, Math.min(34, this.pos.y));
+    const floor = (ground === -Infinity ? 0 : ground) + 0.65;
+    if (this.mode === 'fpv' && this.pos.y <= floor && this.vel.y < -2.2) {
+      this.fpvDetonate(this.pos.clone().setY(floor - 0.4));
+      return;
+    }
+    this.pos.y = Math.max(floor, Math.min(this.ceiling, this.pos.y));
 
     const fromLaunch = this.pos.distanceTo(this.launch);
-    this.signal = Math.max(0, Math.min(1, 1 - fromLaunch / this.maxRange));
-    this.battery = Math.max(0, this.battery - dt * (0.72 + this.vel.length() / MAX_SPEED * 0.42));
-    if (this.signal <= 0.02 || this.battery <= 0) this.resetAircraft();
+    const base = Math.max(0, Math.min(1, 1 - fromLaunch / this.maxRange));
+    // Jammer bubbles. Radius grows with altitude: high and straight is line-of-sight to the
+    // jammer, low along the treeline is terrain masking — the doctrine the mission teaches.
+    this.jamFactor = 1;
+    for (const jammer of this.jammers) {
+      const reach = jammer.r * (0.55 + 0.45 * Math.min(1, this.pos.y / 40));
+      const d = Math.hypot(this.pos.x - jammer.x, this.pos.z - jammer.z);
+      if (d < reach) {
+        this.jamFactor = Math.min(this.jamFactor, Math.pow(Math.max(0, d / reach), 1.4));
+      }
+    }
+    this.signal = base * this.jamFactor;
+    this.battery = Math.max(0, this.battery
+      - dt * (this.batteryDrain + this.vel.length() / this.maxSpeed * this.batteryDrain * 0.6));
+    if (this.isFpvFamily) {
+      // Analog fails soft, but it still fails: hold a dead link too long and the aircraft
+      // is gone. The timer is the pilot's chance to dive out of the bubble.
+      if (this.signal <= 0.1) this.linkLowTimer += dt; else this.linkLowTimer = 0;
+      if (this.linkLowTimer > 1.7) { this.loseAirframe('LINK LOST IN THE BUBBLE'); return; }
+      if (this.battery <= 0) { this.loseAirframe('BATTERY FLAT'); return; }
+    } else if (this.signal <= 0.02 || this.battery <= 0) this.resetAircraft();
 
     this.camera.position.copy(this.pos);
     this.camera.rotation.order = 'YXZ';
@@ -816,6 +1035,11 @@ export class DroneController {
     for (const model of this.targetModels) model?.userData.update?.(dt);
     this.updateMunitions(dt, solids);
     this.updateEffects(dt);
+
+    if (this.isFpvFamily) {
+      this.updateFpvFamily(dt, input, solids);
+      return;
+    }
 
     if (this.mode === 'combat') {
       this.rifleCooldown = Math.max(0, this.rifleCooldown - dt);
@@ -970,6 +1194,192 @@ export class DroneController {
     }
   }
 
+  updateFpvFamily(dt, input, solids) {
+    for (const vehicle of this.combatVehicles) vehicle.update?.(dt, solids);
+    if (this.mode === 'fpv') {
+      for (const vehicle of this.combatVehicles) {
+        if (vehicle.dead) continue;
+        const dx = vehicle.pos.x - this.pos.x;
+        const dy = (vehicle.pos.y + 1.3) - this.pos.y;
+        const dz = vehicle.pos.z - this.pos.z;
+        if (dx * dx + dy * dy + dz * dz < 2.4 * 2.4) {
+          this.fpvDetonate(this.pos.clone());
+          return;
+        }
+      }
+    }
+    if (this.mode === 'bomber' && (input.firePressed || input.nadePressed) && this.bombs > 0) {
+      this.dropBomb();
+    }
+    this.updateFpvOsd(dt);
+    const live = this.combatVehicles.filter(vehicle => !vehicle.dead);
+    if (!live.length && this.combatVehicles.length && !this.complete) {
+      this.complete = true;
+      this.result.textContent = this.resultText;
+      this.result.style.opacity = '1';
+      this.completionTimer = setTimeout(() => this.onComplete?.(), 1400);
+    }
+    if (this.mode === 'bomber' && this.bombs <= 0 && !this.munitions.length
+      && live.length && !this.complete && !this.failedOut) {
+      this.failedOut = true;
+      this.result.textContent = 'PAYLOAD EXPENDED — TARGETS INTACT';
+      this.result.style.opacity = '1';
+      setTimeout(() => this.onFailed?.('PAYLOAD EXPENDED'), 1400);
+    }
+  }
+
+  // Kamikaze terminal event. Aspect matters: the model's nose is local -X, so local +X
+  // rotated by the hull yaw is the rear arc. A caged vehicle shrugs off top/front hits —
+  // the charge goes into the slats — and only the open rear arc puts it down. That single
+  // rule is the cope-cage lesson the mission exists to teach.
+  fpvDetonate(position) {
+    if (this.detonated || this.frozen) return;
+    this.detonated = true;
+    this.createImpactEffect(position, this.airframesLost + 1);
+    this.onCombatBlast?.(position.clone(), 8, 240);
+    let note = 'AIRFRAME EXPENDED — NO EFFECT ON TARGET';
+    for (const vehicle of this.combatVehicles) {
+      if (vehicle.dead) continue;
+      const distance = vehicle.pos.distanceTo(position);
+      if (distance > 7) continue;
+      const rear = new THREE.Vector3(1, 0, 0).applyAxisAngle(UP_AXIS, vehicle.mesh.rotation.y);
+      const toBlast = position.clone().sub(vehicle.pos);
+      toBlast.y = 0;
+      if (toBlast.lengthSq() > 0.001) toBlast.normalize();
+      const rearHit = rear.dot(toBlast) > 0.35;
+      if (vehicle.cage && !rearHit) {
+        vehicle.damage(55);
+        note = 'CAGE DEFEATED THE CHARGE — TAKE THE REAR ARC';
+      } else {
+        const killed = vehicle.damage(460);
+        note = killed
+          ? `${vehicle.label || 'TARGET'} DESTROYED`
+          : 'TARGET HIT — STILL MOVING';
+        if (killed) this.onVehicleKilled?.(vehicle);
+      }
+    }
+    this.loseAirframe(note);
+  }
+
+  // One airframe down, by expenditure or by loss. If the target list is finished, freeze on
+  // the final crash frame under full static; if frames remain, the next quad comes up from
+  // the launch point; if neither, the sortie has failed and the mission is told so.
+  loseAirframe(reason) {
+    if (this.frozen) return;
+    this.airframesLost++;
+    this.vel.set(0, 0, 0);
+    const liveTargets = this.combatVehicles.some(vehicle => !vehicle.dead);
+    if (!liveTargets && this.combatVehicles.length) {
+      this.frozen = true;
+      this.signal = 0;
+      if (!this.complete) {
+        this.complete = true;
+        this.result.textContent = this.resultText;
+        this.result.style.opacity = '1';
+        this.completionTimer = setTimeout(() => this.onComplete?.(), 1700);
+      }
+      return;
+    }
+    if (this.airframesLost >= this.airframes) {
+      this.frozen = true;
+      this.signal = 0;
+      if (!this.failedOut) {
+        this.failedOut = true;
+        this.result.textContent = `${reason} — ALL AIRFRAMES EXPENDED`;
+        this.result.style.opacity = '1';
+        setTimeout(() => this.onFailed?.(reason), 1500);
+      }
+      return;
+    }
+    this.detonated = false;
+    this.pos.copy(this.launch);
+    this.pos.y += 1.7;
+    this.yaw = this.launchYaw;
+    this.pitch = -0.05;
+    this.battery = 100;
+    this.linkLowTimer = 0;
+    this.result.textContent = `${reason} — AIRFRAME ${this.airframesLost + 1}/${this.airframes} UP`;
+    this.result.style.opacity = '1';
+    clearTimeout(this.resultTimer);
+    this.resultTimer = setTimeout(() => {
+      if (!this.complete) this.result.style.opacity = '0';
+    }, 2600);
+  }
+
+  dropBomb() {
+    this.bombs--;
+    const mesh = new THREE.Mesh(DRONE_MUNITION_GEO, DRONE_MUNITION_MAT);
+    mesh.name = 'drone-dropped-bomb';
+    mesh.position.copy(this.pos);
+    mesh.position.y -= 0.55;
+    // A drop munition leaves with the aircraft's drift and nothing else: lead the target by
+    // flying the release point, exactly like a real bomber sortie. Gravity does the rest.
+    const velocity = this.vel.clone().multiplyScalar(0.85);
+    this.scene.add(mesh);
+    this.munitions.push({ type: 'grenade', mesh, velocity, fuse: 16 });
+    return true;
+  }
+
+  updateFpvOsd(dt) {
+    const osd = this.osd;
+    if (!osd) return;
+    const signal = this.frozen ? 0 : this.signal;
+    // Analog snow at television cadence. A hint of sparkle even on a clean link; a wall of
+    // it when the bubble wins. Frozen (expended/lost) is a dead feed: full snow, no video.
+    this.noiseClock -= dt;
+    // Quadratic, not linear: a mid link is sparkle you fly through, and only the bottom
+    // fifth of the scale is a wall. LQ 50 with a readable picture is the analog promise.
+    const snow = this.frozen
+      ? 0.96
+      : Math.max(0.04, Math.min(0.94, 0.04 + Math.pow(1 - signal, 2.6) * 0.92));
+    this.noiseCanvas.style.opacity = String(snow);
+    if (this.noiseClock <= 0) {
+      this.noiseClock = 1 / 13;
+      const image = this.noiseCtx.createImageData(160, 96);
+      const data = image.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const v = (Math.random() * 255) | 0;
+        data[i] = data[i + 1] = data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+      this.noiseCtx.putImageData(image, 0, 0);
+      // Horizontal tear bars: the classic analog break-up as SNR falls.
+      if (signal < 0.8 && Math.random() < (1 - signal) * 0.55) {
+        osd.tear.style.top = `${(Math.random() * 90) | 0}%`;
+        osd.tear.style.height = `${2 + Math.random() * 14}px`;
+        osd.tear.style.opacity = String(0.25 + (1 - signal) * 0.5);
+      } else {
+        osd.tear.style.opacity = '0';
+      }
+    }
+    const minutes = String(Math.floor(this.flightTime / 60)).padStart(2, '0');
+    const seconds = String(Math.floor(this.flightTime % 60)).padStart(2, '0');
+    osd.timer.textContent = `${minutes}:${seconds}`;
+    // 6S pack: 4.2 V/cell full, 3.3 V/cell flat — the numbers a pilot actually flies by.
+    const cell = 3.3 + (this.battery / 100) * 0.9;
+    const mah = Math.round((100 - this.battery) * (this.mode === 'bomber' ? 44 : 13));
+    osd.batt.textContent = `${(cell * 6).toFixed(1)}V  ${cell.toFixed(2)}V/C\n${mah}MAH`;
+    const lq = Math.round(signal * 100);
+    const rssi = Math.round(-40 - (1 - signal) * 58);
+    osd.link.textContent = `LQ ${lq}\nRSSI ${rssi}DBM`
+      + (this.mode === 'bomber'
+        ? `\nBOMBS ${this.bombs}/${this.bombsTotal}\n${this.thermalEnabled ? 'THERM' : 'EO'}`
+        : '');
+    const meters = this.pos.distanceTo(this.launch) * this.metersPerUnit;
+    const yawHome = Math.atan2(-(this.launch.x - this.pos.x), -(this.launch.z - this.pos.z));
+    let rel = yawHome - this.yaw;
+    rel = ((rel % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+    const arrow = '↑↗→↘↓↙←↖'[((Math.round(-rel / (Math.PI / 4)) % 8) + 8) % 8];
+    osd.dist.textContent = meters >= 1000
+      ? `DIST ${(meters / 1000).toFixed(1)}KM   HOME ${arrow}`
+      : `DIST ${Math.round(meters)}M   HOME ${arrow}`;
+    osd.warn.textContent = this.frozen ? ''
+      : this.linkLowTimer > 0.3 ? 'SIGNAL CRITICAL'
+        : signal < 0.3 ? 'JAMMING'
+          : this.battery < 9 ? 'LAND NOW'
+            : this.battery < 22 ? 'LOW BATTERY' : '';
+  }
+
   updateThermalSignatures() {
     for (const signature of this.thermalSignatures) {
       const target = signature.userData.target;
@@ -1042,6 +1452,12 @@ export class DroneController {
   }
 
   updateThermalBurst(dt, input) {
+    // The heavy bomber carries a real gimbal thermal, not a burst gadget: N is a plain
+    // toggle, on for as long as the pilot wants it. That is how Baba Yaga crews fly nights.
+    if (this.thermalPersistent) {
+      if (input.nvgPressed) this.setThermalEnabled(!this.thermalEnabled);
+      return;
+    }
     const available = this.mode === 'combat' || this.strikeCleanup;
     if (!available) return;
     this.thermalRechargeRemaining = Math.max(0, this.thermalRechargeRemaining - dt);
@@ -1336,7 +1752,17 @@ export class DroneController {
         if (distance < 7) this.damageStrikeSquirter(actor, 185 * (1 - distance / 7), false);
       }
     }
-    this.onCombatBlast?.(position.clone(), 7, 185);
+    if (this.isFpvFamily) {
+      // A dropped bomb is a top attack: cages and aspect do not apply, blast falloff does.
+      for (const vehicle of this.combatVehicles) {
+        if (vehicle.dead) continue;
+        const distance = vehicle.pos.distanceTo(position);
+        if (distance > 9) continue;
+        const killed = vehicle.damage(360 * (1 - distance / 9));
+        if (killed) this.onVehicleKilled?.(vehicle);
+      }
+    }
+    this.onCombatBlast?.(position.clone(), this.isFpvFamily ? 9 : 7, 185);
     this.createImpactEffect(position, this.shotsFired + this.grenadeRounds);
   }
 
@@ -1480,6 +1906,14 @@ export class DroneController {
       disposeObject(effect.root);
     }
     for (const vehicle of this.combatVehicles) {
+      // A killed vehicle stays on the field between sorties: the wreck IS the scoreboard
+      // when the next airframe flies past it. Same parking lot the strike targets use.
+      if (this.persistWrecks && vehicle.dead) {
+        const wrecks = this.scene.userData.droneWrecks || [];
+        if (!wrecks.includes(vehicle.mesh)) wrecks.push(vehicle.mesh);
+        this.scene.userData.droneWrecks = wrecks;
+        continue;
+      }
       this.scene.remove(vehicle.mesh);
       vehicle.mesh.userData.dispose?.();
     }
