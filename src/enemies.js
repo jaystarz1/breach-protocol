@@ -35,6 +35,8 @@ export class Enemy {
     // pressure, while the next layout still receives a distinct tactical sequence.
     this.random = seededRandom(def._seed);
     this.concealed = !!def.concealed;
+    this.identifyTarget = !!def.identifyTarget;
+    this.identified = false;
     this.bastion = !!def.bastion;
     this.mesh = makeCharacter({
       hostile: true, silhouette: !!def.silhouette, concealed: this.concealed,
@@ -51,13 +53,19 @@ export class Enemy {
     this.diff = diff;
     this.dead = false;
     this.surrendered = false;
+    // A surrender is a short, readable transition rather than a flag that flips on the same
+    // frame as the last hit. Until this timer completes the actor is still an armed combatant:
+    // the rifle remains in his hands and a lethal shot is a normal hostile kill, not an execution.
+    this.surrenderPending = false;
+    this.surrenderTimer = 0;
+    this.surrenderReason = null;
     this.secured = false;
     this.executed = false;
     this.deathAnim = 0;
     this.patrol = (def.patrol || []).map(p => ({ x: p[0], z: p[1] }));
     this.patrolIdx = 0;
     this.hold = def.hold || this.patrol.length === 0;
-    this.state = 'patrol';           // patrol | alert | hunt | cover
+    this.state = 'patrol';           // patrol | alert | hunt | cover | surrendering | surrender | secured
     this.reactTimer = 0;
     this.burstTimer = 0;
     this.burstShots = 0;
@@ -189,12 +197,40 @@ export class Enemy {
   }
 
   trySurrender(world, reason = 'suppressed', force = false) {
-    if (this.dead || this.surrendered || this.hvt || this.bastion || this.flee
+    if (this.dead || this.surrendered || this.surrenderPending || this.hvt || this.bastion || this.flee
         || this.perches || this.concealed) return false;
     if (!force && (!this.surrenderEligible || this.hasSupport(world))) return false;
     const hurtEnough = this.health <= this.maxHealth * 0.38 && this.suppression >= 0.68;
     const stunnedEnough = reason === 'flash' && this.suppression >= 0.78;
     if (!force && !hurtEnough && !stunnedEnough) return false;
+    // A flash/forced surrender is already an explicit incapacitation event. Keep that path
+    // immediate for grenades and scripted QA; ordinary suppression gets a visible cease-fire
+    // beat so the player can distinguish "still fighting" from "weapon down, hands up".
+    if (force || reason === 'flash') {
+      this.commitSurrender(world, reason);
+      return true;
+    }
+    this.surrenderPending = true;
+    this.surrenderTimer = 1.0;
+    this.surrenderReason = reason;
+    this.state = 'surrendering';
+    this.path = null;
+    this.pathGoal = null;
+    this.lastKnown = null;
+    this.tacticalGoal = null;
+    this.burstShots = 0;
+    this.burstTimer = 999;
+    this.moving = false;
+    this.shotPoseTimer = 0;
+    world.onEnemySurrendering?.(this, reason);
+    return true;
+  }
+
+  commitSurrender(world, reason = this.surrenderReason || 'suppressed') {
+    if (this.dead || this.surrendered) return false;
+    this.surrenderPending = false;
+    this.surrenderTimer = 0;
+    this.surrenderReason = null;
     this.surrendered = true;
     this.secured = false;
     this.state = 'surrender';
@@ -219,6 +255,10 @@ export class Enemy {
     this.secured = true;
     this.state = 'secured';
     this.moving = false;
+    // The unsecured state is face-down. Bring the actor upright before applying the controlled
+    // kneel so securing does not leave the restraint pose rotated into the floor.
+    this.mesh.rotation.x = 0;
+    this.mesh.rotation.z = 0;
     surrenderPoseRig(this.mesh, true);
     world.onEnemySecured?.(this, by);
     return true;
@@ -252,6 +292,9 @@ export class Enemy {
     }
     if (this.health <= 0) {
       this.executed = wasDetainee;
+      this.surrenderPending = false;
+      this.surrenderTimer = 0;
+      this.surrenderReason = null;
       this.surrendered = false;
       this.dead = true;
       this.deathAnim = 0.001;
@@ -287,7 +330,7 @@ export class Enemy {
   // position. A patrol investigates that last-known point and still needs sight before it can
   // present a weapon or shoot. Window specialists and the fleeing HVT retain authored logic.
   hearGunshot(origin, world, radius = 55) {
-    if (this.dead || this.surrendered || this.perches || this.flee) return false;
+    if (this.dead || this.surrendered || this.surrenderPending || this.perches || this.flee) return false;
     const distance = Math.hypot(
       origin.x - this.pos.x, origin.y - this.pos.y, origin.z - this.pos.z);
     if (distance > radius) return false;
@@ -296,6 +339,19 @@ export class Enemy {
     const investigates = distance <= Math.min(radius, 34);
     if (investigates) this.lastKnown = source;
     else this.heardBearing = Math.atan2(origin.x - this.pos.x, origin.z - this.pos.z);
+    // Marketplace shooters are civilians until the contact breaks. A nearby report is the
+    // signal: they visibly produce the rifle and take a short beat before returning fire, so
+    // the player gets the intended weapon/no-weapon decision without a separate identification
+    // interaction.
+    if (this.identifyTarget && this.concealed && investigates) {
+      this.revealWeapon();
+      this.state = 'alert';
+      this.reactTimer = Math.max(
+        this.reactTimer, this.diff.enemyReaction * 0.8 + 0.35);
+      this.lastKnown = source;
+      this.alertNearby(world);
+      return true;
+    }
     if (this.state === 'patrol') {
       // A nearby report gets an investigation. A distant report only puts the position on
       // alert; otherwise one rifle shot at the north end of a long level makes the entire
@@ -561,6 +617,22 @@ export class Enemy {
       settleDeathRig(this.mesh, world.solids, dt);
       return;
     }
+    if (this.surrenderPending) {
+      // Cease fire first, then visibly complete the surrender. The weapon stays carried during
+      // this window, and damage() can still produce an ordinary hostile kill with no detainee
+      // penalty. Only commitSurrender drops the rifle and changes the clear-objective state.
+      this.moving = false;
+      this.burstShots = 0;
+      this.burstTimer = 999;
+      this.shotPoseTimer = 0;
+      this.surrenderTimer = Math.max(0, this.surrenderTimer - dt);
+      this.mesh.rotation.y = this.yaw;
+      animateRig(this.mesh, this.walkPhase, false, this.flinch, false, 'surrendering');
+      const g = groundHeight(world.solids, this.pos.x, this.pos.z, 0.3, this.pos.y + 0.75);
+      this.pos.y += ((g === -Infinity ? 0 : g) - this.pos.y) * Math.min(1, dt * 10);
+      if (this.surrenderTimer <= 0) this.commitSurrender(world, this.surrenderReason);
+      return;
+    }
     if (this.surrendered) {
       this.moving = false;
       this.burstShots = 0;
@@ -633,7 +705,11 @@ export class Enemy {
     }
 
     if (this.state === 'patrol') {
-      if (seesTarget && inCone) {
+      // A concealed marketplace shooter only needs a clear sightline to the contact, not a
+      // pre-authored facing cone. That makes the draw readable in play instead of leaving a
+      // civilian-looking actor inert because he happened to be looking down an aisle.
+      const concealedContact = this.identifyTarget && this.concealed && seesTarget;
+      if (concealedContact || (seesTarget && inCone)) {
         this.revealWeapon();
         this.state = 'alert';
         this.reactTimer = this.diff.enemyReaction * (0.7 + this.random() * 0.6);
@@ -717,10 +793,21 @@ export class Enemy {
         // once we are wedged is what actually breaks the loop.
         const reached = Math.hypot(lk.x - p.x, lk.z - p.z) < 2.0 || this.blocked > 1.2;
         if (reached) {
-          this.lastKnown = null; this.path = null;
-          this.state = 'alert';
-          this.repositionTimer = 1.5;
-          this.blocked = 0;
+          if (this.converge) {
+            // Reinforcements never go passive. Arriving at a cold last-known and standing
+            // down is what left the last two men of a wave squatting at their spawn while a
+            // zone-less "clear all hostiles" objective waited on them — so a converging
+            // hostile re-cues the hunt on the player's current position instead.
+            this.lastKnown = { x: world.playerPos.x, y: world.playerPos.y, z: world.playerPos.z };
+            this.path = null;
+            this.blocked = 0;
+            this.repathTimer = Math.min(this.repathTimer, 0.8);
+          } else {
+            this.lastKnown = null; this.path = null;
+            this.state = 'alert';
+            this.repositionTimer = 1.5;
+            this.blocked = 0;
+          }
         } else {
           if (this.repathTimer <= 0) {
             this.repathTimer = 1.5 + this.random();
@@ -728,6 +815,10 @@ export class Enemy {
           }
           if (!this.followPath(dt, world, this.speed)) this.moveToward(lk.x, lk.z, dt, world, this.speed * 0.8);
         }
+      } else if (this.converge) {
+        // Anything that nulls lastKnown elsewhere would otherwise park a converging
+        // reinforcement for good; re-seed so the hunt branch picks it up next frame.
+        this.lastKnown = { x: world.playerPos.x, y: world.playerPos.y, z: world.playerPos.z };
       }
     }
 
@@ -849,6 +940,16 @@ export class Enemy {
 
   doShoot(dt, world, dist, target) {
     if (this.concealed || this.surrendered) return;
+    // A hostile may have an abstract line to the player through a stair opening or a stale
+    // last-known position, but a round must still have a reciprocal path into the player's
+    // actual eye point. This keeps concrete landings and wall corners from becoming invisible
+    // hits while preserving normal fire against squadmates and the overwatch team.
+    const shootingPlayer = target === world.playerPos || this.targetPlayer;
+    if (shootingPlayer && world.playerPos && !hasLOS(
+      world.solids,
+      world.playerPos.x, world.playerPos.y + 1.6, world.playerPos.z,
+      this.pos.x, this.pos.y + 1.35, this.pos.z,
+    )) return;
     this.burstTimer -= dt;
     if (this.burstTimer > 0) return;
     if (this.burstShots <= 0) {

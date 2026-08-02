@@ -80,17 +80,25 @@ def main():
             enemy.mesh.visible = false;
           }
         }""")
-        page.wait_for_function("() => BP.world.objectiveIdx === 1", timeout=5000)
+        page.wait_for_function(
+            "() => BP.world.objectiveIdx === 1 && BP.world.objectiveStepIdx === 0",
+            timeout=5000,
+        )
         transient_before = page.evaluate("""() => {
           BP.weapons.onFire(0);
           return BP.world.effects.filter(effect => effect.combatTransient).length;
         }""")
         page.evaluate("""() => {
-          const timer = setInterval(() => BP.player.pos.set(-11.2, 0.1, -41.6), 16);
+          const timer = setInterval(() => {
+            BP.player.pos.set(-11.2, 0.1, -41.6);
+            BP.input.breachPressed = true;
+          }, 16);
           setTimeout(() => clearInterval(timer), 750);
         }""")
         page.wait_for_function(
-            "() => BP.world.objectiveIdx === 2 && !!BP.world.drone", timeout=5000
+            "() => BP.world.objectiveIdx === 1"
+            " && BP.world.objectiveStepIdx === 1 && !!BP.world.drone",
+            timeout=5000,
         )
         recon = page.evaluate("""() => {
           const drone = BP.world.drone;

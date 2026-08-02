@@ -66,6 +66,12 @@ export function resolveReinforcementVariant(definition, value) {
     variantIndex(value, definition.atVariants.length)
   ] || definition.at;
   out.at = sockets.map(point => [...point]);
+  // A zone-armed wave (a rigged room) must follow the room when the room itself is a
+  // variant socket — the street-sweep storefronts rotate between three layouts.
+  const trigger = definition.triggerVariants?.[
+    variantIndex(value, definition.triggerVariants.length)
+  ] || definition.trigger;
+  if (trigger) out.trigger = { ...trigger, zone: trigger.zone ? [...trigger.zone] : undefined };
   return out;
 }
 

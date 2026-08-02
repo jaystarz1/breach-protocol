@@ -40,6 +40,7 @@ def main():
                 BP.world.level.enemies, BP.world.level.enemySpawns,
               ).map(position => position.map(value => +value.toFixed(3)).join(',')));
               const droneDefinitions = BP.world.level.objectives
+                .flatMap(phase => phase.steps || [phase])
                 .flatMap(objective => objective.combatWave?.enemies || []);
               const allowedDrone = new Set(authoredActorSockets(
                 droneDefinitions, [],

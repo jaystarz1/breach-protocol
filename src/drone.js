@@ -5,6 +5,8 @@ import {
 
 const MAX_RANGE = 95;
 const MAX_SPEED = 16;
+const THERMAL_BURST_SECONDS = 3;
+const THERMAL_RECHARGE_SECONDS = 5;
 const DRONE_MUNITION_GEO = new THREE.SphereGeometry(0.12, 10, 7);
 const DRONE_FLASH_GEO = new THREE.SphereGeometry(1.05, 18, 12);
 const DRONE_SMOKE_GEO = new THREE.SphereGeometry(1.25, 14, 10);
@@ -13,10 +15,19 @@ const DRONE_FRAGMENT_GEO = new THREE.BoxGeometry(0.13, 0.13, 0.13);
 const DRONE_HEAT_BODY_GEO = new THREE.CapsuleGeometry(0.23, 0.68, 4, 8);
 const DRONE_HEAT_HEAD_GEO = new THREE.SphereGeometry(0.2, 10, 7);
 const DRONE_HEAT_VEHICLE_GEO = new THREE.BoxGeometry(3.8, 1.45, 1.9);
-const DRONE_TARGET_BOX_PERSON_GEO = new THREE.EdgesGeometry(
-  new THREE.BoxGeometry(0.9, 2.05, 0.9));
-const DRONE_TARGET_BOX_VEHICLE_GEO = new THREE.EdgesGeometry(
-  new THREE.BoxGeometry(4.4, 2.15, 2.45));
+const trackingRectangle = (width, height) => new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(-width / 2, -height / 2, 0),
+  new THREE.Vector3(width / 2, -height / 2, 0),
+  new THREE.Vector3(width / 2, height / 2, 0),
+  new THREE.Vector3(-width / 2, height / 2, 0),
+]);
+// Sensor/segmenter overlays live in image space. A 3D cuboid around a person projected as a
+// tilted wire cage; one camera-facing rectangle reads as a tracking result instead.
+const DRONE_TARGET_BOX_PERSON_GEO = trackingRectangle(0.62, 0.62);
+const DRONE_TARGET_BOX_VEHICLE_GEO = trackingRectangle(0.92, 0.92);
+const STRIKE_SQUIRTER_BODY_GEO = new THREE.CapsuleGeometry(0.24, 0.68, 4, 8);
+const STRIKE_SQUIRTER_HEAD_GEO = new THREE.SphereGeometry(0.19, 10, 7);
+const STRIKE_SQUIRTER_LEG_GEO = new THREE.CapsuleGeometry(0.09, 0.48, 3, 7);
 const DRONE_MUNITION_MAT = new THREE.MeshBasicMaterial({
   name: 'drone-strike-munition', color: 0xffd4a3,
 });
@@ -27,17 +38,17 @@ const DRONE_FRAGMENT_DARK_MAT = new THREE.MeshBasicMaterial({
   name: 'drone-strike-fragment-dark', color: 0x252a27,
 });
 const DRONE_TRACER_MAT = new THREE.LineBasicMaterial({
-  name: 'drone-rifle-tracer', color: 0xffe0a1,
-  transparent: true, opacity: 0.92, depthWrite: false,
+  name: 'drone-rifle-tracer', color: 0xffc887,
+  transparent: true, opacity: 0.54, depthWrite: false,
 });
 const DRONE_HEAT_CORE_MAT = new THREE.MeshBasicMaterial({
-  name: 'drone-thermal-core', color: 0xfffbd0,
-  transparent: true, opacity: 0.88, depthTest: true, depthWrite: false,
+  name: 'drone-thermal-core', color: 0xd8d4bb,
+  transparent: true, opacity: 0.46, depthTest: true, depthWrite: false,
   blending: THREE.AdditiveBlending,
 });
 const DRONE_HEAT_HALO_MAT = new THREE.MeshBasicMaterial({
-  name: 'drone-thermal-halo', color: 0xffb870,
-  transparent: true, opacity: 0.22, depthTest: true, depthWrite: false,
+  name: 'drone-thermal-halo', color: 0xaaa58f,
+  transparent: true, opacity: 0.08, depthTest: true, depthWrite: false,
   blending: THREE.AdditiveBlending,
 });
 const DRONE_TARGET_BOX_MAT = new THREE.LineBasicMaterial({
@@ -47,6 +58,12 @@ const DRONE_TARGET_BOX_MAT = new THREE.LineBasicMaterial({
   opacity: 0.9,
   depthTest: true,
   depthWrite: false,
+});
+const STRIKE_SQUIRTER_UNIFORM_MAT = new THREE.MeshStandardMaterial({
+  name: 'drone-strike-squirter-uniform', color: 0x394236, roughness: 0.92,
+});
+const STRIKE_SQUIRTER_SKIN_MAT = new THREE.MeshStandardMaterial({
+  name: 'drone-strike-squirter-skin', color: 0x8d6f59, roughness: 0.9,
 });
 for (const geometry of [
   DRONE_MUNITION_GEO,
@@ -59,6 +76,9 @@ for (const geometry of [
   DRONE_HEAT_VEHICLE_GEO,
   DRONE_TARGET_BOX_PERSON_GEO,
   DRONE_TARGET_BOX_VEHICLE_GEO,
+  STRIKE_SQUIRTER_BODY_GEO,
+  STRIKE_SQUIRTER_HEAD_GEO,
+  STRIKE_SQUIRTER_LEG_GEO,
 ]) {
   geometry.userData.bpPersistent = true;
 }
@@ -67,6 +87,7 @@ for (const material of [
   DRONE_TRACER_MAT,
   DRONE_HEAT_CORE_MAT, DRONE_HEAT_HALO_MAT,
   DRONE_TARGET_BOX_MAT,
+  STRIKE_SQUIRTER_UNIFORM_MAT, STRIKE_SQUIRTER_SKIN_MAT,
 ]) {
   material.userData.bpPersistent = true;
 }
@@ -120,7 +141,7 @@ function thermalSignature(target, vehicle = false) {
 }
 
 function targetingBox(target, vehicle = false) {
-  const line = new THREE.LineSegments(
+  const line = new THREE.LineLoop(
     vehicle ? DRONE_TARGET_BOX_VEHICLE_GEO : DRONE_TARGET_BOX_PERSON_GEO,
     DRONE_TARGET_BOX_MAT,
   );
@@ -130,6 +151,55 @@ function targetingBox(target, vehicle = false) {
   line.renderOrder = 9;
   line.frustumCulled = false;
   return line;
+}
+
+function createStrikeSquirter(target, index) {
+  const mesh = new THREE.Group();
+  mesh.name = 'drone-strike-squirter';
+  const body = new THREE.Mesh(STRIKE_SQUIRTER_BODY_GEO, STRIKE_SQUIRTER_UNIFORM_MAT);
+  body.position.y = 0.94;
+  mesh.add(body);
+  const head = new THREE.Mesh(STRIKE_SQUIRTER_HEAD_GEO, STRIKE_SQUIRTER_SKIN_MAT);
+  head.position.y = 1.62;
+  mesh.add(head);
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(STRIKE_SQUIRTER_LEG_GEO, STRIKE_SQUIRTER_UNIFORM_MAT);
+    leg.position.set(side * 0.13, 0.37, 0);
+    mesh.add(leg);
+  }
+  const lateral = target.index === 0 ? -1 : target.index === 2 ? 1 : (index % 2 ? 1 : -1);
+  const pos = target.pos.clone().add(new THREE.Vector3(lateral * 1.35, 0, 1.2));
+  // Break left/right first, then route around the north wall and back through its corner. The
+  // gun crews are fleeing, not waiting in a firing gallery: once inside, they keep circulating
+  // through the compound instead of becoming stationary targets in the service lane.
+  const side = lateral;
+  const edgeX = side * 31.4;
+  const insideX = side * 27.8;
+  const route = [
+    [edgeX, -45.8], [edgeX, -41.25], [insideX, -41.25],
+    [insideX, -34], [side * 18, -31], [side * 12, -25],
+    [side * 18, -28], [insideX, -34],
+  ].map(([x, z]) => new THREE.Vector3(x, 0.1, z));
+  const direction = route[0].clone().sub(pos).setY(0).normalize();
+  mesh.position.copy(pos);
+  mesh.rotation.y = Math.atan2(direction.x, direction.z);
+  return {
+    pos,
+    mesh,
+    direction,
+    speed: 3.15 + index * 0.28 + target.index * 0.13,
+    health: 42,
+    dead: false,
+    surrendered: false,
+    exposed: true,
+    strikeSquirter: true,
+    distance: 0,
+    route,
+    routeIndex: 0,
+    routeLoopStart: 3,
+    returned: false,
+    fireTimer: 0.9 + index * 0.25 + target.index * 0.18,
+  };
 }
 
 function reconRouteModel(target) {
@@ -240,8 +310,16 @@ function strikeTargetModel(target) {
         [x, 0.48, z * 0.78], [Math.PI / 2, 0, 0]);
     }
     add(new THREE.CylinderGeometry(0.58, 0.7, 0.58, 14), olive, [0.15, 1.18, 0]);
-    add(new THREE.CylinderGeometry(0.12, 0.17, 4.3, 12), steel,
-      [-1.72, 1.6, 0], [0, 0, Math.PI / 2 - 0.18]);
+    // Indirect fire, not a tank gun: elevate the tube over the compound. The local muzzle
+    // points along -X; the authored battery yaw turns that axis south onto the target line.
+    const elevation = target.elevation ?? 0.92;
+    const barrelLength = 4.3;
+    const breechX = 0.18, breechY = 1.45;
+    const muzzleX = breechX - Math.cos(elevation) * barrelLength;
+    const muzzleY = breechY + Math.sin(elevation) * barrelLength;
+    add(new THREE.CylinderGeometry(0.12, 0.17, barrelLength, 12), steel,
+      [(breechX + muzzleX) / 2, (breechY + muzzleY) / 2, 0],
+      [0, 0, Math.PI / 2 - elevation]);
     add(new THREE.BoxGeometry(1.1, 0.62, 1.48), olive, [0.55, 1.42, 0]);
     // A gun position needs people and working space around it. These restrained silhouettes
     // remain cheap at UAV distance, but make the target read as a crewed battery rather than
@@ -283,10 +361,11 @@ function strikeTargetModel(target) {
       });
       const flash = add(
         new THREE.SphereGeometry(0.42, 10, 7), flashMaterial,
-        [-3.82, 1.95, 0]);
+        [muzzleX, muzzleY, 0]);
       const smoke = add(
         new THREE.SphereGeometry(0.55, 10, 7), smokeMaterial,
-        [-4.05, 2.02, 0]);
+        [muzzleX - Math.cos(elevation) * 0.2,
+          muzzleY + Math.sin(elevation) * 0.2, 0]);
       let firingClock = (target.index || 0) * 1.17;
       root.userData.update = dt => {
         if (root.userData.destroyed) {
@@ -301,7 +380,10 @@ function strikeTargetModel(target) {
         const smokeAge = firingClock - 0.08;
         smoke.visible = smokeAge >= 0 && smokeAge < 1.35;
         smoke.material.opacity = smoke.visible ? 0.34 * (1 - smokeAge / 1.35) : 0;
-        smoke.position.set(-4.05 - smokeAge * 0.55, 2.02 + smokeAge * 0.85, 0);
+        smoke.position.set(
+          muzzleX - Math.cos(elevation) * (0.2 + smokeAge * 0.65),
+          muzzleY + Math.sin(elevation) * (0.2 + smokeAge * 0.65) + smokeAge * 0.35,
+          0);
         smoke.scale.setScalar(0.7 + Math.max(0, smokeAge) * 1.5);
       };
     }
@@ -338,6 +420,10 @@ function strikeTargetModel(target) {
     }
     root.rotation.z = target.kind === 'ew' ? 0.05 : -0.035;
     for (const [index, soldier] of (root.userData.crew || []).entries()) {
+      if (index < (target.squirters || 0)) {
+        soldier.visible = false;
+        continue;
+      }
       soldier.rotation.z = (index % 2 ? -1 : 1) * (1.12 + index * 0.08);
       soldier.position.y = 0.16;
     }
@@ -488,6 +574,9 @@ export class DroneController {
     this.roll = 0;
     this.battery = 100;
     this.signal = 1;
+    // Long-range overwatch sorties can be authored per mission without changing the
+    // compact rooftop drone envelope used by the street and tower rounds.
+    this.maxRange = definition.maxRange ?? MAX_RANGE;
     this.active = true;
     this.complete = false;
     this.onComplete = onComplete;
@@ -497,37 +586,51 @@ export class DroneController {
     this.resultText = definition.result || 'ASSAULT ROUTES MAPPED';
     this.combatants = definition.combatants || [];
     this.combatVehicles = definition.combatVehicles || [];
-    this.rifleRounds = this.mode === 'combat' ? (definition.rifleRounds ?? 100) : 0;
-    this.grenadeRounds = this.mode === 'combat' ? (definition.grenades ?? 10) : 0;
+    this.droneInteriorThreshold = definition.droneInteriorThreshold ?? 2;
+    this.rifleRounds = ['combat', 'strike'].includes(this.mode)
+      ? (definition.rifleRounds ?? (this.mode === 'strike' ? 72 : 100)) : 0;
+    this.grenadeRounds = ['combat', 'strike'].includes(this.mode)
+      ? (definition.grenades ?? (this.mode === 'strike' ? 6 : 10)) : 0;
     this.rifleCooldown = 0;
     this.shotsFired = 0;
     this.onCombatShot = definition.onCombatShot || null;
     this.onCombatHit = definition.onCombatHit || null;
     this.onCombatVehicleHit = definition.onCombatVehicleHit || null;
     this.onCombatBlast = definition.onCombatBlast || null;
+    this.onIncomingFire = definition.onIncomingFire || null;
+    this.incomingPressure = 0;
     this.targets = (definition.targets || []).map((entry, index) => ({
       ...(Array.isArray(entry) ? {} : entry),
       pos: new THREE.Vector3(...(Array.isArray(entry) ? entry : entry.pos)),
       marked: false,
       engaged: false,
+      defenceTimer: 0.95 + index * 0.42,
+      defenceCrewIndex: 0,
       index,
     }));
+    this.strikeSquirters = [];
+    this.strikeCleanup = false;
+    this.strikeCleanupStarted = false;
     this.munitions = [];
     this.effects = [];
     this.completionTimer = null;
     this.savedFov = camera.fov;
     this.childVisibility = [];
-    // Hide view-model drawables, not their layer-1-only lighting rig. Hiding the holder group
-    // removed one hemisphere, directional and point light from Three's global light counts;
-    // that changed shader defines and compiled a fresh program family during drone flight.
-    // The retained lights cannot affect layer-0 world geometry, but keep program keys stable.
-    camera.traverse(child => {
-      if (child === camera) return;
-      this.childVisibility.push([child, child.visible]);
-      if (child.isMesh || child.isLine || child.isPoints || child.isSprite) {
-        child.visible = false;
-      }
-    });
+    // Hide view-model drawables, not the rig's lights. Hiding a whole group would remove the
+    // hemisphere/directional pair from that scene's light counts, changing shader defines
+    // and compiling a fresh program family during drone flight — keep program keys stable.
+    // The rig lives in its own overlay scene now (weapons.js viewRoot), registered on the
+    // camera; the camera itself still carries the world-side muzzle flash light.
+    const roots = [camera, ...(camera.userData.viewmodelRoots || [])];
+    for (const root of roots) {
+      root.traverse(child => {
+        if (child === root) return;
+        this.childVisibility.push([child, child.visible]);
+        if (child.isMesh || child.isLine || child.isPoints || child.isSprite) {
+          child.visible = false;
+        }
+      });
+    }
     this.hiddenHud = [
       'health-bar', 'ammo', 'weapon-name', 'squad-line', 'score-line', 'crosshair',
     ].map(id => [document.getElementById(id), document.getElementById(id)?.style.display || '']);
@@ -537,7 +640,7 @@ export class DroneController {
     this.canvas = document.getElementById('game-canvas');
     this.savedCanvasFilter = this.canvas?.style.filter || '';
     if (this.canvas) {
-      this.canvas.style.filter = 'grayscale(1) saturate(0) contrast(1.17) brightness(.84)';
+      this.canvas.style.filter = 'saturate(.78) contrast(1.08) brightness(.9)';
     }
 
     this.forward = new THREE.Vector3();
@@ -550,7 +653,9 @@ export class DroneController {
     this.routeModels = [];
     this.thermalSignatures = [];
     this.targetBoxes = [];
-    this.thermalEnabled = true;
+    this.thermalEnabled = false;
+    this.thermalBurstRemaining = 0;
+    this.thermalRechargeRemaining = 0;
     for (const target of this.targets) {
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(
@@ -640,6 +745,7 @@ export class DroneController {
     this.status = this.overlay.querySelector('.drone-status');
     this.lock = this.overlay.querySelector('.drone-lock');
     this.result = this.overlay.querySelector('.drone-result');
+    this.help = this.overlay.querySelector('.drone-help');
   }
 
   markReconTarget(target) {
@@ -660,21 +766,7 @@ export class DroneController {
 
   update(dt, input, solids) {
     if (!this.active) return;
-    if (this.mode === 'combat' && input.nvgPressed) {
-      this.thermalEnabled = !this.thermalEnabled;
-      if (this.canvas) {
-        this.canvas.style.filter = this.thermalEnabled
-          ? 'grayscale(1) saturate(0) contrast(1.17) brightness(.84)'
-          : 'saturate(.78) contrast(1.08) brightness(.9)';
-      }
-      this.result.textContent = this.thermalEnabled
-        ? 'THERMAL SENSOR // AI TRACK OVERLAY' : 'EO SENSOR // AI TRACK OVERLAY';
-      this.result.style.opacity = '1';
-      clearTimeout(this.resultTimer);
-      this.resultTimer = setTimeout(() => {
-        if (!this.complete) this.result.style.opacity = '0';
-      }, 850);
-    }
+    this.updateThermalBurst(dt, input);
     this.yaw -= input.lookDelta.x * 0.72;
     this.pitch = Math.max(-1.15, Math.min(0.72, this.pitch - input.lookDelta.y * 0.62));
     this.roll += ((-input.move.x * 0.42) - this.roll) * Math.min(1, dt * 6);
@@ -706,7 +798,7 @@ export class DroneController {
     this.pos.y = Math.max((ground === -Infinity ? 0 : ground) + 0.65, Math.min(34, this.pos.y));
 
     const fromLaunch = this.pos.distanceTo(this.launch);
-    this.signal = Math.max(0, Math.min(1, 1 - fromLaunch / MAX_RANGE));
+    this.signal = Math.max(0, Math.min(1, 1 - fromLaunch / this.maxRange));
     this.battery = Math.max(0, this.battery - dt * (0.72 + this.vel.length() / MAX_SPEED * 0.42));
     if (this.signal <= 0.02 || this.battery <= 0) this.resetAircraft();
 
@@ -714,6 +806,11 @@ export class DroneController {
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.set(this.pitch, this.yaw, this.roll);
 
+    this.incomingPressure = Math.max(0, this.incomingPressure - dt * 1.8);
+    if (this.mode === 'strike' && !this.strikeCleanup) {
+      this.updateArtilleryDefence(dt, solids);
+    }
+    if (this.mode === 'strike' && this.strikeCleanup) this.updateStrikeSquirters(dt, solids);
     this.updateThermalSignatures();
     this.updateTargetBoxes();
     for (const model of this.targetModels) model?.userData.update?.(dt);
@@ -730,12 +827,23 @@ export class DroneController {
       const live = this.combatants.filter(actor => !actor.dead && !actor.surrendered);
       const liveVehicles = this.combatVehicles.filter(vehicle => !vehicle.dead);
       const liveCount = live.length + liveVehicles.length;
+      const inside = this.combatants.filter(actor =>
+        !actor.dead && !actor.surrendered && actor.droneInteriorFloor
+        && Math.abs(actor.pos.x) < 8 && actor.pos.z > -17 && actor.pos.z < -3).length;
+      const tracksInterior = this.combatants.some(actor => actor.droneInteriorFloor);
       if (input.breachPressed && liveCount > 0 && !this.complete) {
         this.complete = true;
         this.result.textContent = `HANDOFF // ${liveCount} SURVIVORS JOINING GROUND FIGHT`;
         this.result.style.opacity = '1';
         this.status.textContent += `\nHANDOFF ${liveCount} LIVE`;
         this.completionTimer = setTimeout(() => this.onComplete?.(), 300);
+        return;
+      }
+      if (inside >= this.droneInteriorThreshold && !this.complete) {
+        this.complete = true;
+        this.result.textContent = 'ASSAULT ELEMENT INSIDE // SWITCHING TO SUPPORT STRIKE';
+        this.result.style.opacity = '1';
+        this.status.textContent += `\n${inside} TROOPS INSIDE TOWER // GROUND FIGHT REMAINS`;
         return;
       }
       const nearest = [...live, ...liveVehicles].sort((a, b) =>
@@ -756,13 +864,49 @@ export class DroneController {
         `RIFLE ${this.rifleRounds}/100`,
         `FRAG ${this.grenadeRounds}/10`,
         `HOSTILES ${liveCount}/${this.combatants.length + this.combatVehicles.length}`,
-        `SENSOR ${this.thermalEnabled ? 'THERMAL' : 'EO'} // AI TRACK`,
+        ...(tracksInterior ? [`TOWER ENTRY ${inside}/${this.droneInteriorThreshold}`] : []),
+        this.thermalStatus(),
+        ...(this.incomingPressure > 0.05 ? ['INCOMING FIRE // KEEP MOVING'] : []),
         ...(liveCount <= 4 ? [track] : []),
       ].join('\n');
       this.overlay.style.opacity = String(0.72 + this.signal * 0.28);
       if (!liveCount && (this.combatants.length || this.combatVehicles.length) && !this.complete) {
         this.complete = true;
         this.status.textContent += '\nSTREET SECURE';
+        this.result.textContent = this.resultText;
+        this.result.style.opacity = '1';
+        this.completionTimer = setTimeout(() => this.onComplete?.(), 850);
+      }
+      return;
+    }
+
+    if (this.mode === 'strike' && this.strikeCleanup) {
+      if (this.help) {
+        this.help.textContent = 'WASD FLIGHT · MOUSE/ARROWS LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE RIFLE · G FRAG · N EO/THERMAL';
+      }
+      this.rifleCooldown = Math.max(0, this.rifleCooldown - dt);
+      if (input.fire && this.rifleRounds > 0 && this.rifleCooldown <= 0) {
+        this.fireRifle(solids);
+        this.rifleCooldown = 0.095;
+      }
+      if (input.nadePressed && this.grenadeRounds > 0) this.launchGrenade();
+      const live = this.strikeSquirters.filter(actor => !actor.dead);
+      this.lock.textContent = live.length
+        ? 'SQUIRTERS // RIFLE HOT' : 'GUN CREWS NEUTRALIZED';
+      this.status.textContent = [
+        `LINK ${Math.round(this.signal * 100)}%`,
+        `BAT ${Math.round(this.battery)}%`,
+        `GUNS ${this.targets.filter(target => target.marked).length}/${this.targets.length}`,
+        `SQUIRTERS ${live.length}/${this.strikeSquirters.length}`,
+        `RIFLE ${this.rifleRounds}/72`,
+        `FRAG ${this.grenadeRounds}/6`,
+        this.thermalStatus(),
+        ...(this.incomingPressure > 0.05 ? ['INCOMING FIRE // KEEP MOVING'] : []),
+      ].join('\n');
+      this.overlay.style.opacity = String(0.72 + this.signal * 0.28);
+      if (!live.length && this.strikeSquirters.length && !this.complete) {
+        this.complete = true;
+        this.status.textContent += '\nBATTERY NEUTRALIZED';
         this.result.textContent = this.resultText;
         this.result.style.opacity = '1';
         this.completionTimer = setTimeout(() => this.onComplete?.(), 850);
@@ -808,13 +952,21 @@ export class DroneController {
     ].join('\n');
     this.overlay.style.opacity = String(0.72 + this.signal * 0.28);
     if (marked === this.targets.length && !this.complete) {
-      this.complete = true;
-      this.status.textContent += this.mode === 'strike' ? '\nSTRIKE COMPLETE' : '\nUPLOAD COMPLETE';
+      const crewCleanup = this.mode === 'strike'
+        && this.targets.some(target => (target.squirters || 0) > 0);
+      if (crewCleanup) {
+        const squirters = this.spawnStrikeSquirters();
+        this.result.textContent = `GUNS SILENT // ${squirters.length} CREW FLEEING`;
+        this.result.style.opacity = '1';
+      } else {
+        this.complete = true;
+        this.status.textContent += this.mode === 'strike' ? '\nSTRIKE COMPLETE' : '\nUPLOAD COMPLETE';
+      }
       if (this.mode !== 'strike') {
         this.result.textContent = this.resultText;
         this.result.style.opacity = '1';
       }
-      this.completionTimer = setTimeout(() => this.onComplete?.(), 650);
+      if (this.complete) this.completionTimer = setTimeout(() => this.onComplete?.(), 650);
     }
   }
 
@@ -829,6 +981,114 @@ export class DroneController {
     }
   }
 
+  updateArtilleryDefence(dt, solids) {
+    for (let index = 0; index < this.targets.length; index++) {
+      const target = this.targets[index];
+      if (target.marked || target.kind !== 'artillery') continue;
+      const crew = this.targetModels[index]?.userData.crew || [];
+      if (!crew.length) continue;
+      target.defenceTimer -= dt;
+      if (target.defenceTimer > 0) continue;
+      target.defenceTimer = 1.7 + (index % 3) * 0.52;
+      const gunner = crew[target.defenceCrewIndex++ % crew.length];
+      const origin = new THREE.Vector3();
+      gunner.getWorldPosition(origin);
+      origin.y += 1.12;
+      const aim = this.pos.clone();
+      const distance = origin.distanceTo(aim);
+      if (distance > 86 || !hasLOS(
+        solids, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z,
+      )) continue;
+      gunner.rotation.y = Math.atan2(aim.x - origin.x, aim.z - origin.z)
+        - (this.targetModels[index]?.rotation.y || 0);
+      this.receiveEnemyFire(origin, solids, 1.45);
+    }
+  }
+
+  receiveEnemyFire(origin, solids, impulse = 1.4) {
+    if (!this.active || this.complete) return false;
+    const direction = this.pos.clone().sub(origin);
+    const distance = direction.length();
+    if (distance < 0.01) return false;
+    direction.multiplyScalar(1 / distance);
+    const blocked = raycastSolids(
+      solids, origin.x, origin.y, origin.z,
+      direction.x, direction.y, direction.z, distance,
+    );
+    if (blocked < distance - 0.12) return false;
+    // Draw every confirmed hit so the incoming fire still reads as a live threat. The line is
+    // deliberately dimmer and shorter-lived than the aircraft's own rifle tracer; the impulse
+    // and pressure updates below remain per-hit, preserving the original bounce cadence.
+    const end = this.pos.clone();
+    const geometry = new THREE.BufferGeometry().setFromPoints([origin, end]);
+    const tracer = new THREE.Line(geometry, DRONE_TRACER_MAT);
+    tracer.name = 'drone-incoming-tracer';
+    this.scene.add(tracer);
+    this.effects.push({ type: 'tracer', root: tracer, life: 0.16, age: 0 });
+    this.vel.addScaledVector(direction, impulse);
+    this.roll += (origin.x < this.pos.x ? 1 : -1) * 0.045;
+    this.incomingPressure = Math.min(1, this.incomingPressure + 0.48);
+    this.onIncomingFire?.(origin);
+    return true;
+  }
+
+  setThermalEnabled(enabled) {
+    this.thermalEnabled = enabled;
+    if (this.canvas) {
+      this.canvas.style.filter = enabled
+        ? 'grayscale(1) saturate(0) contrast(1.08) brightness(.72)'
+        : 'saturate(.78) contrast(1.08) brightness(.9)';
+    }
+  }
+
+  updateThermalBurst(dt, input) {
+    const available = this.mode === 'combat' || this.strikeCleanup;
+    if (!available) return;
+    this.thermalRechargeRemaining = Math.max(0, this.thermalRechargeRemaining - dt);
+    if (this.thermalEnabled) {
+      this.thermalBurstRemaining = Math.max(0, this.thermalBurstRemaining - dt);
+      if (this.thermalBurstRemaining <= 0) {
+        this.setThermalEnabled(false);
+        this.thermalRechargeRemaining = THERMAL_RECHARGE_SECONDS;
+        this.showSensorResult('THERMAL DEPLETED // EO TRACKING ACTIVE', 1050);
+      }
+    }
+    if (!input.nvgPressed) return;
+    if (this.thermalEnabled) {
+      this.setThermalEnabled(false);
+      this.thermalBurstRemaining = 0;
+      this.thermalRechargeRemaining = THERMAL_RECHARGE_SECONDS;
+      this.showSensorResult('THERMAL STOWED // RECHARGING', 900);
+    } else if (this.thermalRechargeRemaining <= 0) {
+      this.setThermalEnabled(true);
+      this.thermalBurstRemaining = THERMAL_BURST_SECONDS;
+      this.showSensorResult('THERMAL BURST // 3 SECONDS', 900);
+    } else {
+      this.showSensorResult(
+        `THERMAL CHARGING // ${this.thermalRechargeRemaining.toFixed(1)} SEC`, 700,
+      );
+    }
+  }
+
+  showSensorResult(text, duration) {
+    this.result.textContent = text;
+    this.result.style.opacity = '1';
+    clearTimeout(this.resultTimer);
+    this.resultTimer = setTimeout(() => {
+      if (!this.complete) this.result.style.opacity = '0';
+    }, duration);
+  }
+
+  thermalStatus() {
+    if (this.thermalEnabled) {
+      return `SENSOR THERMAL ${this.thermalBurstRemaining.toFixed(1)}s // AI TRACK`;
+    }
+    if (this.thermalRechargeRemaining > 0) {
+      return `SENSOR EO // THERM CHG ${this.thermalRechargeRemaining.toFixed(1)}s // AI TRACK`;
+    }
+    return 'SENSOR EO // THERM READY // AI TRACK';
+  }
+
   updateTargetBoxes() {
     for (const box of this.targetBoxes) {
       const target = box.userData.target;
@@ -836,12 +1096,84 @@ export class DroneController {
       if (!box.visible) continue;
       box.position.copy(target.pos);
       box.position.y += box.userData.vehicle ? 1.05 : 1.03;
-      if (box.userData.vehicle) box.rotation.y = target.mesh?.rotation.y || 0;
+      box.quaternion.copy(this.camera.quaternion);
     }
   }
 
+  spawnStrikeSquirters() {
+    if (this.strikeCleanupStarted) return this.strikeSquirters;
+    this.strikeCleanupStarted = true;
+    for (const target of this.targets) {
+      for (let index = 0; index < (target.squirters || 0); index++) {
+        const actor = createStrikeSquirter(target, index);
+        this.scene.add(actor.mesh);
+        const signature = thermalSignature(actor);
+        this.scene.add(signature);
+        this.thermalSignatures.push(signature);
+        const box = targetingBox(actor);
+        this.scene.add(box);
+        this.targetBoxes.push(box);
+        this.strikeSquirters.push(actor);
+      }
+    }
+    this.strikeCleanup = this.strikeSquirters.length > 0;
+    return this.strikeSquirters;
+  }
+
+  updateStrikeSquirters(dt, solids = []) {
+    for (const actor of this.strikeSquirters) {
+      if (actor.dead) continue;
+      const waypoint = actor.route[actor.routeIndex];
+      const toWaypoint = waypoint.clone().sub(actor.pos).setY(0);
+      if (toWaypoint.length() < 0.55) {
+        actor.routeIndex = actor.routeIndex + 1 >= actor.route.length
+          ? actor.routeLoopStart : actor.routeIndex + 1;
+      }
+      const next = actor.route[actor.routeIndex];
+      const delta = next.clone().sub(actor.pos).setY(0);
+      const distance = delta.length();
+      if (distance > 0.01) {
+        actor.direction.copy(delta).multiplyScalar(1 / distance);
+        const step = Math.min(distance, actor.speed * dt);
+        actor.pos.addScaledVector(actor.direction, step);
+        actor.distance += step;
+      }
+      actor.returned = actor.returned || (
+        Math.abs(actor.pos.x) < 29.2 && actor.pos.z > -39.2);
+      actor.mesh.position.copy(actor.pos);
+      actor.mesh.rotation.y = Math.atan2(actor.direction.x, actor.direction.z);
+      actor.mesh.rotation.z = Math.sin(actor.distance * 7.5) * 0.035;
+      actor.fireTimer -= dt;
+      if (actor.fireTimer > 0) continue;
+      const origin = actor.pos.clone();
+      origin.y += 1.2;
+      const distanceToDrone = origin.distanceTo(this.pos);
+      if (distanceToDrone < 82 && hasLOS(
+        solids, origin.x, origin.y, origin.z,
+        this.pos.x, this.pos.y, this.pos.z,
+      )) {
+        this.receiveEnemyFire(origin, solids, 1.12);
+        actor.fireTimer = 1.55 + (actor.routeIndex % 3) * 0.3;
+      } else {
+        actor.fireTimer = 0.24;
+      }
+    }
+  }
+
+  damageStrikeSquirter(actor, damage, headshot = false) {
+    if (!actor?.strikeSquirter || actor.dead) return false;
+    actor.health -= headshot ? Math.max(damage, 100) : damage;
+    if (actor.health > 0) return false;
+    actor.dead = true;
+    actor.mesh.rotation.z = actor.direction.x < 0 ? -1.28 : 1.28;
+    actor.mesh.position.y = 0.13;
+    return true;
+  }
+
   fireRifle(solids) {
-    if (this.mode !== 'combat' || this.rifleRounds <= 0) return false;
+    const rifleHot = this.mode === 'combat'
+      || (this.mode === 'strike' && this.strikeCleanup);
+    if (!rifleHot || this.rifleRounds <= 0) return false;
     this.rifleRounds--;
     this.shotsFired++;
     const direction = this.forward.clone();
@@ -861,7 +1193,7 @@ export class DroneController {
     let hitDistance = wallDistance;
     let headshot = false;
     let vehicleHit = false;
-    for (const actor of this.combatants) {
+    for (const actor of [...this.combatants, ...this.strikeSquirters]) {
       if (actor.dead || actor.surrendered || actor.exposed === false) continue;
       const headDistance = raySphere(
         origin.x, origin.y, origin.z,
@@ -899,13 +1231,16 @@ export class DroneController {
       type: 'tracer', root: tracer, life: 0.2, age: 0,
     });
     this.onCombatShot?.(origin, end, hit);
-    if (hit && vehicleHit) this.onCombatVehicleHit?.(hit, 8);
+    if (hit?.strikeSquirter) this.damageStrikeSquirter(hit, headshot ? 99999 : 42, headshot);
+    else if (hit && vehicleHit) this.onCombatVehicleHit?.(hit, 8);
     else if (hit) this.onCombatHit?.(hit, headshot ? 99999 : 42, headshot);
     return true;
   }
 
   launchGrenade() {
-    if (this.mode !== 'combat' || this.grenadeRounds <= 0) return false;
+    const grenadeHot = this.mode === 'combat'
+      || (this.mode === 'strike' && this.strikeCleanup);
+    if (!grenadeHot || this.grenadeRounds <= 0) return false;
     this.grenadeRounds--;
     const mesh = new THREE.Mesh(DRONE_MUNITION_GEO, DRONE_MUNITION_MAT);
     mesh.name = 'drone-launched-grenade';
@@ -994,6 +1329,13 @@ export class DroneController {
   }
 
   combatImpact(position) {
+    if (this.mode === 'strike' && this.strikeCleanup) {
+      for (const actor of this.strikeSquirters) {
+        if (actor.dead) continue;
+        const distance = actor.pos.distanceTo(position);
+        if (distance < 7) this.damageStrikeSquirter(actor, 185 * (1 - distance / 7), false);
+      }
+    }
     this.onCombatBlast?.(position.clone(), 7, 185);
     this.createImpactEffect(position, this.shotsFired + this.grenadeRounds);
   }
@@ -1140,6 +1482,10 @@ export class DroneController {
     for (const vehicle of this.combatVehicles) {
       this.scene.remove(vehicle.mesh);
       vehicle.mesh.userData.dispose?.();
+    }
+    for (const actor of this.strikeSquirters) {
+      this.scene.remove(actor.mesh);
+      disposeObject(actor.mesh);
     }
     for (const signature of this.thermalSignatures) {
       this.scene.remove(signature);

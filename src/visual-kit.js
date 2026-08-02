@@ -1865,46 +1865,69 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
     const capWidth = Math.max(0.8, lot.width - 0.14);
     // A continuous collision wall can still read as individual properties. Shallow,
     // photographed skins give each lot its own construction tone and reset the texture
-    // repeat at the party wall; every lot shares one instanced draw.
-    batcher.add('facade-lot-skins', FACADE_SKIN_GEO, shellMat,
-      instanceMatrix(facadeParent, centre, def.height / 2, -0.012,
-        capWidth, def.height - 0.05, 1),
-      false,
-      lot.tone);
-    const capGeometry = lot.damaged ? DAMAGED_PARAPET_GEO : FACADE_PANEL_GEO;
-    batcher.add(
-      lot.damaged ? 'facade-parapets-damaged' : 'facade-parapets',
-      capGeometry,
-      shellMat,
-      instanceMatrix(
-        facadeParent,
-        centre,
-        def.height + lot.rise / 2 - (lot.damaged ? lot.rise * 0.03 : 0),
-        -0.28,
-        capWidth,
-        lot.rise,
-        1.05,
-      ),
-      true,
-      lot.tone,
-    );
-    // Intact caps receive a projecting stone/metal coping. Damaged caps leave their jagged
-    // edge exposed rather than drawing an implausibly perfect trim line through the breach.
-    if (!lot.damaged) {
-      batcher.add('facade-parapet-coping', UNIT_BOX, copingMat,
-        instanceMatrix(facadeParent, centre, def.height + lot.rise + 0.045, 0.02,
-          capWidth + 0.12, 0.09, 0.46));
-    } else {
-      // A soot field over photographed wall material and a smaller exposed-brick patch gives
-      // shell damage two material depths instead of a black decal standing in for a hole.
-      const scarX = centre + (R() - 0.5) * Math.max(0.4, lot.width * 0.36);
-      const scarY = def.height - 0.65 - R() * Math.min(1.8, def.height * 0.18);
-      batcher.add('facade-shell-scars', FACADE_SCAR_GEO, sootMat,
-        instanceMatrix(facadeParent, scarX, scarY, 0.018,
-          1.8 + R() * 1.2, 1.35 + R() * 0.75, 1, 0, 0, (R() - 0.5) * 0.28));
-      batcher.add('facade-exposed-masonry', FACADE_SCAR_GEO, masonryMat,
-        instanceMatrix(facadeParent, scarX + (R() - 0.5) * 0.18, scarY - 0.05, 0.025,
-          1.13 + R() * 0.52, 0.78 + R() * 0.38, 1, 0, 0, (R() - 0.5) * 0.18));
+    // repeat at the party wall. Split the skin around authored doorway skips: windows already
+    // respected them, but the uninterrupted photographic plane could still cover the actual
+    // opening from outside while remaining invisible from the room behind it.
+    let skinSegments = [{
+      start: lot.start + 0.07,
+      end: lot.start + lot.width - 0.07,
+    }];
+    for (const gap of def.skip || []) {
+      const gapStart = -len / 2 + gap.from;
+      const gapEnd = -len / 2 + gap.to;
+      skinSegments = skinSegments.flatMap(segment => {
+        if (gapEnd <= segment.start || gapStart >= segment.end) return [segment];
+        const pieces = [];
+        if (gapStart > segment.start) pieces.push({ start: segment.start, end: gapStart });
+        if (gapEnd < segment.end) pieces.push({ start: gapEnd, end: segment.end });
+        return pieces;
+      });
+    }
+    for (const segment of skinSegments) {
+      const skinWidth = segment.end - segment.start;
+      if (skinWidth < 0.05) continue;
+      batcher.add('facade-lot-skins', FACADE_SKIN_GEO, shellMat,
+        instanceMatrix(facadeParent, (segment.start + segment.end) / 2,
+          def.height / 2, -0.012, skinWidth, def.height - 0.05, 1),
+        false,
+        lot.tone);
+    }
+    if (def.roofCaps !== false) {
+      const capGeometry = lot.damaged ? DAMAGED_PARAPET_GEO : FACADE_PANEL_GEO;
+      batcher.add(
+        lot.damaged ? 'facade-parapets-damaged' : 'facade-parapets',
+        capGeometry,
+        shellMat,
+        instanceMatrix(
+          facadeParent,
+          centre,
+          def.height + lot.rise / 2 - (lot.damaged ? lot.rise * 0.03 : 0),
+          -0.28,
+          capWidth,
+          lot.rise,
+          1.05,
+        ),
+        true,
+        lot.tone,
+      );
+      // Intact caps receive a projecting stone/metal coping. Damaged caps leave their jagged
+      // edge exposed rather than drawing an implausibly perfect trim line through the breach.
+      if (!lot.damaged) {
+        batcher.add('facade-parapet-coping', UNIT_BOX, copingMat,
+          instanceMatrix(facadeParent, centre, def.height + lot.rise + 0.045, 0.02,
+            capWidth + 0.12, 0.09, 0.46));
+      } else {
+        // A soot field over photographed wall material and a smaller exposed-brick patch gives
+        // shell damage two material depths instead of a black decal standing in for a hole.
+        const scarX = centre + (R() - 0.5) * Math.max(0.4, lot.width * 0.36);
+        const scarY = def.height - 0.65 - R() * Math.min(1.8, def.height * 0.18);
+        batcher.add('facade-shell-scars', FACADE_SCAR_GEO, sootMat,
+          instanceMatrix(facadeParent, scarX, scarY, 0.018,
+            1.8 + R() * 1.2, 1.35 + R() * 0.75, 1, 0, 0, (R() - 0.5) * 0.28));
+        batcher.add('facade-exposed-masonry', FACADE_SCAR_GEO, masonryMat,
+          instanceMatrix(facadeParent, scarX + (R() - 0.5) * 0.18, scarY - 0.05, 0.025,
+            1.13 + R() * 0.52, 0.78 + R() * 0.38, 1, 0, 0, (R() - 0.5) * 0.18));
+      }
     }
 
     if (lot.breached) {
@@ -2010,6 +2033,24 @@ outgoingLight += (0.008 + bpWindowFresnel * 0.055)
             0.045, 0.52, 0.045, 0, 0, brokenSide * 0.035));
       }
     }
+  }
+  // `skip` describes a ground-floor doorway in the tower facades. The vertical skin split
+  // above keeps that opening clear, then these header pieces restore the photographed wall
+  // above the lintel instead of exposing a raw full-height stripe through every upper floor.
+  for (const gap of def.skip || []) {
+    const headerBottom = 2.52;
+    const headerHeight = def.height - headerBottom;
+    if (headerHeight <= 0.05) continue;
+    const start = -len / 2 + gap.from;
+    const end = -len / 2 + gap.to;
+    const centre = (start + end) / 2;
+    const lot = lots.find(candidate =>
+      centre >= candidate.start && centre < candidate.start + candidate.width) || lots[0];
+    batcher.add('facade-doorway-skin-headers', FACADE_SKIN_GEO, shellMat,
+      instanceMatrix(facadeParent, centre, headerBottom + headerHeight / 2, -0.011,
+        end - start, headerHeight, 1),
+      false,
+      lot?.tone ?? 0x8a9292);
   }
   // Party-wall piers project through the window plane and continue above the old flat roof.
   // They make each lot read as a separate building even where the gameplay wall is continuous.

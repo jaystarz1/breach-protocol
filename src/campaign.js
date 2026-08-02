@@ -41,10 +41,10 @@ export const CAMPAIGN_MISSIONS = [
   {
     node: 'OP ALPHA',
     sitrep: 'An apartment block overlooks the eastern approaches, but assault troops hold its floors and residents are being used to prevent supporting fire.',
-    purpose: 'Retake the building, recover the residents and activate the rooftop reconnaissance position.',
+    purpose: 'Retake the building, recover the residents and arm the rooftop drone against the next reinforcement wave.',
     target: 'Morozov has begun moving electronic-warfare assets toward the district.',
     intel: 'The trapped observers recorded a 37th signals convoy moving under BASTION’s personal routing code.',
-    result: 'OP Alpha is transmitting. The rooftop sortie maps the signals team’s withdrawal through the western alleys.',
+    result: 'OP Alpha is transmitting. Its armed rooftop drone breaks the next reinforcement wave before it can enter the block.',
     nextLead: 'DIRECTION FINDER — intercept the routing log before it crosses the assault line.',
   },
   {

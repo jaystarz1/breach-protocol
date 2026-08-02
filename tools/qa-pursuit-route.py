@@ -73,8 +73,41 @@ def main():
             page.wait_for_timeout(160)
             page.screenshot(path=str(output / name))
 
+        # The garage log is a physical pickup on the authored direction-finder table. Walk onto
+        # its socket after clearing the garage and verify that proximity capture advances to the
+        # exfil gate without depending on a desktop-only breach button.
+        page.evaluate("""() => {
+          for (const enemy of BP.world.enemies) enemy.dead = true;
+          BP.world.objectiveIdx = 1;
+          BP.world.objectiveStepIdx = 0;
+        }""")
+        page.wait_for_function(
+            "() => BP.world.objectiveIdx === 1 && BP.world.objectiveStepIdx === 1",
+            timeout=10000,
+        )
+        log_pickup = page.evaluate("""() => {
+          const device = BP.world.objectiveDevices.find(item => item.id === 'l4-log');
+          BP.player.pos.set(device.pos[0], device.pos[1], device.pos[2]);
+          return {
+            pos: device.pos,
+            marker: BP.world.beacon?.name,
+            markerDeviceId: BP.world.beacon?.userData?.deviceId,
+            usedBefore: device.used,
+            objectiveBefore: BP.objective.text,
+          };
+        }""")
+        page.wait_for_function(
+            "() => BP.world.objectiveIdx === 2 && BP.world.objectiveStepIdx === 0",
+            timeout=10000,
+        )
+        log_pickup["usedAfter"] = page.evaluate(
+            "() => BP.world.objectiveDevices.find(item => item.id === 'l4-log').used"
+        )
+        log_pickup["objectiveAfter"] = page.evaluate("() => BP.objective.text")
+
         result.update({
             "screenshots": [shot[0] for shot in shots],
+            "logPickup": log_pickup,
             "errors": errors[:8],
         })
         print(json.dumps(result, indent=2))
@@ -106,6 +139,12 @@ def main():
         assert counts.get("pursuit-direction-finder-mast", 0) == 1, result
         assert counts.get("pursuit-escape-gate-leaves", 0) == 2, result
         assert counts.get("pursuit-escape-gate-sandbags", 0) == 10, result
+        assert result["logPickup"]["pos"] == [-11.1, 0, -35.8], result
+        assert result["logPickup"]["marker"] == "objective-device-marker", result
+        assert result["logPickup"]["markerDeviceId"] == "l4-log", result
+        assert result["logPickup"]["usedBefore"] is False, result
+        assert result["logPickup"]["usedAfter"] is True, result
+        assert "EXFIL" in result["logPickup"]["objectiveAfter"], result
         assert result["calls"] < 350, result
         assert result["triangles"] < 700_000, result
         browser.close()

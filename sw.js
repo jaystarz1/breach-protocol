@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v130-authored-motor-pool';
+const CACHE = 'breach-protocol-v160-sniper-one-survivor';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

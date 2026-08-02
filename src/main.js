@@ -6,7 +6,7 @@ import { Enemy, resetPathBudget } from './enemies.js';
 import { Civilian } from './civilians.js';
 import { DoorSystem } from './breach.js';
 import { buildStaticGeometry } from './levelgen.js';
-import { raycastSolids, raySphere, rayVerticalCapsule, groundHeight, hasLOS } from './physics.js';
+import { makeBox, raycastSolids, raySphere, rayVerticalCapsule, groundHeight, hasLOS } from './physics.js';
 import { LEVELS } from './levels/index.js';
 import { buildNavGrid } from './navgrid.js';
 import { DIFFICULTIES } from './difficulty.js';
@@ -121,7 +121,9 @@ function showBrief(id) {
   $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/10 NODES SECURED`;
   $('brief-target-status').textContent = mission.target;
   $('brief-evidence').textContent = `CURRENT INTELLIGENCE — ${mission.intel}`;
-  $('brief-text').textContent = briefingText(id, L.brief);
+  const phasePlan = (L.objectives || []).map((phaseDef, index) =>
+    `${index + 1}. ${phaseDef.text || phaseDef.id || 'AUTHORED PHASE'}`).join('\n');
+  $('brief-text').textContent = `${briefingText(id, L.brief)}\n\nTHREE-PHASE PLAN\n${phasePlan}`;
   hud.screen('brief');
 }
 
@@ -210,8 +212,42 @@ function setNvg(on) {
   r.nvgAmb.visible = on;
   r.nvgHemi.visible = on;
   r.hemi.visible = !on;
-  if (r.sun) r.sun.intensity = r.sunI * (on ? 0.22 : 1);
-  if (r.fill) r.fill.intensity = r.fillI * (on ? 0.25 : 1);
+  // A dark level — one flagged nvg, or one whose power has been cut — has NO light for a
+  // naked eye to amplify. Goggles-off there is not "low light", it is nothing: ambient
+  // floored at a value ACES maps to black, key and fill dead. If you can comfortably clear
+  // rooms without the goggles, the goggles are set dressing; this is what makes them the
+  // only way to see.
+  const dark = r.dark || world?.blackedOut;
+  if (!on && dark) {
+    // The environment map lights every PBR surface on its own, and even a 0.02 ambient is
+    // plainly readable after tone mapping — both were measured, not guessed. Stash the env
+    // and floor the ambients at values ACES actually maps to black.
+    if (scene.environment) { r.envStash = scene.environment; scene.environment = null; }
+    r.ambBase.intensity = 0.002;
+    r.hemi.intensity = 0.001;
+    if (r.sun) r.sun.intensity = 0;
+    if (r.fill) r.fill.intensity = 0;
+    if (r.fixtures) for (const f of r.fixtures) f.intensity = 0;
+    // The gun must go dark with the room. A hair of fill so it is a silhouette rather than
+    // a hole; the overlay scene's env map goes too, or the metals keep a ghost sheen.
+    if (weapons) {
+      weapons.viewFill.intensity = 0.05;
+      weapons.viewKey.intensity = 0;
+      weapons.viewScene.environment = null;
+    }
+  } else {
+    if (r.envStash) { scene.environment = r.envStash; r.envStash = null; }
+    r.ambBase.intensity = r.ambBaseI;
+    r.hemi.intensity = r.hemiI;
+    if (r.sun) r.sun.intensity = r.sunI * (on ? 0.22 : 1);
+    if (r.fill) r.fill.intensity = r.fillI * (on ? 0.25 : 1);
+    if (r.fixtures) for (const f of r.fixtures) f.intensity = f.userData.baseIntensity * (on ? 0.35 : 1);
+    if (weapons) {
+      weapons.viewFill.intensity = weapons.viewFillI;
+      weapons.viewKey.intensity = weapons.viewKeyI;
+      weapons.viewScene.environment = scene.environment;
+    }
+  }
 }
 
 // Kill the power. Every fixture out, the natural ambient crushed to almost nothing, and the
@@ -222,7 +258,10 @@ function killPower() {
   if (!nvgRig || world.blackedOut) return;
   world.blackedOut = true;
   const r = nvgRig;
-  if (r.fixtures) for (const f of r.fixtures) f.intensity = 0;
+  r.dark = true;
+  // Zero the BASE intensities, not just the current ones: the breakers are gone, so no
+  // later goggle toggle may ever bring a fixture back.
+  if (r.fixtures) for (const f of r.fixtures) { f.userData.baseIntensity = 0; f.intensity = 0; }
   for (const material of scene.userData.blackoutMaterials || []) {
     if (material?.isMeshStandardMaterial && material.emissiveIntensity > 0) {
       material.userData.blackoutIntensity ??= material.emissiveIntensity;
@@ -236,10 +275,11 @@ function killPower() {
   // reference costs nothing and it comes back on the next level load.
   r.savedEnv = scene.environment;
   scene.environment = null;
-  r.ambBase.intensity *= 0.05;
-  r.hemi.intensity *= 0.05;
-  if (r.sun) { r.sunI = 0; r.sun.intensity = 0; }
-  if (r.fill) { r.fillI = 0; r.fill.intensity = 0; }
+  r.ambBaseI = 0.02;
+  r.hemiI = 0.015;
+  r.sunI = 0;
+  r.fillI = 0;
+  setNvg(nvgOn);   // re-derive every light from the now-dead base state
   if (world.litMesh) world.litMesh.visible = false;
   sfx.explosion(player.pos);
   hud.flashWhite(0.5);
@@ -250,6 +290,32 @@ function killPower() {
   // owning the dark: the goggles are an advantage, not just a different colour palette.
   for (const e of world.enemies) e.range = Math.min(e.range, 12);
   world.darkRange = 12;
+}
+
+// Emergency power. The counterpart to killPower(): a breaker device brings up a handful of
+// authored red/amber fixtures and a faint warm ambient — NOT the house lights. The floor
+// stays night-dark between the pools, so the goggles remain the way to clear the black
+// cubicles while the amber marks the routes; under NVG the same pools bloom hot. Turning the
+// breaker into a real lighting change is what makes "RESTORE EMERGENCY POWER" a true phase
+// instead of a panel that recolors itself.
+function emergencyPower() {
+  if (!nvgRig || nvgRig.emergency) return;
+  const r = nvgRig;
+  r.emergency = [];
+  const sockets = world.level.emergencyLights || [];
+  for (const [x, y, z] of sockets.slice(0, 6)) {
+    const pl = new THREE.PointLight(0xff5a2a, 1.35, 11, 2);
+    pl.position.set(x, y, z);
+    scene.add(pl);
+    r.emergency.push(pl);
+  }
+  // Deliberately NOT clearing r.dark and NOT raising the ambient floors: the level stays a
+  // dark level. setNvg() never touches these point lights, so the pools burn in both goggle
+  // states — bare-eyed the floor is black with red islands, under NVG the same islands bloom.
+  // That asymmetry is the whole point: the breaker gives you landmarks, not house lights.
+  sfx.objective();
+  hud.flashWhite(0.25);
+  hud.feed('EMERGENCY POWER ONLINE — RED CIRCUIT ONLY', '#ff8a65');
 }
 
 function startLevel(id) {
@@ -370,6 +436,9 @@ function startLevel(id) {
   scene.add(hemi);
   nvgRig = { ambBase, nvgAmb, nvgHemi, hemi, sun: sunLight, fill: fillLight,
              sunI: sunLight ? sunLight.intensity : 0, fillI: fillLight ? fillLight.intensity : 0,
+             ambBaseI: ambBase.intensity, hemiI: hemi.intensity,
+             // nvg levels are dark from the first frame; blackout levels turn dark at killPower()
+             dark: !!L.nvg,
              fixtures: null };
   setNvg(!!L.nvg);
 
@@ -383,19 +452,36 @@ function startLevel(id) {
   for (const l of used) {
     const pl = new THREE.PointLight(l.color, l.intensity * (L.nvg ? 0.35 : 1), l.distance, 2);
     pl.position.set(l.pos[0], l.pos[1], l.pos[2]);
+    pl.userData.baseIntensity = l.intensity;   // setNvg re-derives from this on every toggle
     scene.add(pl);
     fixtures.push(pl);          // kept so a level can cut the power later
   }
   nvgRig.fixtures = fixtures;
+  setNvg(nvgOn);   // fixtures arrive after the first setNvg — re-apply so a dark start covers them
   if (roomLights.length > used.length) {
     console.warn(`[bp] level ${L.id}: ${roomLights.length - used.length} of ${roomLights.length} fixtures dropped (cap ${LIGHT_CAP})`);
   }
 
   const { solids, mesh: staticMesh, litMesh } = buildStaticGeometry(scene, geo);
+  const objectiveDevices = createObjectiveDevices(L.objectiveDevices || []);
+  // Objective gates are authored as a temporary collision solid rather than baked into the
+  // merged geometry. That keeps the vehicle passage blocked until the operator actually opens
+  // it, while allowing the exact same objective device to remove the blocker at runtime.
+  for (const device of objectiveDevices) {
+    if (!device.blocker) continue;
+    const b = device.blocker;
+    device.blockerSolid = makeBox(b.x, b.y, b.z, b.width, b.height, b.depth);
+    solids.push(device.blockerSolid);
+  }
   addVisualProps(scene, visualProps);
   addInteriorMissionArt(scene, L.id);
   if (!indoor) addFrontlineAmbientArt(scene, L.id, bounds);
   addFrontlineMissionArt(scene, L.id);
+  // Mission art owns the gate leaf animation. Resolve it after the art pass so an authored
+  // device remains data-driven and the generic objective UI does not need a level special case.
+  for (const device of objectiveDevices) {
+    if (device.visualId) device.visual = scene.getObjectByName(device.visualId) || null;
+  }
   if (L.id === 2) {
     addStreetSweepArt(scene, solids, missionVariant);
     addFrontlineStreetArt(scene);
@@ -437,6 +523,11 @@ function startLevel(id) {
 
   weapons = new Weapons(camera);
   weapons.setLoadout(L.weapons, L.grenades ?? 0, L.flashes ?? 0);
+  // The overlay scene needs the same environment map as the world or the gun's PBR metals
+  // render black — two analytic lights alone give them nothing to reflect. setNvg() drops
+  // this again whenever a dark level demands a dark gun.
+  weapons.viewScene.environment = scene.environment;
+  setNvg(nvgOn);   // re-derive now that the weapons rig exists
 
   // flashlight (blackout level)
   flashlight = null;
@@ -454,8 +545,10 @@ function startLevel(id) {
     enemies: [], civilians: [], allies: [], grenades: [], effects: [],
     playerPos: player.pos, playerYaw: player.yaw, playerSpeed: 0, playerAds: false, playerCrouched: false,
     combatHeat: 0, slowmo: 0, blind: 0,
+    droneHandoff: null,
     hostageCommand: 'follow',
-    objectiveIdx: 0, won: false, over: false,
+    objectiveIdx: 0, objectiveStepIdx: 0, objectiveDevices,
+    won: false, over: false,
     stats: {
       kills: 0, surrenders: 0, detaineesSecured: 0, detaineeKills: 0,
       shotsFired: 0, shotsHit: 0, civKills: 0, rescued: 0,
@@ -476,6 +569,11 @@ function startLevel(id) {
       } else if (byAlly) hud.feed('SQUAD — HOSTILE DOWN', '#8fd0ff');
       else { this.stats.score += 100; hud.feed('HOSTILE DOWN', '#a5d6a7'); }
       this.combatHeat = Math.max(this.combatHeat, 4);
+    },
+    onEnemySurrendering(e) {
+      // This is deliberately not a no-shoot warning. Until the weapon is discarded the actor
+      // is still a combatant, so a round during this beat is judged as a normal hostile hit.
+      hud.feed('HOSTILE CEASES FIRE — WEAPON NOT YET DROPPED', '#ffd180');
     },
     onEnemySurrendered(e, reason) {
       this.stats.surrenders++;
@@ -643,12 +741,23 @@ function startLevel(id) {
   // uncapped drip would make every "eliminate all hostiles" objective impossible to satisfy,
   // and reinforcing during the final objective would do the same, so both are ruled out below.
   if (L.reinforce) {
-    world.reinf = {
-      ...resolveReinforcementVariant(L.reinforce, missionVariant),
-      timer: L.reinforce.first ?? L.reinforce.every,
-      sent: 0,
-      max: Math.max(1, Math.round(L.reinforce.max * diff.enemyCountMul)),
-    };
+    // A level may define one reinforcement clock or a list. Beyond the classic timed wave,
+    // a config can be gated: `trigger.zone` arms it the first time the player enters a rect
+    // (a rigged room), `startPhase` holds it until an objective phase begins (a counter-
+    // attack), and both spawn CONVERGING hostiles — see reinforcements() below.
+    const reinforceDefs = Array.isArray(L.reinforce) ? L.reinforce : [L.reinforce];
+    world.reinfs = reinforceDefs.map(def => {
+      const resolved = resolveReinforcementVariant(def, missionVariant);
+      return {
+        ...resolved,
+        timer: def.first ?? def.every,
+        sent: 0,
+        max: Math.max(1, Math.round(def.max * diff.enemyCountMul)),
+        armed: !resolved.trigger,
+      };
+    });
+    // The primary clock keeps its old name: QA tools and set-piece code read world.reinf.
+    world.reinf = world.reinfs[0];
   }
 
   // civilian scaling (never scale hostages — they're placed deliberately)
@@ -760,7 +869,7 @@ function startLevel(id) {
   // middle of the final mission.
   const droneWarmup = new THREE.Group();
   droneWarmup.name = 'all-mission-drone-material-prewarm';
-  for (const objective of L.objectives.filter(candidate =>
+  for (const objective of L.objectives.flatMap(phase => phaseSteps(phase)).filter(candidate =>
     candidate.type === 'drone' && ['strike', 'combat'].includes(candidate.mode))) {
     const child = dronePrewarmGroup(objective);
     if (child) droneWarmup.add(child);
@@ -847,9 +956,16 @@ function spawnDroneCombatWave(obj) {
     }, world.diff);
     enemy.droneTarget = true;
     enemy.surrenderEligible = false;
-    enemy.droneRoute = (definition.droneRoute || definition.patrol || [])
+    const baseRoute = (definition.droneRoute || definition.patrol || [])
       .map(point => ({ x: point[0], z: point[1] }));
+    const ingress = (wave.droneIngress?.[index % wave.droneIngress.length] || [])
+      .map(point => ({ x: point[0], z: point[1] }));
+    enemy.droneRoute = baseRoute.concat(ingress);
+    enemy.droneRouteLoopStart = baseRoute.length;
+    enemy.droneRouteLoops = ingress.length > 1;
+    enemy.droneInteriorFloor = index < (wave.droneInteriorCount ?? 0);
     enemy.droneRouteIdx = 0;
+    enemy.droneFireTimer = 0.7 + (index % 4) * 0.34;
     enemy.state = 'patrol';
     world.enemies.push(enemy);
     actors.push(enemy);
@@ -868,7 +984,7 @@ function spawnDroneCombatWave(obj) {
     label: wave.label || 'ASSAULT ELEMENT',
     spawned: actors.length,
   };
-  if (world.reinf) world.reinf.sent = world.reinf.max;
+  stopReinforcements();
   hud.feed(`${actors.length} HOSTILES ENTERING THE STREET — STACK HOLDING`, '#ffb283');
   hud.reinf(`DRONE INTERDICTION — ${actors.length} HOSTILES`);
   sfx.contact(player.pos);
@@ -888,7 +1004,10 @@ function updateDroneCombatWave(dt) {
     const waypoint = route?.[Math.min(enemy.droneRouteIdx, route.length - 1)];
     if (waypoint) {
       if (Math.hypot(waypoint.x - enemy.pos.x, waypoint.z - enemy.pos.z) < 1.0) {
-        enemy.droneRouteIdx = Math.min(route.length - 1, enemy.droneRouteIdx + 1);
+        const nextIndex = enemy.droneRouteIdx + 1;
+        enemy.droneRouteIdx = nextIndex >= route.length
+          ? (enemy.droneRouteLoops ? enemy.droneRouteLoopStart : route.length - 1)
+          : nextIndex;
         enemy.path = null;
       }
       const next = route[Math.min(enemy.droneRouteIdx, route.length - 1)];
@@ -903,7 +1022,27 @@ function updateDroneCombatWave(dt) {
       // The aerial wave now uses the same nav graph and collision-aware path following as
       // ground combat. If no route exists it holds and retries instead of running forever
       // into the first truck, wall or barricade on the direct line.
-      enemy.followPath(dt, world, enemy.speed * 0.72);
+      if (!enemy.followPath(dt, world, enemy.speed * 0.72)) {
+        // A busy frame can deny an A* slot. Keep the formation walking toward its next
+        // authored socket while it retries, so a denied path never looks like a stopped truck.
+        enemy.moveToward(next.x, next.z, dt, world, enemy.speed * 0.58);
+      }
+    }
+    enemy.droneFireTimer -= dt;
+    if (enemy.droneFireTimer <= 0 && world.drone && !world.drone.complete) {
+      const origin = new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.22, enemy.pos.z);
+      const droneTarget = world.drone.pos;
+      const distance = origin.distanceTo(droneTarget);
+      if (distance < 78 && hasLOS(
+        world.solids, origin.x, origin.y, origin.z,
+        droneTarget.x, droneTarget.y, droneTarget.z,
+      )) {
+        world.drone.receiveEnemyFire(origin, world.solids, 1.55);
+        enemy.yaw = Math.atan2(droneTarget.x - enemy.pos.x, droneTarget.z - enemy.pos.z);
+        enemy.droneFireTimer = 1.55 + enemy.random() * 1.35;
+      } else {
+        enemy.droneFireTimer = 0.22;
+      }
     }
     enemy.settle(dt, world);
   }
@@ -967,9 +1106,140 @@ function restoreGroundCombatAfterDrone() {
   world.droneGroundVisibility = null;
 }
 
+// Missions expose three authored top-level phases. A phase may contain several physical
+// steps (for example Level 10's combat UAV followed by its strike UAV), but only the active
+// step owns the world transition. Keeping this adapter here lets old one-step definitions
+// continue to work while the campaign is migrated without duplicating objective logic.
+function phaseSteps(phase) {
+  return phase?.steps?.length ? phase.steps : (phase ? [phase] : []);
+}
+
+function currentPhase() {
+  return world?.level?.objectives?.[world.objectiveIdx] || null;
+}
+
+function activeObjective() {
+  const phase = currentPhase();
+  const steps = phaseSteps(phase);
+  return steps[world?.objectiveStepIdx ?? 0] || null;
+}
+
+function nextObjectiveStep() {
+  const phase = currentPhase();
+  const steps = phaseSteps(phase);
+  const nextStep = (world?.objectiveStepIdx ?? 0) + 1;
+  if (nextStep < steps.length) return steps[nextStep];
+  return phaseSteps(world?.level?.objectives?.[world.objectiveIdx + 1])[0] || null;
+}
+
+function phaseObjectiveText(text = '') {
+  const phase = currentPhase();
+  const steps = phaseSteps(phase);
+  const step = world?.objectiveStepIdx ?? 0;
+  const phaseLabel = `PHASE ${Math.min((world?.objectiveIdx ?? 0) + 1,
+    world?.level?.objectives?.length || 1)}/${world?.level?.objectives?.length || 1}`;
+  const stepLabel = steps.length > 1 ? ` · STEP ${Math.min(step + 1, steps.length)}/${steps.length}` : '';
+  return `${phaseLabel}${stepLabel} — ${text || phase?.text || 'MISSION COMPLETE'}`;
+}
+
+function setObjectiveText(text) {
+  hud.objective(phaseObjectiveText(text));
+}
+
+const OBJECTIVE_DEVICE_COLORS = {
+  breaker: 0x9dffc4,
+  console: 0x8cecff,
+  relay: 0x8cecff,
+  antenna: 0xffd180,
+  gate: 0xffb74d,
+  server: 0x9dffc4,
+  seal: 0xffb74d,
+  launch: 0x8cecff,
+};
+
+function createObjectiveDevices(definitions = []) {
+  return definitions.map(def => {
+    const root = new THREE.Group();
+    root.name = `objective-device-${def.id}`;
+    root.position.set(def.pos[0], def.pos[1] ?? 0, def.pos[2]);
+    const accent = OBJECTIVE_DEVICE_COLORS[def.kind] || 0x8cecff;
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(def.width ?? 0.72, def.height ?? 1.05, def.depth ?? 0.42),
+      new THREE.MeshStandardMaterial({ color: 0x39444b, roughness: 0.72, metalness: 0.38 }),
+    );
+    body.position.y = (def.height ?? 1.05) / 2;
+    body.castShadow = quality.shadows;
+    body.receiveShadow = true;
+    root.add(body);
+    const panel = new THREE.Mesh(
+      new THREE.BoxGeometry((def.width ?? 0.72) * 0.62, (def.height ?? 1.05) * 0.42, 0.035),
+      new THREE.MeshStandardMaterial({
+        color: 0x182126, emissive: accent, emissiveIntensity: 0.16,
+        roughness: 0.42, metalness: 0.28,
+      }),
+    );
+    panel.position.set(0, (def.height ?? 1.05) * 0.58, (def.depth ?? 0.42) / 2 + 0.02);
+    root.add(panel);
+    const lamp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.075, 8, 6),
+      new THREE.MeshBasicMaterial({ color: accent }),
+    );
+    lamp.position.set(0, (def.height ?? 1.05) * 0.86, (def.depth ?? 0.42) / 2 + 0.045);
+    root.add(lamp);
+    if (def.kind === 'gate' || def.kind === 'seal') {
+      const handle = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.42, 0.08),
+        new THREE.MeshStandardMaterial({ color: 0xb68b50, roughness: 0.56, metalness: 0.48 }),
+      );
+      handle.position.set((def.width ?? 0.72) * 0.28, (def.height ?? 1.05) * 0.46, (def.depth ?? 0.42) / 2 + 0.05);
+      root.add(handle);
+    }
+    scene.add(root);
+    return { ...def, root, used: false };
+  });
+}
+
+function nearestObjectiveDevice(obj) {
+  if (!obj || !world?.objectiveDevices?.length) return null;
+  const wanted = obj.device || obj.devices;
+  const ids = Array.isArray(wanted) ? wanted : wanted ? [wanted] : [];
+  if (!ids.length) return null;
+  let best = null, bestDistance = obj.radius ?? 2.2;
+  for (const device of world.objectiveDevices) {
+    if (device.used || !ids.includes(device.id)) continue;
+    const dy = Math.abs((device.pos[1] ?? 0) - player.pos.y);
+    if (dy > 2.2) continue;
+    const distance = Math.hypot(device.pos[0] - player.pos.x, device.pos[2] - player.pos.z);
+    if (distance < bestDistance) { best = device; bestDistance = distance; }
+  }
+  return best;
+}
+
+function useObjectiveDevice(device, obj) {
+  if (!device || !obj) return false;
+  device.used = true;
+  device.root.userData.used = true;
+  if (device.blockerSolid) {
+    const index = world?.solids?.indexOf(device.blockerSolid) ?? -1;
+    if (index >= 0) world.solids.splice(index, 1);
+    device.opened = true;
+    device.visual?.userData?.openGate?.();
+  }
+  device.root.traverse(part => {
+    if (part.material?.emissiveIntensity !== undefined) part.material.emissiveIntensity = 0.82;
+    if (part.material?.color) part.material.color.setHex(OBJECTIVE_DEVICE_COLORS[device.kind] || 0x9dffc4);
+  });
+  hud.feed(`${device.label || obj.text || 'OBJECTIVE DEVICE'} SECURED`, '#9dffc4');
+  sfx.objective();
+  // A device may carry a world effect beyond its own panel. Declared in the level definition
+  // so the objective text and the consequence are authored side by side.
+  if (device.effect === 'emergencyPower') emergencyPower();
+  return true;
+}
+
 function setObjective() {
-  const obj = world.level.objectives[world.objectiveIdx];
-  hud.objective(obj ? obj.text : 'MISSION COMPLETE');
+  const obj = activeObjective();
+  setObjectiveText(obj ? obj.text : 'MISSION COMPLETE');
   world.objectiveState = null;
   world.objStuckTime = 0;
   world.lastIntelCallout = 0;
@@ -982,6 +1252,7 @@ function setObjective() {
   if (world.drone && !world.drone.complete) {
     world.drone.dispose();
     world.drone = null;
+    if (world.droneSensorNvg) { world.droneSensorNvg = false; setNvg(false); }
     restoreGroundCombatAfterDrone();
     player.locked = !!world.level.lockPlayer;
   }
@@ -992,10 +1263,10 @@ function setObjective() {
     world.markZone = obj.zone || null;
   } else { world.markLive = null; world.markZone = null; }
   if (obj && obj.type === 'defend') {
-    // The authored defense phase owns its pressure. Stop the generic reinforcement clock,
+    // The authored defense phase owns its pressure. Stop the generic reinforcement clocks,
     // then fold any surface attackers already in play into this objective so entering the
     // drone view can never leave a rifleman shooting an immobile player.
-    if (world.reinf) world.reinf.sent = world.reinf.max;
+    stopReinforcements();
     for (const enemy of world.enemies) {
       if (!enemy.dead && !enemy.surrendered && enemy.pos.y >= -1 && !enemy.hvt) {
         enemy.defenseObjective = world.objectiveIdx;
@@ -1041,14 +1312,104 @@ function setObjective() {
     marker.userData.material = markerMat;
     scene.add(marker);
     world.beacon = marker;
+  } else if (obj && obj.type === 'escort' && obj.destination) {
+    // The sniper cannot physically walk with the assault element. Mark its destination in
+    // the world and keep a live arrival count on the HUD so the player knows exactly what
+    // their cover fire is waiting for.
+    const [zx, zz, , zy] = obj.destination;
+    const marker = new THREE.Group();
+    marker.name = 'escort-destination-marker';
+    const markerMat = new THREE.MeshBasicMaterial({
+      color: 0xffc45c,
+      transparent: true,
+      opacity: 0.58,
+      depthTest: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const destinationRadius = Math.max(2.2, Math.min(12, obj.destination[2] ?? 5));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(
+      destinationRadius * 0.86, destinationRadius * 0.94, 40), markerMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.012;
+    marker.add(ring);
+    const ticks = [];
+    for (let i = 0; i < 4; i++) {
+      const angle = i * Math.PI / 2;
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(
+        Math.max(0.42, destinationRadius * 0.1), 0.025, 0.07), markerMat);
+      tick.position.set(
+        Math.cos(angle) * destinationRadius * 1.04,
+        0.014,
+        Math.sin(angle) * destinationRadius * 1.04,
+      );
+      tick.rotation.y = -angle + Math.PI / 2;
+      marker.add(tick);
+      ticks.push(tick);
+    }
+    marker.position.set(zx, (zy ?? 0) + 0.055, zz);
+    marker.userData.ring = ring;
+    marker.userData.ticks = ticks;
+    marker.userData.material = markerMat;
+    marker.userData.destination = true;
+    scene.add(marker);
+    world.beacon = marker;
+  } else if (obj && (obj.type === 'interact' || obj.type === 'secure')) {
+    const wanted = obj.device || obj.devices;
+    const ids = Array.isArray(wanted) ? wanted : wanted ? [wanted] : [];
+    const device = world.objectiveDevices.find(item => ids.includes(item.id) && !item.used);
+    if (device) {
+      // Interactables need the same grounded, depth-tested locator as exits. A console that
+      // only exists as a small mesh is easy to miss after a firefight, especially when the
+      // player comes down a stairwell and is looking across the room rather than at it.
+      const marker = new THREE.Group();
+      marker.name = 'objective-device-marker';
+      const markerMat = new THREE.MeshBasicMaterial({
+        color: OBJECTIVE_DEVICE_COLORS[device.kind] || 0x8cecff,
+        transparent: true,
+        opacity: 0.62,
+        depthTest: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.72, 0.86, 32), markerMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.012;
+      marker.add(ring);
+      const ticks = [];
+      for (let i = 0; i < 4; i++) {
+        const angle = i * Math.PI / 2;
+        const tick = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.025, 0.055), markerMat);
+        tick.position.set(Math.cos(angle) * 1.02, 0.014, Math.sin(angle) * 1.02);
+        tick.rotation.y = -angle + Math.PI / 2;
+        marker.add(tick);
+        ticks.push(tick);
+      }
+      marker.position.set(device.pos[0], (device.pos[1] ?? 0) + 0.055, device.pos[2]);
+      marker.userData.ring = ring;
+      marker.userData.ticks = ticks;
+      marker.userData.material = markerMat;
+      marker.userData.deviceId = device.id;
+      scene.add(marker);
+      world.beacon = marker;
+    }
   } else if (obj && obj.type === 'drone') {
     player.locked = true;
+    // The UAS carries its own image intensifier: launching over a blacked-out map must not
+    // hand the operator a black feed. Borrow the goggle light state for the flight and give
+    // it back on handoff (unless the player already had the goggles latched themselves).
+    if (nvgRig && (nvgRig.dark || world.blackedOut) && !nvgOn) {
+      world.droneSensorNvg = true;
+      setNvg(true);
+      hud.feed('UAS SENSOR — IMAGE INTENSIFIER ACTIVE', '#8cecff');
+    }
     const combatants = obj.mode === 'combat' ? spawnDroneCombatWave(obj) : [];
     const combatVehicles = obj.mode === 'combat'
       ? (world.droneAssault?.vehicles || []) : [];
     suspendGroundCombatForDrone(obj);
     const runtimeDefinition = obj.mode === 'combat' ? {
       ...obj,
+      droneInteriorThreshold: obj.combatWave?.droneInteriorThreshold ?? 2,
       combatants,
       combatVehicles,
       onCombatShot(from, to, directHit) {
@@ -1097,12 +1458,46 @@ function setObjective() {
         }
         world.combatHeat = Math.max(world.combatHeat, 6);
       },
+      onIncomingFire(origin) {
+        sfx.enemyShot(origin);
+      },
+    } : obj.mode === 'strike' ? {
+      ...obj,
+      onCombatShot(from, to, directHit) {
+        world.stats.shotsFired++;
+        sfx.rifle();
+        if (directHit?.strikeSquirter) {
+          world.stats.shotsHit++;
+          hud.hitmarker();
+        }
+      },
+      onCombatBlast(position) {
+        sfx.explosion(position);
+        world.combatHeat = Math.max(world.combatHeat, 6);
+      },
+      onIncomingFire(origin) {
+        sfx.enemyShot(origin);
+      },
     } : obj;
     world.drone = new DroneController(scene, camera, runtimeDefinition, () => {
       if (!world?.drone) return;
       world.drone.complete = true;
       if (obj.result) hud.feed(obj.result, '#8cecff');
     });
+    if (world.droneHandoff) {
+      const handoff = world.droneHandoff;
+      world.droneHandoff = null;
+      // Consecutive drone objectives are one sortie: keep the aircraft in the air while the
+      // operator changes from the assault-wave gun to the support-strike reticle.
+      world.drone.launch.copy(handoff.pos);
+      world.drone.pos.copy(handoff.pos);
+      world.drone.vel.copy(handoff.vel).multiplyScalar(0.35);
+      world.drone.yaw = handoff.yaw;
+      world.drone.pitch = handoff.pitch;
+      world.drone.roll = handoff.roll;
+      world.drone.battery = handoff.battery;
+      world.drone.signal = handoff.signal;
+    }
   }
 }
 
@@ -1117,65 +1512,105 @@ function blackoutTrigger() {
   killPower();
 }
 
-// Timed reinforcements. Spawns are refused on the LAST objective so the mission always
-// converges. A hidden reinforcement set may use authored, physically occluded staging sockets:
-// if the player can currently see every one of them, the wave waits instead of materialising.
+// Stop every reinforcement clock at once. Authored set pieces (drone assault waves, recon
+// ground responses, defend phases) own their own pressure; a generic wave landing in the
+// middle of one reads as a spawn bug, not a threat.
+function stopReinforcements() {
+  for (const r of world.reinfs || []) r.sent = r.max;
+}
+
+// Timed reinforcements. Generic clocks are refused on the LAST objective so the mission
+// always converges; a phase-gated counter-attack (startPhase) is exempt because its hard cap
+// and converging hostiles are the convergence. A hidden reinforcement set may use authored,
+// physically occluded staging sockets: if the player can currently see every one of them,
+// the wave waits instead of materialising.
 function reinforcements(dt) {
-  const r = world.reinf;
-  if (!r || world.over) return;
-  if (world.level.objectives[world.objectiveIdx]?.type === 'defend') return;
+  if (!world.reinfs?.length || world.over) return;
+  if (activeObjective()?.type === 'defend') return;
   const last = world.objectiveIdx >= world.level.objectives.length - 1;
-  if (r.sent >= r.max || last) { hud.reinf(''); return; }
-  r.timer -= dt;
-  if (r.timer > 0) {
-    // Only warn when it is close enough to act on; a permanent countdown is just noise.
-    hud.reinf(r.timer < 12 ? `REINFORCEMENTS INBOUND ${Math.ceil(r.timer)}s` : '');
-    return;
+  let banner = '';
+  for (const r of world.reinfs) {
+    if (r.sent >= r.max) continue;
+    if (r.startPhase !== undefined && world.objectiveIdx < r.startPhase) continue;
+    if (last && r.startPhase === undefined) continue;
+    if (!r.armed) {
+      // Zone-armed wave (a rigged room). Arms once, then runs on its own short clock.
+      const z = r.trigger?.zone;
+      if (!z) { r.armed = true; continue; }
+      const [x1, z1, x2, z2] = z;
+      if (player.pos.x < Math.min(x1, x2) || player.pos.x > Math.max(x1, x2)
+        || player.pos.z < Math.min(z1, z2) || player.pos.z > Math.max(z1, z2)) continue;
+      r.armed = true;
+      r.timer = r.first ?? 1.5;
+    }
+    r.timer -= dt;
+    if (r.timer > 0) {
+      // Only warn when it is close enough to act on; a permanent countdown is just noise.
+      // Ambush and counter-attack clocks stay silent — a countdown would spoil the beat.
+      if (!r.trigger && r.startPhase === undefined && r.timer < 12) {
+        banner = `REINFORCEMENTS INBOUND ${Math.ceil(r.timer)}s`;
+      }
+      continue;
+    }
+    const group = Math.min(r.group ?? 2, r.max - r.sent);
+    const distant = r.at.filter(s =>
+      Math.hypot(s[0] - player.pos.x, s[2] - player.pos.z) > (r.minDistance ?? 22));
+    const hidden = distant.filter(s => !hasLOS(
+      world.solids,
+      player.pos.x, player.pos.y + 1.5, player.pos.z,
+      s[0], s[1] + 1.5, s[2],
+    ));
+    // Hidden staging is best-effort, not a veto: if the player's position keeps every socket
+    // in view for this long, distant pop-in beats a wave that silently never arrives (which
+    // reads as a bug and can starve a beat that other systems are counting on).
+    const hiddenStuck = (r.hiddenWait ?? 0) > 8;
+    if (r.hidden && hidden.length < group && !hiddenStuck) {
+      r.timer = 1;
+      r.hiddenWait = (r.hiddenWait ?? 0) + dt + 1;
+      // Surprise waves (zone-armed, phase-gated) stage silently — the banner is the spoiler.
+      if (!r.trigger && r.startPhase === undefined) banner = banner || 'REINFORCEMENTS REPOSITIONING';
+      continue;
+    }
+    r.hiddenWait = 0;
+    const pool = (r.hidden && hidden.length >= group) ? hidden : (distant.length ? distant : r.at);
+    let made = 0;
+    for (let i = 0; i < group; i++) {
+      const s = pool[(r.sent + i) % pool.length];
+      const spawnIndex = r.sent + i;
+      const e = new Enemy(scene, {
+        // Concealed motor-pool sockets are tight wall-side work lanes. Keep those coordinates
+        // exact; generic open-map arrivals retain their small formation scatter.
+        pos: r.scatter === 0 ? [...s] : [
+          s[0] + (world.random() - 0.5) * (r.scatter ?? 2),
+          s[1],
+          s[2] + (world.random() - 0.5) * (r.scatter ?? 2),
+        ],
+        aggro: true, range: Math.min(r.range ?? 70, world.darkRange ?? 1e9),
+        patrol: r.patrol || null, hold: !r.patrol,
+        _seed: world.level.id * 930011
+          + world.missionVariant * 9311 + spawnIndex * 197,
+      }, world.diff);
+      // They arrive already looking for you — a reinforcement that stands around defeats
+      // the entire point of putting a clock on the mission. `converge` keeps that promise
+      // to the end: survivors re-cue their hunt on the player instead of ever going passive,
+      // so a zone-less clear objective can never strand on two men holding their spawn.
+      e.state = 'alert';
+      e.converge = !r.patrol;
+      e.reinforcementOrigin = [...s];
+      e.lastKnown = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
+      world.enemies.push(e);
+      made++;
+    }
+    r.sent += made;
+    r.timer = r.every;
+    // An authored message announces the beat once; follow-up waves use the generic line.
+    hud.feed(r.message && r.sent === made
+      ? r.message
+      : `${made} HOSTILE${made > 1 ? 'S' : ''} REINFORCING`, '#ffab91');
+    sfx.contact(player.pos);
+    world.combatHeat = Math.max(world.combatHeat, 4);
   }
-  const group = Math.min(r.group ?? 2, r.max - r.sent);
-  const distant = r.at.filter(s =>
-    Math.hypot(s[0] - player.pos.x, s[2] - player.pos.z) > (r.minDistance ?? 22));
-  const hidden = distant.filter(s => !hasLOS(
-    world.solids,
-    player.pos.x, player.pos.y + 1.5, player.pos.z,
-    s[0], s[1] + 1.5, s[2],
-  ));
-  if (r.hidden && hidden.length < group) {
-    r.timer = 1;
-    hud.reinf('REINFORCEMENTS REPOSITIONING');
-    return;
-  }
-  const pool = r.hidden ? hidden : (distant.length ? distant : r.at);
-  let made = 0;
-  for (let i = 0; i < group; i++) {
-    const s = pool[(r.sent + i) % pool.length];
-    const spawnIndex = r.sent + i;
-    const e = new Enemy(scene, {
-      // Concealed motor-pool sockets are tight wall-side work lanes. Keep those coordinates
-      // exact; generic open-map arrivals retain their small formation scatter.
-      pos: r.scatter === 0 ? [...s] : [
-        s[0] + (world.random() - 0.5) * (r.scatter ?? 2),
-        s[1],
-        s[2] + (world.random() - 0.5) * (r.scatter ?? 2),
-      ],
-      aggro: true, range: Math.min(r.range ?? 70, world.darkRange ?? 1e9),
-      patrol: r.patrol || null, hold: !r.patrol,
-      _seed: world.level.id * 930011
-        + world.missionVariant * 9311 + spawnIndex * 197,
-    }, world.diff);
-    // They arrive already looking for you — a reinforcement that stands around defeats
-    // the entire point of putting a clock on the mission.
-    e.state = 'alert';
-    e.reinforcementOrigin = [...s];
-    e.lastKnown = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
-    world.enemies.push(e);
-    made++;
-  }
-  r.sent += made;
-  r.timer = r.every;
-  hud.feed(`${made} HOSTILE${made > 1 ? 'S' : ''} REINFORCING`, '#ffab91');
-  sfx.contact(player.pos);
-  world.combatHeat = Math.max(world.combatHeat, 4);
+  hud.reinf(banner);
 }
 
 // Recon is not a map-click minigame: the uploaded lanes drive an authored ground response.
@@ -1213,7 +1648,7 @@ function spawnReconGroundResponse(obj) {
     lane: response.lane,
     spawned: made,
   };
-  if (world.reinf) world.reinf.sent = world.reinf.max;
+  stopReinforcements();
   hud.feed(response.label, '#ffbf86');
   hud.reinf(`${response.lane} LANE — ${made} SURVIVORS`);
   sfx.contact(player.pos);
@@ -1274,10 +1709,10 @@ function updateDefenseObjective(obj, dt) {
   if (!atPost) {
     const distance = Math.round(Math.hypot(
       player.pos.x - obj.zone[0], player.pos.z - obj.zone[1]));
-    hud.objective(`RETURN TO FIRE-CONTROL TOWER — ${distance}m`);
+    setObjectiveText(`RETURN TO FIRE-CONTROL TOWER — ${distance}m`);
     hud.reinf('DRONE LINK PAUSED — POSITION ABANDONED');
   } else {
-    hud.objective(state.remaining > 0
+    setObjectiveText(state.remaining > 0
       ? `${obj.text} — ${seconds}s`
       : `${obj.text} — CLEAR ${threats.length} REMAINING`);
     hud.reinf(state.nextWave < (obj.waves?.length || 0)
@@ -1293,7 +1728,7 @@ function updateDefenseObjective(obj, dt) {
 // Deadlock failsafe: an enemy that hasn't moved or fired for 90s while a clear
 // objective is stuck gets neutralized by "command" rather than soft-locking the mission.
 function objectiveWatchdog(dt) {
-  const obj = world.level.objectives[world.objectiveIdx];
+  const obj = activeObjective();
   if (!obj) return;
   world.objStuckTime = (world.objStuckTime || 0) + dt;
   if (obj.type !== 'clear') return;
@@ -1364,6 +1799,9 @@ function onPlayerShot(spread) {
     let bestAng = assist, bestDir = null;
     for (const e of world.enemies) {
       if (e.dead || e.surrendered) continue;
+      // A concealed marketplace contact must reveal a weapon before aim assist can help. Do
+      // not let the assist silently turn a civilian-looking silhouette into an auto-target.
+      if (e.concealed && e.identifyTarget) continue;
       const to = new THREE.Vector3(e.pos.x - camera.position.x, e.pos.y + 1.1 - camera.position.y, e.pos.z - camera.position.z);
       const d = to.length();
       if (d > weapons.spec.range) continue;
@@ -1383,10 +1821,18 @@ function onPlayerShot(spread) {
     // exposed===false is the counter-sniper between peeks: he is not in the window, so there
     // is nothing there to hit. Without this you could kill him through a wall by memory.
     if (e.dead || e.exposed === false) continue;
+    // Once a surrendered actor is face-down, keep the hit volumes on the ground with him. A
+    // standing capsule here would make the visible detainee impossible to hit (or execute) by
+    // an aimed body shot and would undermine the very clear surrender read.
+    const prone = e.surrendered && !e.secured;
+    const headY = e.pos.y + (prone ? 0.38 : 1.64);
+    const bodyMinY = e.pos.y + (prone ? 0.08 : 0.72);
+    const bodyMaxY = e.pos.y + (prone ? 0.56 : 1.37);
+    const bodyRadius = prone ? 0.34 : 0.25;
     const tHead = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z,
-      e.pos.x, e.pos.y + 1.64, e.pos.z, 0.2);
+      e.pos.x, headY, e.pos.z, 0.2);
     const tBody = rayVerticalCapsule(o.x, o.y, o.z, dir.x, dir.y, dir.z,
-      e.pos.x, e.pos.y + 0.72, e.pos.y + 1.37, e.pos.z, 0.25);
+      e.pos.x, bodyMinY, bodyMaxY, e.pos.z, bodyRadius);
     const t = Math.min(tHead, tBody);
     if (t < hitDist) { hitDist = t; hitEnemy = e; hitCiv = null; headshot = tHead <= tBody; }
   }
@@ -1623,14 +2069,87 @@ function inZone(pos, zone) {
   return Math.hypot(pos.x - zx, pos.z - zz) <= zr;
 }
 
+function objectiveIdentifyTargets(obj) {
+  return world.enemies.filter(enemy => {
+    if (enemy.dead || enemy.surrendered) return false;
+    if (obj.targetTag && enemy.tag !== obj.targetTag) return false;
+    if (obj.concealedOnly && !enemy.identifyTarget) return false;
+    return enemy.identifyTarget || (!obj.targetTag && !obj.concealedOnly);
+  });
+}
+
+function objectiveIdentifyCandidate(obj) {
+  const direction = camera.getWorldDirection(new THREE.Vector3());
+  let best = null, bestAngle = 0.22, bestDistance = Infinity;
+  for (const enemy of objectiveIdentifyTargets(obj)) {
+    if (enemy.identified || enemy.concealed) continue;
+    const to = new THREE.Vector3(
+      enemy.pos.x - camera.position.x,
+      enemy.pos.y + 1.05 - camera.position.y,
+      enemy.pos.z - camera.position.z,
+    );
+    const distance = to.length();
+    if (distance > (obj.range ?? 36)) continue;
+    to.normalize();
+    const angle = direction.angleTo(to);
+    if (angle > bestAngle || distance >= bestDistance) continue;
+    if (!hasLOSTo({ x: enemy.pos.x, y: enemy.pos.y + 1.1, z: enemy.pos.z })) continue;
+    best = enemy;
+    bestAngle = angle;
+    bestDistance = distance;
+  }
+  return best;
+}
+
+function escortObjectiveDone(obj) {
+  const team = world.allies.filter(ally => ally.route);
+  if (!team.length) return false;
+  const alive = team.filter(ally => !ally.dead);
+  const requiredAlive = obj.minAlive ?? team.length;
+  if (alive.length < requiredAlive) return false;
+  // Route progress is the normal completion signal, but the authored destination is the
+  // physical truth. If the men are visibly on station and one route index missed a waypoint,
+  // do not leave the sniper staring at a completed assault that the objective never credits.
+  const destination = obj.destination;
+  if (destination) {
+    const radius = destination[2] ?? 5;
+    const arrived = alive.filter(ally =>
+      Math.hypot(ally.pos.x - destination[0], ally.pos.z - destination[1]) <= radius,
+    ).length;
+    if (arrived >= requiredAlive) return true;
+  }
+  return alive.every(ally => ally.routeIdx >= ally.route.length - 1);
+}
+
+function holdObjectiveDone(obj, dt) {
+  const atPost = !obj.zone || inZone(player.pos, obj.zone);
+  if (!world.objectiveState || world.objectiveState.type !== 'hold') {
+    world.objectiveState = { type: 'hold', elapsed: 0 };
+  }
+  if (atPost) world.objectiveState.elapsed += dt;
+  const threats = obj.clearZone
+    ? world.enemies.some(enemy => !enemy.dead && !enemy.surrendered && inZone(enemy.pos, obj.clearZone))
+    : false;
+  world.objectiveState.atPost = atPost;
+  world.objectiveState.remaining = Math.max(0, (obj.duration ?? 1) - world.objectiveState.elapsed);
+  if (!atPost) {
+    setObjectiveText(`RETURN TO ${obj.postLabel || 'THE OBJECTIVE POSITION'}`);
+    return false;
+  }
+  setObjectiveText(`${obj.text} — ${Math.ceil(world.objectiveState.remaining)}s`);
+  return world.objectiveState.remaining <= 0 && !threats;
+}
+
 function checkObjectives(dt = 0) {
-  const obj = world.level.objectives[world.objectiveIdx];
+  const obj = activeObjective();
   if (!obj) return;
   let done = false;
   if (obj.type === 'clear') {
     const [zx, zz, zr, zy] = obj.zone || [];
     done = world.enemies.every(e => {
-      if (e.dead || (e.surrendered && e.secured)
+      // Surrender removes a combatant from a clear objective immediately. Do not set `dead`:
+      // the living detainee, restraint interaction and execution warning must all remain.
+      if (e.dead || e.surrendered
           || (obj.excludeHvt && e.hvt)) return true;
       if (!obj.zone) return false;
       const dy = zy !== undefined ? Math.abs(e.pos.y - zy) : 0;
@@ -1639,7 +2158,7 @@ function checkObjectives(dt = 0) {
     if (obj.zone) {
       // zone-clear: no live enemy inside the zone
       done = !world.enemies.some(e => {
-        if (e.dead || (e.surrendered && e.secured)
+        if (e.dead || e.surrendered
             || (obj.excludeHvt && e.hvt)) return false;
         const dy = zy !== undefined ? Math.abs(e.pos.y - zy) : Math.abs(e.pos.y - player.pos.y) * 0;
         return Math.hypot(e.pos.x - zx, e.pos.z - zz) <= zr && dy < 4;
@@ -1663,17 +2182,71 @@ function checkObjectives(dt = 0) {
     done = !!world.drone?.complete;
   } else if (obj.type === 'defend') {
     done = updateDefenseObjective(obj, dt);
+  } else if (obj.type === 'interact' || obj.type === 'secure') {
+    const devices = Array.isArray(obj.device || obj.devices)
+      ? (obj.device || obj.devices) : obj.device ? [obj.device] : [];
+    // Physical pickups and authored proximity controls should not strand the mission behind a
+    // platform-specific action button. When autoUse is authored, entering the socket is the
+    // action; devices without it retain their explicit F / button interaction.
+    const autoDevice = obj.autoUse ? nearestObjectiveDevice(obj) : null;
+    if (autoDevice) useObjectiveDevice(autoDevice, obj);
+    done = devices.length > 0 && devices.every(id =>
+      world.objectiveDevices.some(device => device.id === id && device.used));
+    if (done && obj.clearZone) {
+      done = !world.enemies.some(enemy =>
+        !enemy.dead && !enemy.surrendered && inZone(enemy.pos, obj.clearZone));
+    }
+  } else if (obj.type === 'identify') {
+    const targets = objectiveIdentifyTargets(obj);
+    done = targets.length > 0 && targets.every(enemy => enemy.identified);
+  } else if (obj.type === 'escort') {
+    const team = world.allies.filter(ally => ally.route);
+    if (obj.destination && team.length) {
+      const radius = obj.destination[2] ?? 5;
+      const arrived = team.filter(ally => !ally.dead &&
+        Math.hypot(ally.pos.x - obj.destination[0], ally.pos.z - obj.destination[1]) <= radius,
+      ).length;
+      const label = obj.destinationLabel || 'THE OBJECTIVE';
+      const required = obj.minAlive ?? team.length;
+      setObjectiveText(`${obj.text} — ${arrived}/${team.length} ON STATION · ${required} REQUIRED AT ${label}`);
+    }
+    done = escortObjectiveDone(obj);
+  } else if (obj.type === 'hold') {
+    done = holdObjectiveDone(obj, dt);
   }
   if (done) {
     if (obj.type === 'drone' && world.drone) {
+      const next = nextObjectiveStep();
+      if (next?.type === 'drone') {
+        world.droneHandoff = {
+          pos: world.drone.pos.clone(),
+          vel: world.drone.vel.clone(),
+          yaw: world.drone.yaw,
+          pitch: world.drone.pitch,
+          roll: world.drone.roll,
+          battery: world.drone.battery,
+          signal: world.drone.signal,
+        };
+      }
       if (world.drone.mode === 'combat') integrateDroneSurvivors();
+      // A drone handoff is a phase transition, not a silent camera reset. Level 6 starts as a
+      // locked sniper post, but the ground-clear / rescue work belongs to the operator on foot.
+      // Tell the player exactly what changed while restoring movement for the next objective.
+      hud.feed('DRONE HANDOFF COMPLETE — CLEAR THE EXTRACTION CORRIDOR', '#8cecff');
       spawnReconGroundResponse(obj);
       world.drone.dispose();
       world.drone = null;
+      if (world.droneSensorNvg) { world.droneSensorNvg = false; setNvg(false); }
       restoreGroundCombatAfterDrone();
-      player.locked = !!world.level.lockPlayer;
+      player.locked = obj.unlockPlayer ? false : !!world.level.lockPlayer;
     }
-    world.objectiveIdx++;
+    const steps = phaseSteps(currentPhase());
+    if ((world.objectiveStepIdx ?? 0) + 1 < steps.length) {
+      world.objectiveStepIdx++;
+    } else {
+      world.objectiveIdx++;
+      world.objectiveStepIdx = 0;
+    }
     sfx.objective();
     if (world.objectiveIdx >= world.level.objectives.length) winMission();
     else setObjective();
@@ -1737,6 +2310,9 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
       ['Accuracy', Math.round(acc * 100) + '%'],
       ['Civilian casualties', world.stats.civKills],
       ['Hostages freed', world.stats.rescued],
+      ['Phase progress', won
+        ? `${world.level.objectives.length}/${world.level.objectives.length}`
+        : `${Math.min(world.objectiveIdx + 1, world.level.objectives.length)}/${world.level.objectives.length}`],
       ['Time', Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0')],
       ['Time bonus', '+' + timeBonus],
       ['FINAL SCORE', Math.max(0, world.stats.score)],
@@ -1767,8 +2343,10 @@ function frame() {
   lastTime = now;
 
   if (skyMesh) skyMesh.position.copy(camera.position);
+  // The first-person rig renders as an overlay pass from its own scene (see weapons.js).
+  const viewmodel = weapons ? { scene: weapons.viewScene, rig: weapons.viewRoot } : null;
   if (mode !== 'playing' || !world) {
-    if (scene) renderPipeline.render(scene, camera, { adaptive: false });
+    if (scene) renderPipeline.render(scene, camera, { adaptive: false, viewmodel });
     clearEdges();
     return;
   }
@@ -1792,7 +2370,7 @@ function frame() {
     if (world.drone.mode === 'combat') updateDroneCombatWave(dt);
     world.drone.update(dt, input, world.solids);
     checkObjectives();
-    renderPipeline.render(scene, camera, { adaptive: true });
+    renderPipeline.render(scene, camera, { adaptive: true, viewmodel });
     clearEdges();
     return;
   }
@@ -1925,9 +2503,15 @@ function frame() {
     }
   } else if (world.nadeRing) world.nadeRing.visible = false;
 
-  // doors / breach
+  // doors / breach / authored objective actions
+  const obj = activeObjective();
   const near = world.doors.nearBreachable(player.pos, player.yaw, world.objectiveIdx);
-  hud.breachBtn(!!near && !world.level.sniper);
+  const nearDevice = nearestObjectiveDevice(obj);
+  const identifyCandidate = obj?.type === 'identify' ? objectiveIdentifyCandidate(obj) : null;
+  hud.breachBtn(
+    !!near || !!nearDevice || !!identifyCandidate,
+    near ? 'BREACH' : nearDevice ? (nearDevice.actionLabel || 'USE') : identifyCandidate ? 'IDENTIFY' : 'BREACH',
+  );
   // Stack cue for the squad. Deliberately a WIDER radius than the breach prompt: the men
   // should already be forming the column as you walk up on the door, not snapping into it at
   // the moment the button appears.
@@ -1937,7 +2521,15 @@ function frame() {
     hud.feed('BUNKER SEALED — COMPLETE THE NETWORK STRIKE', '#ffca80');
     world.lockedDoorNotice = 3.5;
   }
-  if (input.breachPressed && near) world.doors.breach(near, world);
+  if (input.breachPressed) {
+    if (near) world.doors.breach(near, world);
+    else if (nearDevice) useObjectiveDevice(nearDevice, obj);
+    else if (identifyCandidate) {
+      identifyCandidate.identified = true;
+      hud.feed(`${identifyCandidate.callout || 'INFILTRATOR'} IDENTIFIED`, '#8cecff');
+      sfx.objective();
+    }
+  }
   world.doors.update(dt);
 
   // actors
@@ -1946,8 +2538,8 @@ function frame() {
   for (const a of world.allies) a.update(sdt, world);
   for (const c of world.civilians) c.update(sdt, world);
   // Securing is physical, like cutting loose a hostage: close the final metre and the
-  // surrendered soldier drops to both knees. Until then he remains a compliant but
-  // unsecured person whose location still matters to the clear objective.
+  // face-down surrendered soldier is brought to a controlled kneel. Until then he remains a
+  // compliant but unsecured person whose location still matters to the clear objective.
   for (const enemy of world.enemies) {
     if (!enemy.surrendered || enemy.secured || enemy.dead) continue;
     if (Math.abs(player.pos.y - enemy.pos.y) > 2.0) continue;
@@ -2012,16 +2604,36 @@ function frame() {
 
   // objectives + HUD
   if (!world.over) { checkObjectives(dt); objectiveWatchdog(dt); reinforcements(dt); blackoutTrigger(); }
-  // Ground marker pulse + live distance readout on reach objectives.
+  // Ground marker pulse + live distance/readiness readout on movement objectives.
   if (world.beacon) {
     const pulse = Math.sin(performance.now() / 420);
     world.beacon.userData.material.opacity = 0.42 + pulse * 0.08;
     world.beacon.userData.ring.scale.setScalar(1 + pulse * 0.065);
     world.beacon.rotation.y += dt * 0.22;
-    const obj = world.level.objectives[world.objectiveIdx];
-    if (obj && obj.type === 'reach') {
-      const d = Math.round(Math.hypot(player.pos.x - obj.zone[0], player.pos.z - obj.zone[1]));
-      hud.objective(`${obj.text} — ${d}m`);
+    const markerObj = activeObjective();
+    if (markerObj && markerObj.type === 'reach') {
+      const d = Math.round(Math.hypot(player.pos.x - markerObj.zone[0], player.pos.z - markerObj.zone[1]));
+      setObjectiveText(`${markerObj.text} — ${d}m`);
+    } else if (markerObj && markerObj.type === 'escort' && markerObj.destination) {
+      const team = world.allies.filter(ally => ally.route);
+      const radius = markerObj.destination[2] ?? 5;
+      const arrived = team.filter(ally => !ally.dead &&
+        Math.hypot(ally.pos.x - markerObj.destination[0], ally.pos.z - markerObj.destination[1]) <= radius,
+      ).length;
+      const d = Math.round(Math.hypot(
+        player.pos.x - markerObj.destination[0], player.pos.z - markerObj.destination[1],
+      ));
+      const required = markerObj.minAlive ?? team.length;
+      setObjectiveText(`${markerObj.text} — ${arrived}/${team.length} ON STATION · ${required} REQUIRED AT ${markerObj.destinationLabel || 'THE OBJECTIVE'} · ${d}m`);
+    } else if (markerObj && (markerObj.type === 'interact' || markerObj.type === 'secure')) {
+      const ids = Array.isArray(markerObj.device || markerObj.devices)
+        ? (markerObj.device || markerObj.devices)
+        : markerObj.device ? [markerObj.device] : [];
+      const device = world.objectiveDevices.find(item => ids.includes(item.id) && !item.used);
+      if (device) {
+        const d = Math.round(Math.hypot(player.pos.x - device.pos[0], player.pos.z - device.pos[2]));
+        setObjectiveText(`${markerObj.text} — ${d}m`);
+      }
     }
   }
   hud.health(player.health, player.maxHealth);
@@ -2050,7 +2662,7 @@ function frame() {
     ? `EVAC ${escorted.length} · ${HOSTAGE_COMMAND_LABEL[world.hostageCommand]} · H COMMAND`
     : '');
 
-  renderPipeline.render(scene, camera, { adaptive: true });
+  renderPipeline.render(scene, camera, { adaptive: true, viewmodel });
   clearEdges();
 }
 frame();
@@ -2063,6 +2675,10 @@ for (const b of document.querySelectorAll('.menu-btn, #menu-refresh')) {
 // expose for debugging + QA
 window.BP = {
   get world() { return world; },
+  get objective() { return activeObjective(); },
+  get phase() { return currentPhase(); },
+  // The same socket query used by the interaction prompt, exposed for focused browser QA.
+  get nearestObjectiveDevice() { return nearestObjectiveDevice(activeObjective()); },
   get scene() { return scene; },
   get player() { return player; },
   get weapons() { return weapons; },
@@ -2070,6 +2686,13 @@ window.BP = {
   get rendererMode() { return renderPipeline.mode; },
   get performance() { return renderPipeline.performanceSnapshot(); },
   startLevel, LEVELS, S, input,
+  setNvg,
+  // Real-path device activation for focused browser QA: the F interaction is gated behind
+  // pointer lock, which headless runs never hold. Same code path, same side effects.
+  useObjectiveDeviceById(id) {
+    const device = world?.objectiveDevices?.find(d => d.id === id && !d.used);
+    return device ? useObjectiveDevice(device, activeObjective()) : false;
+  },
   CAMPAIGN,
   get campaign() { return campaignSnapshot(currentLevel, S); },
   setDifficulty(d) { S.difficulty = d; },

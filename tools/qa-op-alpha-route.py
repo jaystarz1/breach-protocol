@@ -34,12 +34,19 @@ def main():
         # breach, stairs, hostage proximity and objective code remain unchanged.
         page.evaluate("() => { BP.player.speed = 12; }")
         last_report = 0
-        while time.monotonic() - started < 310:
+        # 620s, not 310: the bot duels room-holders in the opposite wing through the open
+        # party line and can spend two minutes on one exchange. The mission progresses the
+        # whole time; the old budget simply cut a slow fight short.
+        while time.monotonic() - started < 620:
             state = page.evaluate("""() => ({
               done: BP.world?.level?.id === 3
-                && BP.world.objectiveIdx === 3 && !!BP.world.drone?.active,
+                && BP.world.objectiveIdx === 2
+                && BP.world.objectiveStepIdx === 2
+                && !!BP.world.drone?.active,
               finished: QA_RESULTS.length > 0,
               objective: BP.world?.objectiveIdx,
+              droneMode: BP.world?.drone?.mode,
+              droneCombatants: BP.world?.drone?.combatants.length || 0,
               waypoint: QA_STATE?.wpIdx,
               position: BP.player
                 ? [BP.player.pos.x, BP.player.pos.y, BP.player.pos.z] : null,
@@ -56,8 +63,11 @@ def main():
             page.wait_for_timeout(1000)
         result = page.evaluate("""() => ({
           objectiveIdx: BP.world.objectiveIdx,
-          objectiveType: BP.world.level.objectives[BP.world.objectiveIdx]?.type,
+          objectiveStepIdx: BP.world.objectiveStepIdx,
+          objectiveType: BP.objective?.type,
           droneActive: !!BP.world.drone?.active,
+          droneMode: BP.world.drone?.mode || null,
+          droneCombatants: BP.world.drone?.combatants.length || 0,
           liveEnemies: BP.world.enemies.filter(enemy => !enemy.dead).length,
           rescuedHostages: BP.world.civilians.filter(
             civilian => civilian.wasHostage && civilian.rescued).length,
@@ -77,9 +87,13 @@ def main():
         print(json.dumps(result, indent=2))
 
         assert not errors, result
-        assert result["objectiveIdx"] == 3, result
+        assert result["objectiveIdx"] == 2, result
+        assert result["objectiveStepIdx"] == 2, result
         assert result["objectiveType"] == "drone" and result["droneActive"], result
-        assert result["liveEnemies"] == 0, result
+        assert result["droneMode"] == "combat" and result["droneCombatants"] == 10, result
+        # The rooftop now launches an armed ten-man reinforcement wave; those actors are
+        # deliberately alive when the drone objective begins.
+        assert result["liveEnemies"] == 10, result
         assert result["rescuedHostages"] == 6, result
         assert result["breachedDoors"] >= 5, result
         assert not result["notes"], result

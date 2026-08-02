@@ -32,13 +32,19 @@ def main():
         page.evaluate("""() => {
           for (const enemy of BP.world.enemies) enemy.damage(99999, BP.world);
         }""")
-        page.wait_for_function("() => BP.world.objectiveIdx === 1", timeout=90000)
+        page.wait_for_function(
+            "() => BP.world.objectiveIdx === 1 && BP.world.objectiveStepIdx === 0",
+            timeout=90000,
+        )
         page.evaluate("""() => {
-          const zone = BP.world.level.objectives[1].zone;
-          BP.player.pos.set(zone[0], zone[3] || 0, zone[1]);
+          const device = BP.world.objectiveDevices.find(row => row.id === 'l2-launch');
+          BP.player.pos.set(device.pos[0], device.pos[1] || 0, device.pos[2]);
+          BP.input.breachPressed = true;
         }""")
         page.wait_for_function(
-            "() => BP.world.objectiveIdx === 2 && BP.world.drone?.mode === 'combat'",
+            "() => BP.world.objectiveIdx === 1"
+            " && BP.world.objectiveStepIdx === 1"
+            " && BP.world.drone?.mode === 'combat'",
             timeout=90000,
         )
         level2_before = page.evaluate("""() => ({
@@ -63,9 +69,11 @@ def main():
             const actor = BP.world.drone.combatants[0];
             const meshVisible = actor.mesh.visible;
             actor.mesh.visible = false;
+            BP.world.drone.setThermalEnabled(true);
             BP.world.drone.updateThermalSignatures();
             const survivesHiddenMesh = BP.world.drone.thermalSignatures[0].visible;
             actor.mesh.visible = meshVisible;
+            BP.world.drone.setThermalEnabled(false);
             return {
               count: BP.world.drone.thermalSignatures.length,
               visible: BP.world.drone.thermalSignatures
@@ -84,7 +92,7 @@ def main():
           BP.input.nvgPressed = true;
           drone.update(0.016, BP.input, BP.world.solids);
           BP.input.nvgPressed = false;
-          const off = {
+          const on = {
             thermal: drone.thermalEnabled,
             visibleSignatures: drone.thermalSignatures.filter(
               signature => signature.visible).length,
@@ -94,7 +102,16 @@ def main():
           BP.input.nvgPressed = true;
           drone.update(0.016, BP.input, BP.world.solids);
           BP.input.nvgPressed = false;
-          return off;
+          return {
+            on,
+            off: {
+              thermal: drone.thermalEnabled,
+              visibleSignatures: drone.thermalSignatures.filter(
+                signature => signature.visible).length,
+              boxes: drone.targetBoxes.filter(box => box.visible).length,
+              filter: document.getElementById('game-canvas').style.filter,
+            },
+          };
         }""")
         page.wait_for_timeout(900)
         level2_movement = page.evaluate("""before => {
@@ -192,11 +209,12 @@ def main():
           }
         }""")
         page.wait_for_function(
-            "() => !BP.world.drone && BP.world.objectiveIdx === 3",
+            "() => !BP.world.drone && BP.world.objectiveIdx === 2"
+            " && BP.world.objectiveStepIdx === 0",
             timeout=90000,
         )
         level2_after = page.evaluate("""() => ({
-          objective: BP.world.level.objectives[BP.world.objectiveIdx].text,
+          objective: BP.objective.text,
           stackRestored: BP.world.allies.every(actor => actor.mesh.visible),
           assaultDead: BP.world.droneAssault.actors.every(actor => actor.dead),
         })""")
@@ -234,7 +252,7 @@ def main():
             timeout=90000,
         )
         level7_after = page.evaluate("""() => ({
-          objective: BP.world.level.objectives[BP.world.objectiveIdx].text,
+          objective: BP.objective.text,
           assaultDead: BP.world.droneAssault.actors.every(actor => actor.dead),
           survivors: BP.world.droneAssault.actors.filter(actor => !actor.dead).map(actor => ({
             droneTarget: actor.droneTarget,
@@ -269,7 +287,7 @@ def main():
         assert 10 <= level2_before["combatants"] <= 12
         assert level2_before["vehicles"] == 1
         assert level2_before["optics"]["fov"] == 78
-        assert "grayscale(1)" in level2_before["optics"]["canvasFilter"]
+        assert "grayscale" not in level2_before["optics"]["canvasFilter"]
         assert level2_before["optics"]["mask"]
         assert level2_before["thermal"]["count"] == level2_before["combatants"] + 1
         assert level2_before["thermal"]["visible"] == level2_before["thermal"]["count"]
@@ -277,10 +295,14 @@ def main():
         assert level2_before["thermal"]["depthTested"]
         assert level2_before["thermal"]["boxes"] == level2_before["thermal"]["count"]
         assert level2_before["thermal"]["boxesDepthTested"]
-        assert sensor_toggle["thermal"] is False
-        assert sensor_toggle["visibleSignatures"] == 0
-        assert sensor_toggle["boxes"] == level2_before["thermal"]["count"]
-        assert "grayscale" not in sensor_toggle["filter"]
+        assert sensor_toggle["on"]["thermal"] is True
+        assert sensor_toggle["on"]["visibleSignatures"] == level2_before["thermal"]["count"]
+        assert sensor_toggle["on"]["boxes"] == level2_before["thermal"]["count"]
+        assert "grayscale(1)" in sensor_toggle["on"]["filter"]
+        assert sensor_toggle["off"]["thermal"] is False
+        assert sensor_toggle["off"]["visibleSignatures"] == 0
+        assert sensor_toggle["off"]["boxes"] == level2_before["thermal"]["count"]
+        assert "grayscale" not in sensor_toggle["off"]["filter"]
         assert level2_before["staticTargets"] == 0
         assert level2_before["stackVisible"]
         assert level2_movement["moved"] == level2_before["combatants"]
@@ -297,7 +319,7 @@ def main():
         assert vehicle["dead"]
         assert level2_after["stackRestored"]
         assert level2_after["assaultDead"]
-        assert "REGROUP" in level2_after["objective"]
+        assert "SOUTHERN" in level2_after["objective"]
         assert level7_before["mode"] == "combat"
         assert level7_before["rifle"] == 100
         assert level7_before["grenades"] == 10

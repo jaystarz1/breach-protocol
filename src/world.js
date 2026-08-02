@@ -491,7 +491,7 @@ export function facade(x1, z1, x2, z2, yBase, height, seed, opts = {}) {
       kind: 'facade', x1, z1, x2, z2, yBase, height, seed,
       away: opts.away, out: opts.out, step: opts.step, floorH: opts.floorH,
       lit: opts.lit, skip: opts.skip, damage: opts.damage, balconies: opts.balconies,
-      finish: opts.finish, staticWindows: opts.staticWindows,
+      finish: opts.finish, staticWindows: opts.staticWindows, roofCaps: opts.roofCaps,
     });
     return [];
   }

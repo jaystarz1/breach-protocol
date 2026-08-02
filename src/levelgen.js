@@ -693,7 +693,19 @@ export function kneelRig(g, k) {
 export function surrenderPoseRig(g, secured = false) {
   const r = g.userData.rig;
   if (!r) return false;
-  if (r.authored) return poseAuthoredSurrender(g, secured);
+  if (r.authored) {
+    const posed = poseAuthoredSurrender(g, secured);
+    if (posed) {
+      // An unsecured surrender is the unmistakable end-state: weapon discarded and the man
+      // face-down on the ground. `secure()` clears this root rotation before moving him to the
+      // controlled kneel used for restraint, so the two states remain visually distinct.
+      g.rotation.x = secured ? 0 : -1.42;
+      g.rotation.z = 0;
+    }
+    return posed;
+  }
+  g.rotation.x = secured ? 0 : -1.42;
+  g.rotation.z = 0;
   r.lLeg.rotation.x = -0.72;
   r.lLeg.userData.shin.rotation.x = 1.25;
   r.rLeg.rotation.x = -1.05;
@@ -806,6 +818,9 @@ function breachDoorMaterials() {
       roughnessMap: quality.textures ? metal.roughnessMap : null,
       normalMap: quality.textures ? metal.normalMap : null,
       normalScale: new THREE.Vector2(0.13, 0.13),
+      // Breachable leaves are approached from either side. ExtrudeGeometry's cap winding can
+      // otherwise cull the exterior face, making an intact door look like an empty opening.
+      side: THREE.DoubleSide,
     }),
   };
   return doorMaterials;

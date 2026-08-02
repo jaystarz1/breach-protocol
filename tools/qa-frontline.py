@@ -77,31 +77,24 @@ def main():
         }""")
 
         page.evaluate("""() => {
-          if (BP.world.reinf) BP.world.reinf.sent = BP.world.reinf.max;
+          for (const r of BP.world.reinfs || []) r.sent = r.max;
           for (const enemy of BP.world.enemies) {
             enemy.dead = true;
             enemy.mesh.visible = false;
           }
         }""")
-        page.wait_for_function("() => BP.world.objectiveIdx === 1", timeout=5000)
+        page.wait_for_function(
+            "() => BP.world.objectiveIdx === 1 && BP.world.objectiveStepIdx === 0",
+            timeout=5000,
+        )
         objective_marker = page.evaluate("""() => {
-          const marker = BP.world.beacon;
-          let minY = Infinity, maxY = -Infinity;
-          for (const child of marker.children) {
-            child.updateMatrix();
-            child.geometry.computeBoundingBox();
-            const box = child.geometry.boundingBox.clone().applyMatrix4(child.matrix);
-            minY = Math.min(minY, box.min.y);
-            maxY = Math.max(maxY, box.max.y);
-          }
+          const device = BP.world.objectiveDevices.find(row => row.id === 'l2-launch');
           return {
-            name: marker.name,
-            parts: marker.children.length,
-            height: +(maxY - minY).toFixed(3),
-            depthTested: marker.children.every(child => child.material.depthTest),
-            depthWritesDisabled: marker.children.every(child => !child.material.depthWrite),
-            ring: marker.children.some(child => child.geometry.type === 'RingGeometry'),
-            cylinder: marker.children.some(child => child.geometry.type === 'CylinderGeometry'),
+            name: device.root.name,
+            visible: device.root.visible,
+            position: device.root.position.toArray(),
+            kind: device.kind,
+            actionLabel: device.actionLabel,
           };
         }""")
         op_path = output_path.with_name(f"{output_path.stem}-op{output_path.suffix}")
@@ -113,11 +106,16 @@ def main():
         page.wait_for_timeout(180)
         page.screenshot(path=str(op_path))
         page.evaluate("""() => {
-          const hold = setInterval(() => BP.player.pos.set(-11.2, 0.1, -41.6), 16);
+          const hold = setInterval(() => {
+            BP.player.pos.set(-11.2, 0.1, -41.6);
+            BP.input.breachPressed = true;
+          }, 16);
           setTimeout(() => clearInterval(hold), 750);
         }""")
         page.wait_for_function(
-            "() => BP.world.objectiveIdx === 2 && !!BP.world.drone", timeout=5000
+            "() => BP.world.objectiveIdx === 1"
+            " && BP.world.objectiveStepIdx === 1 && !!BP.world.drone",
+            timeout=5000,
         )
         drone_started = page.evaluate("""() => ({
           active: BP.world.drone.active,
@@ -128,11 +126,14 @@ def main():
         drone_path = output_path.with_name(f"{output_path.stem}-drone{output_path.suffix}")
         page.screenshot(path=str(drone_path))
         page.evaluate("""() => {
-          for (const target of BP.world.drone.targets) {
-            BP.world.drone.markReconTarget(target);
-          }
+          const drone = BP.world.drone;
+          for (const actor of drone.combatants) drone.onCombatHit(actor, 99999, false);
+          for (const vehicle of drone.combatVehicles) drone.onCombatVehicleHit(vehicle, 99999);
         }""")
-        page.wait_for_function("() => BP.world.objectiveIdx === 3", timeout=5000)
+        page.wait_for_function(
+            "() => BP.world.objectiveIdx === 2 && BP.world.objectiveStepIdx === 0",
+            timeout=5000,
+        )
         drone_finished = page.evaluate("""() => ({
           controllerDisposed: BP.world.drone === null,
           playerRestored: !BP.player.locked,
@@ -141,7 +142,7 @@ def main():
           intelRoutes: BP.world.staticMesh.parent.userData.reconIntel?.length || 0,
           response: BP.world.reconResponse,
           liveResponse: BP.world.enemies.filter(enemy => !enemy.dead).length,
-          objective: BP.world.level.objectives[BP.world.objectiveIdx].text,
+          objective: BP.objective.text,
         })""")
 
         output = {
@@ -187,11 +188,9 @@ def main():
         assert art["frontline-anti-vehicle-hedgehogs"]["vertices"] > 150
         assert art["frontline-rubble-concrete-0"]["photoMap"]
         assert art["frontline-rubble-concrete-0"]["relief"]
-        assert objective_marker["name"] == "objective-ground-marker"
-        assert objective_marker["parts"] == 5
-        assert objective_marker["height"] < 0.1
-        assert objective_marker["depthTested"] and objective_marker["depthWritesDisabled"]
-        assert objective_marker["ring"] and not objective_marker["cylinder"]
+        assert objective_marker["name"] == "objective-device-l2-launch"
+        assert objective_marker["visible"] and objective_marker["kind"] == "launch"
+        assert objective_marker["actionLabel"] == "ARM"
         assert field_equipment["boards"] == 4 and field_equipment["tubeParts"] == 6
         assert field_equipment["tableParts"] == 3
         assert field_equipment["cases"] == 3 and field_equipment["caseVertices"] > 24
@@ -199,14 +198,7 @@ def main():
         assert field_equipment["caseRelief"]
         assert drone_started["active"] and drone_started["locked"]
         assert drone_finished["controllerDisposed"] and drone_finished["playerRestored"]
-        assert drone_finished["intelRoutes"] == 3
-        assert drone_finished["response"] == {
-            "label": "CENTRAL/WEST LANES CUT — EAST SCOUTS THROUGH",
-            "lane": "EAST",
-            "spawned": 3,
-        }
-        assert drone_finished["liveResponse"] == 3
-        assert drone_finished["objective"] == "INTERCEPT THE SURVIVING ASSAULT ELEMENT"
+        assert drone_finished["objective"] == "OPEN THE SOUTHERN BARRICADE — MOVE THE STACK THROUGH"
         browser.close()
 
 

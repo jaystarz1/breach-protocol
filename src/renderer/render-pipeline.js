@@ -28,6 +28,26 @@ export function createRenderPipeline(canvas, settings) {
     initialScale: settings.resolutionScale,
   });
 
+  // The first-person rig and its fill/key lights live in their own scene (weapons.js) and
+  // are drawn as a depth-cleared overlay after the world. Light layers cannot scope a light
+  // to the gun (they gate against the CAMERA's mask, not per-object illumination), and two
+  // passes over ONE scene with different light subsets fights three's per-scene render-state
+  // caching — measured on r160: the world pass silently lost every point light. A separate
+  // scene gives each pass its own render state, so the viewmodel lights touch nothing else.
+  function renderWithViewmodel(scene, camera, viewmodel) {
+    renderer.render(scene, camera);
+    if (!viewmodel?.scene) return;
+    if (viewmodel.rig) {
+      camera.updateMatrixWorld();
+      viewmodel.rig.matrix.copy(camera.matrixWorld);
+      viewmodel.rig.matrixWorldNeedsUpdate = true;
+    }
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(viewmodel.scene, camera);
+    renderer.autoClear = true;
+  }
+
   function applySize() {
     const ratio = Math.min(viewport.devicePixelRatio, settings.pixelRatioCap) * resolution.scale;
     renderer.setPixelRatio(ratio);
@@ -123,11 +143,11 @@ export function createRenderPipeline(canvas, settings) {
       renderer.info.reset();
       if (target) {
         renderer.setRenderTarget(target);
-        renderer.render(scene, camera);
+        renderWithViewmodel(scene, camera, frameState.viewmodel);
         renderer.setRenderTarget(null);
         renderer.render(postScene, postCamera);
       } else {
-        renderer.render(scene, camera);
+        renderWithViewmodel(scene, camera, frameState.viewmodel);
       }
       lastRender = {
         calls: renderer.info.render.calls,

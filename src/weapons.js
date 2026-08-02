@@ -571,30 +571,40 @@ function gunMesh(kind) {
 export class Weapons {
   constructor(camera) {
     this.camera = camera;
+    // The first-person rig lives in its OWN scene, rendered by the pipeline as a depth-
+    // cleared overlay pass after the world. This is what actually scopes the viewmodel
+    // fill/key lights to the gun: light layers cannot do it (they gate against the camera
+    // mask, not per-object illumination), and two render passes over ONE scene with
+    // different light subsets fights three's render-state caching — measured: world point
+    // lights stopped rendering entirely. viewRoot mirrors camera.matrixWorld every frame
+    // (render-pipeline.js), so everything below is authored in camera space exactly as if
+    // it were parented to the camera.
+    this.viewScene = new THREE.Scene();
+    this.viewRoot = new THREE.Group();
+    this.viewRoot.matrixAutoUpdate = false;
+    this.viewScene.add(this.viewRoot);
+    // The drone view hides first-person drawables by traversal; tell it where they moved.
+    camera.userData.viewmodelRoots = [this.viewRoot];
     this.holder = new THREE.Group();
-    // Layer 1 is reserved for the first-person rig. World lights remain on layer 0, while
-    // these measured camera-space lights keep black steel, polymer, fabric and reinforcement
-    // panels separated in every mission without brightening a single environment surface.
-    camera.layers.enable(1);
-    this.holder.layers.set(1);
-    camera.add(this.holder);
+    this.viewRoot.add(this.holder);
     this.holder.position.set(0.22, -0.22, -0.45);
     this.meshes = {};
     for (const k of Object.keys(WEAPON_SPECS)) {
       this.meshes[k] = gunMesh(k);
       this.meshes[k].visible = false;
-      this.meshes[k].traverse(object => object.layers.set(1));
       this.holder.add(this.meshes[k]);
     }
+    // Viewmodel-only by construction now (separate scene). setNvg() still drives them to
+    // (near) zero in a dark level with the goggles up, because a brightly lit gun floating
+    // in a blacked-out room is its own giveaway.
     this.viewFill = new THREE.HemisphereLight(0xb8c6cf, 0x11171b, 0.88);
-    this.viewFill.layers.set(1);
-    camera.add(this.viewFill);
+    this.viewRoot.add(this.viewFill);
     this.viewKey = new THREE.DirectionalLight(0xffe8d2, 1.14);
     this.viewKey.position.set(-0.8, 1.1, 0.7);
-    this.viewKey.layers.set(1);
     this.viewKey.target.position.set(0, -0.12, -1.4);
-    this.viewKey.target.layers.set(1);
-    camera.add(this.viewKey, this.viewKey.target);
+    this.viewRoot.add(this.viewKey, this.viewKey.target);
+    this.viewFillI = this.viewFill.intensity;
+    this.viewKeyI = this.viewKey.intensity;
     // ---------- muzzle flash ----------
     // A short orange pop, not a white starburst.
     //
@@ -606,10 +616,16 @@ export class Weapons {
     // It was also enormous. These planes live on the holder, which is NOT scaled by the
     // gun's 0.6-0.78, so 0.34m of plane at half a metre from the eye covered a third of the
     // screen. Petals are 0.095m now and the whole thing is scaled per weapon.
+    // Two flash lights on purpose. `flash` rides the holder in the viewmodel scene and pops
+    // the gun itself; `worldFlash` is parented to the CAMERA (world scene) so the muzzle
+    // report still lights the room — the one rig light that SHOULD hit the world. Before
+    // the scene split that worked by accident via the light-layer spill.
     this.flash = new THREE.PointLight(0xff9838, 0, 12);
-    this.flash.layers.set(1);
     this.flash.position.set(0, 0, -0.55);
     this.holder.add(this.flash);
+    this.worldFlash = new THREE.PointLight(0xff9838, 0, 12);
+    this.worldFlash.position.set(0.22, -0.2, -1.0);
+    camera.add(this.worldFlash);
     this.petalMat = new THREE.MeshBasicMaterial({
       color: 0xff7418, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
       depthWrite: false, side: THREE.DoubleSide,
@@ -628,7 +644,6 @@ export class Weapons {
     // three crossed streaks floating in front of the barrel.
     this.flashMesh.add(new THREE.Mesh(new THREE.CircleGeometry(0.022, 10), this.coreMat));
     this.flashMesh.position.set(0, 0.02, -0.55);
-    this.flashMesh.traverse(object => object.layers.set(1));
     this.flashMesh.visible = false;
     this.flashLife = 0;
     this.flashSize = 1;
@@ -696,6 +711,7 @@ export class Weapons {
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.recoilKick = Math.max(0, this.recoilKick - dt * 3);
     this.flash.intensity = Math.max(0, this.flash.intensity - dt * 110);
+    this.worldFlash.intensity = this.flash.intensity;
     // One life value drives the whole pop, so the pieces cannot drift out of step. ~45ms.
     if (this.flashLife > 0) {
       this.flashLife = Math.max(0, this.flashLife - dt * 22);
@@ -731,6 +747,7 @@ export class Weapons {
         this.cooldown = 60 / sp.rpm;
         this.recoilKick = Math.min(1, this.recoilKick + 0.5);
         this.flash.intensity = 7 * this.flashSize;
+        this.worldFlash.intensity = this.flash.intensity;
         this.flashLife = 1;
         this.flashMesh.visible = true;
         // Fresh orientation every shot so consecutive rounds do not stamp the same shape.

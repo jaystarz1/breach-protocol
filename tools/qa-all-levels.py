@@ -41,6 +41,8 @@ def main():
               enemies: BP.world.enemies.length,
               civilians: BP.world.civilians.length,
               objectives: BP.world.level.objectives.length,
+              phaseSteps: BP.world.level.objectives.map(phase => phase.steps?.length || 1),
+              objectiveDevices: (BP.world.level.objectiveDevices || []).map(device => device.id),
               visualBatches: BP.world.staticMesh.parent.children.filter(
                 object => object.isInstancedMesh).length,
             })""", level))
@@ -50,6 +52,8 @@ def main():
         assert not errors
         assert len(levels) == 10
         assert all(item["mode"] == "playing" for item in levels)
+        assert all(item["objectives"] == 3 for item in levels)
+        assert all(len(item["phaseSteps"]) == 3 for item in levels)
         assert all(item["calls"] < 450 for item in levels)
         assert all(item["triangles"] < 1_500_000 for item in levels)
         assert all(item["enemies"] > 0 and item["objectives"] > 0 for item in levels)

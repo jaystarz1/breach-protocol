@@ -1144,19 +1144,35 @@ function addOpBravoTower(scene) {
     roughness: 0.99,
     metalness: 0,
   });
-  const membrane = new THREE.Mesh(new THREE.PlaneGeometry(15.45, 13.45), roofMaterial);
-  membrane.name = 'op-bravo-roof-membrane';
-  membrane.rotation.x = -Math.PI / 2;
-  membrane.position.set(0, 12.044, -4);
-  membrane.receiveShadow = quality.shadows;
-  scene.add(membrane);
+  // The stairwell is an actual hole in the slab. Keep the photographic roof skin in three
+  // pieces around it; one uninterrupted plane here used to cap the top tread with a dark
+  // rectangle even though collision correctly left the opening empty.
+  const membranePiece = (name, x, z, width, depth) => {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), roofMaterial);
+    mesh.name = name;
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x, 12.044, z);
+    mesh.receiveShadow = quality.shadows;
+    scene.add(mesh);
+  };
+  const roofMinX = -7.725, roofMaxX = 7.725, roofMinZ = -10.725, roofMaxZ = 2.725;
+  const stairHoleMinX = 5.1, stairHoleMinZ = -2.2, stairHoleMaxZ = 2.6;
+  membranePiece('op-bravo-roof-membrane-west',
+    (roofMinX + stairHoleMinX) / 2, (roofMinZ + roofMaxZ) / 2,
+    stairHoleMinX - roofMinX, roofMaxZ - roofMinZ);
+  membranePiece('op-bravo-roof-membrane-north',
+    (stairHoleMinX + roofMaxX) / 2, (roofMinZ + stairHoleMinZ) / 2,
+    roofMaxX - stairHoleMinX, stairHoleMinZ - roofMinZ);
+  membranePiece('op-bravo-roof-membrane-south',
+    (stairHoleMinX + roofMaxX) / 2, (stairHoleMaxZ + roofMaxZ) / 2,
+    roofMaxX - stairHoleMinX, roofMaxZ - stairHoleMaxZ);
 
   const roofPatchMaterial = new THREE.MeshStandardMaterial({
     color: 0x242a29, roughness: 0.99, metalness: 0,
   });
   const roofPatches = instanced(scene, raggedDisc(1, 22, 77033), roofPatchMaterial, [
     [-4.9, 12.055, -7.4, -Math.PI / 2, 0, 0.15, 1.6, 0.85, 1],
-    [4.7, 12.055, -1.0, -Math.PI / 2, 0, -0.24, 1.3, 0.72, 1],
+    [2.1, 12.055, -1.0, -Math.PI / 2, 0, -0.24, 1.3, 0.72, 1],
     [5.7, 12.055, -8.2, -Math.PI / 2, 0, 0.32, 0.9, 0.55, 1],
   ], false);
   roofPatches.name = 'op-bravo-roof-repairs';
@@ -1167,7 +1183,8 @@ function addOpBravoTower(scene) {
     do {
       x = -7.1 + R() * 14.2;
       z = -10.2 + R() * 12.4;
-    } while (Math.hypot(x - 3, z + 2) < 2.2 || Math.hypot(x + 3, z + 2) < 2.5);
+    } while (Math.hypot(x - 3, z + 2) < 2.2 || Math.hypot(x + 3, z + 2) < 2.5
+      || (x > 5.05 && z > -2.2 && z < 2.6));
     roofGravel.push([
       x, 12.07 + R() * 0.025, z,
       R() * 0.3, R() * Math.PI, R() * 0.3,
@@ -1232,17 +1249,18 @@ function addOpBravoTower(scene) {
   ], false);
   commandScreen.name = 'op-bravo-command-screen';
 
-  // Rooftop services occupy the otherwise dead east edge and form hard cover silhouettes
-  // without entering the stair or drone-launch routes.
+  // Rooftop services occupy the otherwise dead centre edge. OP Bravo's tower is mirrored, so
+  // the east-side stair well owns x≈6.6; keeping these units west of x=5.2 leaves the first
+  // tread and the roof landing open in both directions.
   const serviceBodies = instanced(scene, unitBox, steel, [
-    [5.75, 12.62, -7.65, 0, 0.08, 0, 2.25, 1.12, 1.5],
-    [5.45, 12.48, 0.05, 0, -0.04, 0, 1.7, 0.84, 1.2],
+    [3.65, 12.62, -7.65, 0, 0.08, 0, 2.25, 1.12, 1.5],
+    [3.55, 12.48, 0.05, 0, -0.04, 0, 1.7, 0.84, 1.2],
   ]);
   serviceBodies.name = 'op-bravo-roof-service-units';
   const serviceVents = [];
   for (const [x, y, z, yaw, width] of [
-    [5.75, 12.62, -6.88, 0.08, 1.62],
-    [5.45, 12.48, 0.67, -0.04, 1.18],
+    [3.65, 12.62, -6.88, 0.08, 1.62],
+    [3.55, 12.48, 0.67, -0.04, 1.18],
   ]) {
     for (let i = -3; i <= 3; i++) {
       serviceVents.push([x + i * width / 7, y, z, 0, yaw, 0, width / 8, 0.055, 0.035]);
@@ -1271,6 +1289,15 @@ function addOpBravoTower(scene) {
     const y = floor * 3;
     for (let zi = 0; zi < 3; zi++) {
       for (let xi = 0; xi < 4; xi++) {
+        // The eastmost tile row is decorative only. Do not lay a flat visual tile over the
+        // alternating stair opening: the collision hole is real, and a tile over it makes the
+        // stairs look capped even though the player can technically walk through the gap.
+        // This loop lays the surface ABOVE each flight: floor 1 covers the even/north
+        // flight, floor 2 covers the odd/south flight, and so on. The old parity test used
+        // the flight's parity instead of the slab's, leaving a full tile cap over every
+        // other stairwell. Keep the ground course intact; only upper-floor tiles need the
+        // aperture.
+        if (xi === 3 && floor > 0 && (floor % 2 === 1 ? zi < 2 : zi >= 2)) continue;
         const entry = [
           -3.45 + xi * 3.45, y + 0.065, -8.7 + zi * 3.35,
           0, ((xi + zi + floor) % 2 ? 0.006 : -0.006), 0,
@@ -1315,7 +1342,7 @@ function addOpBravoTower(scene) {
     frontline.rebar, conduits, false);
   conduitBatch.name = 'op-bravo-wall-conduits';
 
-  // A continuous handrail finally explains the open west-side stairwell and makes the
+  // A continuous handrail finally explains the open east-side stairwell and makes the
   // top-to-bottom route readable from every landing.
   const stairRails = [];
   const stairPosts = [];
@@ -1325,13 +1352,13 @@ function addOpBravoTower(scene) {
     const y = floor * 3;
     const zMid = even ? -8.2 : 0.2;
     stairRails.push([
-      -5.72, y + 1.65, zMid,
+      5.32, y + 1.65, zMid,
       even ? -slope : slope, 0, 0, 1, 4.54, 1,
     ]);
     for (const [py, pz] of even
       ? [[y + 0.72, -6.5], [y + 3.72, -9.9]]
       : [[y + 0.72, -1.5], [y + 3.72, 1.9]]) {
-      stairPosts.push([-5.72, py, pz, 0, 0, 0, 1, 1.35, 1]);
+      stairPosts.push([5.32, py, pz, 0, 0, 0, 1, 1.35, 1]);
     }
   }
   const stairRailBatch = instanced(
@@ -1345,19 +1372,19 @@ function addOpBravoTower(scene) {
 
   // Top floor: signals cell and observation briefing station.
   const signalRacks = instanced(scene, EQUIPMENT_CASE_GEO, frontline.equipment, [
-    [6.7, 9.78, -8.6, 0, 0, 0, 1.15, 1.65, 0.88],
-    [6.7, 9.78, -7.15, 0, 0, 0, 1.15, 1.65, 0.88],
+    [3.9, 9.78, -8.6, 0, 0, 0, 1.15, 1.65, 0.88],
+    [3.9, 9.78, -7.15, 0, 0, 0, 1.15, 1.65, 0.88],
   ]);
   signalRacks.name = 'op-bravo-signals-racks';
   const rackFaces = instanced(scene, unitBox, darkSteel, [
-    [6.12, 9.8, -8.6, 0, 0, 0, 0.04, 1.35, 0.68],
-    [6.12, 9.8, -7.15, 0, 0, 0, 0.04, 1.35, 0.68],
+    [3.32, 9.8, -8.6, 0, 0, 0, 0.04, 1.35, 0.68],
+    [3.32, 9.8, -7.15, 0, 0, 0, 0.04, 1.35, 0.68],
   ], false);
   rackFaces.name = 'op-bravo-signals-rack-faces';
   const rackLeds = [];
   for (const z of [-8.6, -7.15]) {
     for (let i = 0; i < 6; i++) {
-      rackLeds.push([6.085, 9.4 + i * 0.18, z - 0.22 + (i % 2) * 0.34,
+      rackLeds.push([3.285, 9.4 + i * 0.18, z - 0.22 + (i % 2) * 0.34,
         0, 0, 0, 0.025, 0.035, 0.055]);
     }
   }
@@ -1365,30 +1392,30 @@ function addOpBravoTower(scene) {
   leds.name = 'op-bravo-signals-leds';
   addFieldTable(scene, 2.6, 9.86, -7.2, Math.PI / 2, 2.2, 0.84);
   addEquipmentCases(scene, [
-    [4.25, 9.3, -8.8, 0, 0.15, 0, 1.0, 0.8, 0.86],
-    [5.15, 9.25, -9.0, 0, -0.08, 0, 0.82, 0.7, 0.8],
+    [3.85, 9.3, -8.8, 0, 0.15, 0, 1.0, 0.8, 0.86],
+    [4.45, 9.25, -9.0, 0, -0.08, 0, 0.82, 0.7, 0.8],
   ]);
 
   // Third floor: hostage holding area, with field cots and rolled blankets against the east
   // wall. Their cloth shapes break up the repeated office furniture without narrowing lanes.
   const cots = instanced(scene, unitBox, rubber, [
-    [6.15, 6.34, -8.2, 0, 0, 0, 2.7, 0.18, 0.82],
-    [6.15, 6.34, -4.7, 0, 0, 0, 2.7, 0.18, 0.82],
-    [6.15, 6.34, -1.2, 0, 0, 0, 2.7, 0.18, 0.82],
+    [3.85, 6.34, -8.2, 0, 0, 0, 2.7, 0.18, 0.82],
+    [3.85, 6.34, -4.7, 0, 0, 0, 2.7, 0.18, 0.82],
+    [3.85, 6.34, -1.2, 0, 0, 0, 2.7, 0.18, 0.82],
   ], false);
   cots.name = 'op-bravo-field-cots';
   const cotFrames = instanced(scene, unitBox, steel, [
-    [6.15, 6.18, -8.2, 0, 0, 0, 2.82, 0.07, 0.92],
-    [6.15, 6.18, -4.7, 0, 0, 0, 2.82, 0.07, 0.92],
-    [6.15, 6.18, -1.2, 0, 0, 0, 2.82, 0.07, 0.92],
+    [3.85, 6.18, -8.2, 0, 0, 0, 2.82, 0.07, 0.92],
+    [3.85, 6.18, -4.7, 0, 0, 0, 2.82, 0.07, 0.92],
+    [3.85, 6.18, -1.2, 0, 0, 0, 2.82, 0.07, 0.92],
   ]);
   cotFrames.name = 'op-bravo-field-cot-frames';
   const blankets = instanced(
     scene, new THREE.CylinderGeometry(0.13, 0.13, 0.68, 12),
     frontline.sandbag, [
-      [5.2, 6.55, -8.2, Math.PI / 2, 0, 0, 1, 1, 1],
-      [5.2, 6.55, -4.7, Math.PI / 2, 0, 0, 1, 1, 1],
-      [5.2, 6.55, -1.2, Math.PI / 2, 0, 0, 1, 1, 1],
+      [4.9, 6.55, -8.2, Math.PI / 2, 0, 0, 1, 1, 1],
+      [4.9, 6.55, -4.7, Math.PI / 2, 0, 0, 1, 1, 1],
+      [4.9, 6.55, -1.2, Math.PI / 2, 0, 0, 1, 1, 1],
     ], false);
   blankets.name = 'op-bravo-rolled-blankets';
 
@@ -2591,7 +2618,9 @@ export function addFrontlineMissionArt(scene, levelId) {
       scene, new THREE.PlaneGeometry(4.6, 1.7),
       aidSignMaterial, [
         [0, 3.9, 37.68, 0, Math.PI, 0, 1, 1, 1],
-        [0, 3.9, -37.68, 0, 0, 0, 1, 1, 1],
+        // Leave the south sign above the vehicle portal lintel; the other three signs remain
+        // at the normal pedestrian eye-line around the courtyard.
+        [0, 5.05, -37.68, 0, 0, 0, 1, 1, 1],
         [34.68, 3.9, 0, 0, -Math.PI / 2, 0, 1, 1, 1],
         [-34.68, 3.9, 0, 0, Math.PI / 2, 0, 1, 1, 1],
       ], false);
@@ -2648,6 +2677,106 @@ export function addFrontlineMissionArt(scene, levelId) {
         perimeterRubble[i], false);
       rubble.name = `market-perimeter-rubble-${i}`;
     }
+
+    // The south boundary is an operating vehicle compound. The wall shell leaves the actual
+    // opening; these steel leaves, posts and lintel make it read as a gate before interaction,
+    // then fold clear of the lane when the operator opens it.
+    const gate = new THREE.Group();
+    gate.name = 'market-south-gate-visual';
+    const gateLeafMaterial = frontline.barrierSteel.clone();
+    gateLeafMaterial.color.setHex(0x30383b);
+    gateLeafMaterial.roughness = 0.78;
+    const gateFrameMaterial = frontline.barrierSteel.clone();
+    gateFrameMaterial.color.setHex(0x1e2729);
+    gateFrameMaterial.roughness = 0.66;
+    const leafLeft = new THREE.Mesh(new THREE.BoxGeometry(5.92, 4.2, 0.18), gateLeafMaterial);
+    const leafRight = new THREE.Mesh(new THREE.BoxGeometry(5.92, 4.2, 0.18), gateLeafMaterial);
+    leafLeft.position.set(-3.0, 2.12, -38.34);
+    leafRight.position.set(3.0, 2.12, -38.34);
+    leafLeft.castShadow = leafRight.castShadow = quality.shadows;
+    gate.add(leafLeft, leafRight);
+    for (const x of [-6.25, 6.25]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.28, 4.75, 0.34), gateFrameMaterial);
+      post.position.set(x, 2.38, -38.28);
+      post.castShadow = post.receiveShadow = quality.shadows;
+      gate.add(post);
+    }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(12.8, 0.3, 0.34), gateFrameMaterial);
+    lintel.position.set(0, 4.66, -38.28);
+    lintel.castShadow = lintel.receiveShadow = quality.shadows;
+    gate.add(lintel);
+    const gateLampMaterial = new THREE.MeshBasicMaterial({ color: 0xffb74d });
+    const gateLamp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), gateLampMaterial);
+    gateLamp.position.set(0, 4.82, -38.45);
+    gate.add(gateLamp);
+    gate.userData.leaves = [leafLeft, leafRight];
+    gate.userData.openGate = () => {
+      if (gate.userData.opened) return;
+      gate.userData.opened = true;
+      leafLeft.position.x = -8.0;
+      leafRight.position.x = 8.0;
+      gateLampMaterial.color.setHex(0x86e0a0);
+    };
+    scene.add(gate);
+
+    // A field table and paper packet turn the second objective into a physical recovery task,
+    // not another invisible flag. The marker/control mesh is authored by main.js on the table.
+    const manifestTable = addFieldTable(scene, 0, 1.0, -29.5, 0, 2.7, 1.0);
+    manifestTable.name = 'market-manifest-table';
+    const manifestPaper = new THREE.Mesh(
+      new THREE.BoxGeometry(0.86, 0.035, 0.58),
+      new THREE.MeshStandardMaterial({ color: 0xd7d1bc, roughness: 0.92, metalness: 0.02 }),
+    );
+    manifestPaper.name = 'market-manifest-paper';
+    manifestPaper.position.set(0, 1.105, -29.5);
+    manifestPaper.rotation.y = -0.07;
+    manifestPaper.castShadow = manifestPaper.receiveShadow = quality.shadows;
+    scene.add(manifestPaper);
+    const manifestClip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.055, 0.66),
+      frontline.barrierSteel,
+    );
+    manifestClip.position.set(0.34, 1.145, -29.5);
+    manifestClip.rotation.y = -0.07;
+    scene.add(manifestClip);
+
+    // Keep the exfil unmistakable and safely inside the 90m ground plate. It sits beyond the
+    // vehicle passage, not at the old -40m edge where a player could step off the map.
+    const exfil = new THREE.Group();
+    exfil.name = 'market-exfil-pad';
+    const padMaterial = new THREE.MeshStandardMaterial({
+      color: 0x334b40, roughness: 0.86, metalness: 0.08,
+    });
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(7.0, 0.045, 4.8), padMaterial);
+    pad.position.set(0, 0.055, -42.5);
+    pad.receiveShadow = quality.shadows;
+    exfil.add(pad);
+    const exfilRingMaterial = new THREE.MeshBasicMaterial({
+      color: 0x8ce6ae, transparent: true, opacity: 0.78,
+      depthTest: true, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const exfilRing = new THREE.Mesh(new THREE.RingGeometry(2.6, 2.78, 40), exfilRingMaterial);
+    exfilRing.rotation.x = -Math.PI / 2;
+    exfilRing.position.set(0, 0.085, -42.5);
+    exfil.add(exfilRing);
+    const laneMaterial = new THREE.MeshBasicMaterial({ color: 0xd3a653 });
+    for (const x of [-2.6, 2.6]) {
+      const lane = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.025, 4.25), laneMaterial);
+      lane.position.set(x, 0.09, -42.5);
+      exfil.add(lane);
+    }
+    for (const x of [-3.25, 3.25]) {
+      const bollard = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.13, 1.0, 8), gateFrameMaterial,
+      );
+      bollard.position.set(x, 0.52, -42.5);
+      bollard.castShadow = bollard.receiveShadow = quality.shadows;
+      exfil.add(bollard);
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), exfilRingMaterial);
+      beacon.position.set(x, 1.05, -42.5);
+      exfil.add(beacon);
+    }
+    scene.add(exfil);
   }
 
   if (levelId === 10) {

@@ -26,7 +26,7 @@ def main():
         page.evaluate("() => BP.startLevel(2)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.evaluate("""() => {
-          if (BP.world.reinf) BP.world.reinf.sent = BP.world.reinf.max;
+          for (const r of BP.world.reinfs || []) r.sent = r.max;
           for (const enemy of BP.world.enemies) {
             enemy.mesh.visible = false;
             enemy.range = 0;

@@ -7,9 +7,10 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 
-def finish_drone(page, expected_index, mode="recon", capture=None):
+def finish_drone(page, expected_index, expected_step=0, mode="recon", capture=None):
     page.wait_for_function(
-        f"() => BP.world.objectiveIdx === {expected_index} && !!BP.world.drone",
+        f"() => BP.world.objectiveIdx === {expected_index}"
+        f" && BP.world.objectiveStepIdx === {expected_step} && !!BP.world.drone",
         timeout=10000,
     )
     before = page.evaluate("""() => ({
@@ -76,6 +77,19 @@ def finish_drone(page, expected_index, mode="recon", capture=None):
         page.evaluate("() => BP.world.drone.targets.forEach(target => target.marked = true)")
     if mode == "combat":
         page.wait_for_function("() => !BP.world.drone", timeout=90000)
+        if capture:
+            page.screenshot(path=str(capture).replace(".png", "-ground.png"))
+            for suffix, position, yaw, pitch in [
+                ("-roof-stair", [6.9, 12.35, -1.5], 3.141592653589793, -0.95),
+                ("-floor3-stair", [6.9, 9.35, -6.5], 3.141592653589793, -0.95),
+            ]:
+                page.evaluate("""view => {
+                  BP.player.pos.set(...view.position);
+                  BP.player.yaw = view.yaw;
+                  BP.player.pitch = view.pitch;
+                }""", {"position": position, "yaw": yaw, "pitch": pitch})
+                page.wait_for_timeout(120)
+                page.screenshot(path=str(capture).replace(".png", suffix + ".png"))
     else:
         page.wait_for_timeout(1200)
     after = page.evaluate("""() => ({
@@ -115,30 +129,47 @@ def main():
             page.evaluate("() => BP.startLevel(2)")
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             page.evaluate("""() => {
-              if (BP.world.reinf) BP.world.reinf.sent = BP.world.reinf.max;
+              for (const r of BP.world.reinfs || []) r.sent = r.max;
               BP.world.enemies.forEach(enemy => { enemy.dead = true; enemy.mesh.visible = false; });
             }""")
-            page.wait_for_function("() => BP.world.objectiveIdx === 1")
+            page.wait_for_function(
+                "() => BP.world.objectiveIdx === 1 && BP.world.objectiveStepIdx === 0",
+            )
             page.evaluate("""() => {
-              const hold = setInterval(() => BP.player.pos.set(-11.2, .1, -41.6), 16);
+              const hold = setInterval(() => {
+                BP.player.pos.set(-11.2, .1, -41.6);
+                BP.input.breachPressed = true;
+              }, 16);
               setTimeout(() => clearInterval(hold), 700);
             }""")
-            results["level2"] = finish_drone(page, 2, mode="combat")
+            results["level2"] = finish_drone(page, 1, expected_step=1, mode="combat")
 
             page.evaluate("() => BP.startLevel(3)")
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             page.evaluate("""() => {
-              if (BP.world.reinf) BP.world.reinf.sent = BP.world.reinf.max;
+              for (const r of BP.world.reinfs || []) r.sent = r.max;
               BP.world.enemies.forEach(enemy => { enemy.dead = true; enemy.mesh.visible = false; });
             }""")
-            page.wait_for_function("() => BP.world.objectiveIdx === 1")
+            page.wait_for_function(
+                "() => BP.world.objectiveIdx === 1 && BP.world.objectiveStepIdx === 0",
+            )
             page.evaluate("() => BP.world.civilians.forEach(civilian => civilian.rescued = true)")
             page.wait_for_function("() => BP.world.objectiveIdx === 2")
             page.evaluate("""() => {
               const hold = setInterval(() => BP.player.pos.set(-2, 9.1, -6), 16);
               setTimeout(() => clearInterval(hold), 700);
             }""")
-            results["level3"] = finish_drone(page, 3)
+            page.wait_for_function(
+                "() => BP.world.objectiveIdx === 2 && BP.world.objectiveStepIdx === 1",
+            )
+            page.evaluate("""() => {
+              const hold = setInterval(() => {
+                BP.player.pos.set(-2, 9.45, -6);
+                BP.input.breachPressed = true;
+              }, 16);
+              setTimeout(() => clearInterval(hold), 700);
+            }""")
+            results["level3"] = finish_drone(page, 2, expected_step=2, mode="combat")
 
         page.evaluate("() => BP.startLevel(7)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
@@ -158,6 +189,7 @@ def main():
         results["level7"] = finish_drone(
             page,
             0,
+            expected_step=0,
             mode="combat",
             capture=output_dir / "op-bravo-impact.png",
         )
@@ -167,8 +199,8 @@ def main():
         expected = {"level7": (1, "playing")}
         if not args.strike_only:
             expected.update({
-                "level2": (3, "playing"),
-                "level3": (4, "debrief"),
+                "level2": (2, "playing"),
+                "level3": (3, "debrief"),
             })
         for name, (objective_index, mode) in expected.items():
             after = results[name]["after"]
@@ -182,7 +214,11 @@ def main():
             assert results["level2"]["before"]["vehicles"] == 1
             assert results["level2"]["before"]["rifle"] == 100
             assert results["level2"]["before"]["grenades"] == 10
-            assert results["level3"]["before"]["mode"] == "recon"
+            assert results["level3"]["before"]["mode"] == "combat"
+            assert results["level3"]["before"]["combatants"] == 10
+            assert results["level3"]["before"]["vehicles"] == 0
+            assert results["level3"]["before"]["rifle"] == 100
+            assert results["level3"]["before"]["grenades"] == 8
         assert results["level7"]["before"]["mode"] == "combat"
         assert 10 <= results["level7"]["before"]["combatants"] <= 12
         assert results["level7"]["before"]["vehicles"] == 1

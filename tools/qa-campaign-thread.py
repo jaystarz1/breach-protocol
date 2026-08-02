@@ -96,7 +96,9 @@ def main():
             rootName: enemy?.mesh.name,
             rigBastion: enemy?.mesh.userData.rig?.bastion,
             namedParts: names.filter(name => name.startsWith('bastion-')),
-            objective: BP.world.level.objectives.find(objective => objective.type === 'target')?.text,
+            objective: BP.world.level.objectives
+              .flatMap(objective => objective.steps || [objective])
+              .find(step => step.type === 'target')?.text,
             objectiveMarkers: BP.world.objMarkers?.length || 0,
             liveMarker: !!BP.world.markLive,
             bunkerDrawCalls: BP.performance.render.calls,
@@ -146,6 +148,15 @@ def main():
           });
         }""")
         page.wait_for_function("() => BP.world.objectiveIdx === 1", timeout=10000)
+        # Phase 2 is the backup-breaker reset. The F-interaction path is gated behind pointer
+        # lock (absent headless), so mark the device used the same way enemy deaths are
+        # simulated above; the objective checker advances it through the real code path.
+        page.evaluate("""() => {
+          const breaker = BP.world.objectiveDevices.find(device => device.id === 'l1-breaker');
+          breaker.used = true;
+          breaker.root.userData.used = true;
+        }""")
+        page.wait_for_function("() => BP.world.objectiveIdx === 2", timeout=10000)
         page.evaluate("""() => {
           BP.player.locked = true;
           BP.player.pos.set(0, 0, -19);

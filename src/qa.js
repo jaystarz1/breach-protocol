@@ -55,6 +55,11 @@ window.QA_RESULTS = RESULTS;
 
 let timer = null;
 
+function activeObjective(world) {
+  const phase = world?.level?.objectives?.[world.objectiveIdx];
+  return phase?.steps?.[world.objectiveStepIdx ?? 0] || phase || null;
+}
+
 export function stop() { if (timer) clearInterval(timer); timer = null; input.move.x = 0; input.move.y = 0; input.fire = false; }
 
 export function run(from = 1, to = 10, opts = {}) {
@@ -66,7 +71,7 @@ export function run(from = 1, to = 10, opts = {}) {
   let levelStart = performance.now();
   let lastPos = null, stuckSince = 0, jiggleUntil = 0, jiggleDir = 1, bestWd = null;
   let dynPath = null, dynIdx = 0, dynTimer = 0, dynStuck = 0, dynLast = null;
-  let lastObjIdx = -1, objSince = 0;
+  let lastObjKey = '', objSince = 0;
   let notes = [];
   let fireTick = 0, civJam = 0, civBypassUntil = 0;
   let hpMin = 1, hpSum = 0, hpSamples = 0;
@@ -76,7 +81,7 @@ export function run(from = 1, to = 10, opts = {}) {
     wpIdx = 0; levelStart = performance.now();
     lastPos = null; stuckSince = 0; jiggleUntil = 0; bestWd = null;
     dynPath = null; dynIdx = 0; dynTimer = 0; dynStuck = 0; dynLast = null;
-    lastObjIdx = -1; objSince = performance.now();
+    lastObjKey = ''; objSince = performance.now();
     hpMin = 1; hpSum = 0; hpSamples = 0;
     notes = [];
   }
@@ -137,15 +142,17 @@ export function run(from = 1, to = 10, opts = {}) {
     }
 
     // objective hang tracking
-    if (w.objectiveIdx !== lastObjIdx) { lastObjIdx = w.objectiveIdx; objSince = performance.now(); }
+    const objectiveKey = `${w.objectiveIdx}:${w.objectiveStepIdx ?? 0}`;
+    if (objectiveKey !== lastObjKey) { lastObjKey = objectiveKey; objSince = performance.now(); }
 
-    const obj = w.level.objectives[w.objectiveIdx];
+    const obj = activeObjective(w);
 
     // --- combat: nearest live visible enemy, but an HVT always outranks a guard ---
     const eye = { x: p.pos.x, y: p.pos.y + 1.6, z: p.pos.z };
     let target = null, tDist = Infinity;
     for (const e of w.enemies) {
       if (e.dead || e.surrendered) continue;
+      if (obj?.type === 'identify' && e.identifyTarget && !e.identified) continue;
       const d = Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y, e.pos.z - p.pos.z);
       if (!hasLOS(w.solids, eye.x, eye.y, eye.z, e.pos.x, e.pos.y + 1.1, e.pos.z)) continue;
       const priority = e.hvt ? d - 400 : d;
@@ -154,7 +161,7 @@ export function run(from = 1, to = 10, opts = {}) {
     }
     // hold fire if any civilian sits near the exact firing line (generous 0.9m sphere,
     // covers weapon spread) at any range up to the target
-    let civRisk = false;
+    let civRisk = false, civRiskHostage = null;
     if (target) {
       const dx = target.pos.x - eye.x, dyy = (target.pos.y + 1.15) - eye.y, dz = target.pos.z - eye.z;
       const dl = Math.hypot(dx, dyy, dz);
@@ -169,7 +176,12 @@ export function run(from = 1, to = 10, opts = {}) {
           const t = raySphere(eye.x, eye.y, eye.z, ux, uy, uz, c.pos.x, c.pos.y + h, c.pos.z, clearR);
           if (t < dl + 1.5) { civRisk = true; break; }
         }
-        if (civRisk) break;
+        if (civRisk) {
+          // An unrescued hostage masking the shot is not a reason to duel forever — it is a
+          // navigation order. Remember who, and go cut them loose before resuming the fight.
+          if (c.hostage && !c.rescued) civRiskHostage = c;
+          break;
+        }
       }
     }
 
@@ -191,7 +203,7 @@ export function run(from = 1, to = 10, opts = {}) {
       else { fireTick++; if (fireTick % 12 === 0) { input.fire = true; input.firePressed = true; } }
       return; // stand and fight
     }
-    if (target && civRisk && performance.now() >= civBypassUntil) {
+    if (target && civRisk && !civRiskHostage && performance.now() >= civBypassUntil) {
       // sidestep to open a clean line, and keep facing the threat while doing it
       const dx2 = target.pos.x - eye.x, dz2 = target.pos.z - eye.z;
       p.yaw = Math.atan2(-dx2, -dz2);
@@ -212,8 +224,10 @@ export function run(from = 1, to = 10, opts = {}) {
     if (w.level.lockPlayer) return; // sniper: nothing to walk
 
     // --- dynamic goals: run down an HVT, or go free a hostage ---
-    let dyn = null;
-    if (obj && obj.type === 'target') {
+    // A hostage masking the only shot outranks the objective's own goal: walking up frees
+    // them (rescue is proximity-based), unmasks the target, and the fight resumes.
+    let dyn = civRiskHostage ? civRiskHostage.pos : null;
+    if (dyn) { /* rescue-before-fight */ } else if (obj && obj.type === 'target') {
       const hvt = w.enemies.find(e => e.hvt && !e.dead);
       if (hvt) dyn = hvt.pos;
     } else if (obj && obj.type === 'rescue') {
@@ -229,6 +243,15 @@ export function run(from = 1, to = 10, opts = {}) {
         if (d < bd) { bd = d; best = c.pos; }
       }
       dyn = best;
+    } else if (obj && (obj.type === 'interact' || obj.type === 'secure')) {
+      const wanted = obj.device || obj.devices;
+      const ids = Array.isArray(wanted) ? wanted : wanted ? [wanted] : [];
+      const device = w.objectiveDevices?.find(d => ids.includes(d.id) && !d.used);
+      if (device) dyn = { x: device.pos[0], y: device.pos[1] ?? 0, z: device.pos[2] };
+    } else if (obj && obj.type === 'identify') {
+      const contact = w.enemies.find(e =>
+        !e.dead && !e.surrendered && e.identifyTarget && !e.identified);
+      if (contact) dyn = contact.pos;
     }
     if (dyn) {
       if (!dynPath || dynTimer <= 0 || dynIdx >= dynPath.length) {
@@ -242,6 +265,16 @@ export function run(from = 1, to = 10, opts = {}) {
       if (d2 < 1.1 && Math.abs(wp2.y - p.pos.y) < 1.6) { dynIdx++; dynStuck = 0; }
       p.yaw = Math.atan2(-(wp2.x - p.pos.x), -(wp2.z - p.pos.z));
       p.pitch = 0;
+      if (obj?.type === 'interact' || obj?.type === 'secure') {
+        const wanted = obj.device || obj.devices;
+        const ids = Array.isArray(wanted) ? wanted : wanted ? [wanted] : [];
+        const device = w.objectiveDevices?.find(d => ids.includes(d.id) && !d.used);
+        if (device && Math.hypot(device.pos[0] - p.pos.x, device.pos[2] - p.pos.z) < 2.35) {
+          input.breachPressed = true;
+        }
+      } else if (obj?.type === 'identify' && dyn && d2 < 30) {
+        input.breachPressed = true;
+      }
       input.move.y = -1;
       // dynamic goals need their own unstick, or a jammed doorway hangs the level
       if (dynLast && Math.hypot(p.pos.x - dynLast.x, p.pos.z - dynLast.z) < 0.06) {

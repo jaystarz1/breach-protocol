@@ -7,7 +7,7 @@ import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
   ceilingLight, hangingBulb, exitSign, baseboard, wainscot, doorFrame, desk, chair, table,
-  shelf, cabinet, mattress, rug, radiator, pipes, poster, debris,
+  shelf, cabinet, mattress, rug, radiator, pipes, poster, debris, poleWire,
   posterWall, noticeBoard, whiteboard, wallClock, graffiti, picture, windowBay,
   lightCursor, mirrorLightsXSince,
 } from '../world.js';
@@ -26,6 +26,10 @@ const BAY_C = [[-15.2, 4.2], [-9.2, 7.2], [-3.2, 4.2], [2.8, 7.2], [8.8, 4.2], [
 // in front of the black recess that puts him inside a room instead of flat against the brick.
 const inBay = (b, wallZ) => [b[0], b[1], wallZ + 0.62];
 
+// Three authored top-level mission phases. Each phase may contain physical, testable steps;
+// the runtime presents the phase as the campaign beat and advances through its steps in order.
+const phase = (id, text, steps) => ({ id, text, steps });
+
 // A multi-storey tower with a west-side stairwell. Flights alternate corners per floor
 // (even floors: NW flight ascending north; odd floors: SW flight ascending south) so no
 // flight ever stacks over another — every floor is walkable UP and DOWN. Each flight
@@ -36,7 +40,12 @@ function tower(x, z, w, d, floors, opts = {}) {
   const lightsStart = lightCursor();
   const fh = 3;
   const x1 = x - w / 2, x2 = x + w / 2, z1 = z - d / 2, z2 = z + d / 2;
-  const sx = x1 + 1.1; // stair lane center
+  // The default lane is deliberately tight against the west wall. OP Bravo uses a slightly
+  // wider, inset well so the roof parapet and each landing read as an opening from the player
+  // camera instead of a concrete cap over the first tread.
+  const stairwellExtra = Math.max(0, opts.stairwellClearance ?? 0);
+  const stairOpeningWidth = 2.2 + stairwellExtra;
+  const sx = x1 + stairOpeningWidth / 2; // stair lane center
   // Top face at 0.04, NOT 0: the street/ground slab under every tower also tops out at y=0,
   // and two coplanar upward faces in the same merged mesh z-fight into a per-frame strobe.
   // 4cm is invisible, is well under the 0.6m step allowance, and matches what shop() does.
@@ -48,21 +57,32 @@ function tower(x, z, w, d, floors, opts = {}) {
     // That is a coplanar 1.8m2 band around the whole room perimeter, and it strobes. Lifting
     // the walking surface 2cm above the wall caps also clears the top stair tread at oy.
     const sy = oy + 0.02;
-    geo.push(...floorSlab(x + 1.1, z, w - 2.2, d, sy, 0.3, color)); // east portion, full length
+    const eastStart = x1 + stairOpeningWidth;
+    const eastWidth = Math.max(0.1, x2 - eastStart);
+    geo.push(...floorSlab(eastStart + eastWidth / 2, z, eastWidth, d, sy, 0.3, color));
+    const extraRun = stairwellExtra > 0 ? 0.65 : 0;
     if (parityBelow === 0) {
-      // NW flight below: hole over z1+1.1..z1+4.5; cover the rest + top landing at z1..z1+1.1
-      geo.push(...floorSlab(sx, z1 + 4.5 + (d - 4.5) / 2, 2.2, d - 4.5, sy, 0.3, color));
-      geo.push(...floorSlab(sx, z1 + 0.55, 2.2, 1.1, sy, 0.3, color));
+      // NW flight below: leave a little daylight around z1+1.1..z1+4.5 so the landing and
+      // first tread cannot disappear behind the edge of a full-depth concrete slab.
+      const holeLow = z1 + 1.1 - extraRun;
+      const holeHigh = z1 + 4.5 + extraRun;
+      if (holeLow > z1) geo.push(...floorSlab(sx, z1 + (holeLow - z1) / 2, stairOpeningWidth, holeLow - z1, sy, 0.3, color));
+      if (holeHigh < z2) geo.push(...floorSlab(sx, holeHigh + (z2 - holeHigh) / 2, stairOpeningWidth, z2 - holeHigh, sy, 0.3, color));
     } else {
-      // SW flight below: hole over z2-4.5..z2-1.1; cover the rest + top landing at z2-1.1..z2
-      geo.push(...floorSlab(sx, z1 + (d - 4.5) / 2, 2.2, d - 4.5, sy, 0.3, color));
-      geo.push(...floorSlab(sx, z2 - 0.55, 2.2, 1.1, sy, 0.3, color));
+      // SW flight below: same clearance at the opposite end of the alternating run.
+      const holeLow = z2 - 4.5 - extraRun;
+      const holeHigh = z2 - 1.1 + extraRun;
+      if (holeLow > z1) geo.push(...floorSlab(sx, z1 + (holeLow - z1) / 2, stairOpeningWidth, holeLow - z1, sy, 0.3, color));
+      if (holeHigh < z2) geo.push(...floorSlab(sx, holeHigh + (z2 - holeHigh) / 2, stairOpeningWidth, z2 - holeHigh, sy, 0.3, color));
     }
   };
 
   for (let f = 0; f < floors; f++) {
     const y = f * fh;
-    const doorGap = (f === 0 && opts.door !== false) ? [{ off: w / 2 - 0.8, w: 1.6, h: 2.4 }] : [];
+    // wall() measures `off` to the opening's leading edge. Subtract half the door width so
+    // the masonry opening, exterior portal and authored DoorSystem leaf all centre on x.
+    const doorGap = (f === 0 && opts.door !== false)
+      ? [{ off: w / 2 - 0.8, w: 1.6, h: 2.4 }] : [];
     geo.push(...wall(x1, z2, x2, z2, fh, C.building, doorGap, y)); // south (entry)
     geo.push(...wall(x1, z1, x2, z1, fh, C.building, [], y));
     if (!opts.openEast) geo.push(...wall(x2, z1, x2, z2, fh, C.building, [], y));
@@ -120,7 +140,7 @@ function tower(x, z, w, d, floors, opts = {}) {
     geo.push(...lift(debris(x + 2 + R() * 3, z + (R() - 0.5) * 5, 1.8, 6, 41 + f), y));
     // doorway trim on the ground-floor entrance
     if (f === 0 && opts.door !== false) {
-      geo.push(...doorFrame(x1 + w / 2 - 0.8 + 0.8, z2, false, 1.6, 2.4));
+      geo.push(...doorFrame(x, z2, false, 1.6, 2.4));
       // The tower shell is reused in three missions. A thin frame and a grey steel leaf
       // disappeared into its battered facade—especially with a crate in the approach—so the
       // breach existed logically but read as a solid wall. This deep exterior portal remains
@@ -157,6 +177,7 @@ function tower(x, z, w, d, floors, opts = {}) {
       lit: opts.windowLit ?? 0.16,
       damage: opts.facadeDamage ?? 0.5,
       balconies: opts.balconies,
+      roofCaps: opts.roofCaps,
     };
     const facadeSeed = opts.seedOffset ?? 0;
     geo.push(...facade(x1, z2, x2, z2, 0, floors * fh, 30101 + floors * 17 + facadeSeed, {
@@ -323,8 +344,18 @@ export const LEVELS = [
         hostage: true },
     ],
     objectives: [
-      { type: 'clear', zone: null, text: 'CLEAR ALL THREE ROOMS — HOSTILES ONLY' },
-      { type: 'reach', zone: [0, -19, 3.5], text: 'EXIT THE KILL-HOUSE' },
+      phase('annex-clear', 'CLEAR AND SECURE THE ANNEX', [
+        { type: 'clear', zone: null, text: 'CLEAR ALL THREE ROOMS — HOSTILES ONLY' },
+      ]),
+      phase('backup-map', 'RESTORE THE BACKUP CIRCUIT', [
+        { type: 'interact', device: 'l1-breaker', text: 'RESET THE BACKUP BREAKER — RECOVER THE LAUNCH-CORRIDOR MAP' },
+      ]),
+      phase('annex-evac', 'EVACUATE THE KILL-HOUSE', [
+        { type: 'reach', zone: [0, -19, 3.5], text: 'EXIT THE KILL-HOUSE' },
+      ]),
+    ],
+    objectiveDevices: [
+      { id: 'l1-breaker', kind: 'breaker', label: 'BACKUP BREAKER', actionLabel: 'RESET', pos: [9.9, 0, 1.8] },
     ],
   },
 
@@ -446,18 +477,45 @@ export const LEVELS = [
       { pos: [9.5, 0, -3], hostage: true },
     ],
     crowdSpawns: [[-11, 0, 16], [11, 0, -16]],
-    // Fed in from both ends of the street. Dawdle and the block refills behind you.
-    reinforce: { every: 24, first: 28, max: 6, group: 2, range: 70,
-      at: [[0, 0, 50], [-8, 0, -46], [8, 0, -46]],
-      atVariants: [
-        [[0, 0, 50], [-8, 0, -46], [8, 0, -46]],
-        [[0, 0, 50], [-12, 0, 34], [8, 0, -46]],
-        [[0, 0, 50], [12, 0, 32], [-8, 0, -46]],
-      ] },
+    reinforce: [
+      // Fed in from both ends of the street. Dawdle and the block refills behind you.
+      { every: 24, first: 28, max: 6, group: 2, range: 70,
+        at: [[0, 0, 50], [-8, 0, -46], [8, 0, -46]],
+        atVariants: [
+          [[0, 0, 50], [-8, 0, -46], [8, 0, -46]],
+          [[0, 0, 50], [-12, 0, 34], [8, 0, -46]],
+          [[0, 0, 50], [12, 0, 32], [-8, 0, -46]],
+        ] },
+      // The deep shell-damaged storefront is rigged: step inside and a close-quarters team
+      // pours out of the street to shut the door behind you. Zones and staging sockets track
+      // the storefront module through its three layout variants (mission-variants.js); the
+      // hidden flag keeps the wave from materialising in the player's face, and converge
+      // (reinforcements()) means they come hunting rather than posting up outside.
+      { every: 4, first: 1.5, max: 4, group: 2, range: 55, minDistance: 8,
+        scatter: 1.5, hidden: true,
+        message: 'AMBUSH — THE STOREFRONT WAS RIGGED',
+        triggerVariants: [
+          { zone: [-15.5, -28.5, -6.5, -21.5] },
+          { zone: [6.5, -29.5, 15.5, -22.5] },
+          { zone: [-15.5, -23.5, -6.5, -16.5] },
+        ],
+        // Sockets hug the same building face as the rigged shop, one up-street and one
+        // down-street of it: from inside the module its own side walls occlude both, so the
+        // hidden staging holds while the player is in the kill zone — where it matters.
+        at: [[-14, 0, -14], [-14, 0, -36]],
+        atVariants: [
+          [[-14, 0, -14], [-14, 0, -36]],
+          [[14, 0, -15], [14, 0, -37]],
+          [[-14, 0, -9], [-14, 0, -31]],
+        ] },
+    ],
     objectives: [
-      { type: 'clear', zone: null, text: 'SWEEP THE BLOCK — ELIMINATE ALL HOSTILES' },
-      { type: 'reach', zone: [-11.2, -41.6, 3], text: 'ESTABLISH OBSERVATION POST ALPHA' },
-      {
+      phase('street-clear', 'CLEAR THE STREET', [
+        { type: 'clear', zone: null, text: 'SWEEP THE BLOCK — ELIMINATE ALL HOSTILES' },
+      ]),
+      phase('alpha-sortie', 'ARM OP ALPHA AND BREAK THE REINFORCEMENTS', [
+        { type: 'interact', device: 'l2-launch', text: 'ARM THE OP ALPHA LAUNCH TABLE' },
+        {
         type: 'drone',
         mode: 'combat',
         label: 'OP ALPHA // ARMED UAS',
@@ -512,15 +570,23 @@ export const LEVELS = [
               patrols: [[[8, 51], [7, 33], [6, 13]], [[8.5, 48], [8, 31], [7, 11]], [[7.5, 54], [7, 35], [6, 14]]] },
           ],
         },
-      },
-      { type: 'reach', zone: [0, -52, 3], text: 'REGROUP WITH THE STACK — PUSH THROUGH THE BARRICADE' },
+        },
+      ]),
+      phase('corridor-open', 'REOPEN THE LAUNCH CORRIDOR', [
+        { type: 'interact', device: 'l2-gate', text: 'OPEN THE SOUTHERN BARRICADE — MOVE THE STACK THROUGH' },
+        { type: 'reach', zone: [0, -52, 3], text: 'REGROUP WITH THE STACK — PUSH THROUGH THE BARRICADE' },
+      ]),
+    ],
+    objectiveDevices: [
+      { id: 'l2-launch', kind: 'launch', label: 'OP ALPHA LAUNCH TABLE', actionLabel: 'ARM', pos: [-11.2, 0, -41.6] },
+      { id: 'l2-gate', kind: 'gate', label: 'SOUTHERN BARRICADE', actionLabel: 'OPEN', pos: [0, 0, -48.4], width: 0.85 },
     ],
   },
 
   // ---------------------------------------------------------------- 3
   {
     id: 3, name: 'OP ALPHA',
-    brief: 'The apartment block above OP Alpha is being cleared room by room by a 37th assault team. Recover the observers and hold all three floors so the launch corridor keeps its eastern view. Flash the rooms before entry and walk up to each bound observer to release them.',
+    brief: 'The apartment block above OP Alpha is being cleared room by room by a 37th assault team. Recover the observers, hold all three floors, then arm the rooftop drone against a reinforcement wave trying to enter the building. Flash the rooms before entry and walk up to each bound observer to release them.',
     weapons: ['pistol', 'm4'], grenades: 0, flashes: 3, squad: 2,
     sky: 0x232e3a, fog: [0x232e3a, 35, 120], ambient: 0.9, sun: 1.15,
     start: [0, 0, 16, 0],
@@ -588,12 +654,16 @@ export const LEVELS = [
         hold: true, yaw: 180 },
       { pos: [-8, 0, -7], positions: [[-8, 0, -7], [-10, 0, -8.5], [-5, 0, -3]],
         patrols: [[[-8, -7], [-3, -7]], [[-10, -8.5], [-4, -8.5]], [[-5, -3], [-11, -3]]] },
+      // The whole second-floor team carries the blackout tag: the building generator lives
+      // on their floor, and dropping the last of them kills the power for the rest of the
+      // mission — floor three and the rooftop drone launch happen on goggles.
       { pos: [10, 3, -7], positions: [[10, 3, -7], [11, 3, -8.2], [7, 3, -8.8]],
-        hold: true, yaw: 90 },
+        hold: true, yaw: 90, tag: 'floor2' },
       { pos: [-9, 3, -5], positions: [[-9, 3, -5], [-11, 3, -7.8], [-7, 3, -7.2]],
-        hold: true, yaw: 270 },
+        hold: true, yaw: 270, tag: 'floor2' },
       { pos: [2, 3, -8], positions: [[2, 3, -8], [-2, 3, -7], [3, 3, -7.5]],
-        patrols: [[[2, -8], [-9, -8], [9, -8]], [[-2, -7], [9, -7], [-9, -7]], [[3, -7.5], [-8, -7.5], [8, -7.5]]] },
+        patrols: [[[2, -8], [-9, -8], [9, -8]], [[-2, -7], [9, -7], [-9, -7]], [[3, -7.5], [-8, -7.5], [8, -7.5]]],
+        tag: 'floor2' },
       { pos: [10, 6, -7], positions: [[10, 6, -7], [11, 6, -8], [7, 6, -8.7]],
         hold: true, yaw: 90 },
       { pos: [8, 6, -3], positions: [[8, 6, -3], [6, 6, -2.2], [11, 6, -1.4]],
@@ -617,6 +687,9 @@ export const LEVELS = [
       { pos: [-9, 6, -2.4], positions: [[-9, 6, -2.4], [-11, 6, -2.8], [-6, 6, -2]],
         hostage: true },
     ],
+    // Clearing the second floor drops the building power (see the tagged team above). It is
+    // a dusk map, so the courtyard survives as silhouettes; inside, the goggles take over.
+    blackoutOn: { tag: 'floor2' },
     reinforce: { every: 30, first: 35, max: 4, group: 2, range: 45,
       at: [[-7, 0, 6], [7, 0, 6]],
       atVariants: [
@@ -625,17 +698,59 @@ export const LEVELS = [
         [[11, 0, 8], [-5, 0, 7]],
       ] },
     objectives: [
-      { type: 'clear', zone: null, text: 'CLEAR BOTH WINGS — ALL THREE FLOORS' },
-      { type: 'rescue', text: 'CUT THE HOSTAGES LOOSE — WALK UP TO EACH ONE' },
-      { type: 'reach', zone: [-2, -6, 3, 9], text: 'GET TO THE ROOF' },
-      {
+      phase('alpha-clear', 'CLEAR THE APARTMENT BLOCK', [
+        { type: 'clear', zone: null, text: 'CLEAR BOTH WINGS — ALL THREE FLOORS' },
+      ]),
+      phase('alpha-observers', 'RECOVER THE OBSERVERS', [
+        { type: 'rescue', text: 'CUT THE HOSTAGES LOOSE — WALK UP TO EACH ONE' },
+      ]),
+      phase('alpha-drone', 'ARM THE ROOFTOP DRONE', [
+        { type: 'reach', zone: [-2, -6, 3, 9], text: 'GET TO THE ROOF' },
+        { type: 'interact', device: 'l3-drone', text: 'ARM OP ALPHA — CONNECT THE ROOFTOP CONTROL' },
+        {
         type: 'drone',
+        mode: 'combat',
         label: 'OP ALPHA',
-        text: 'LAUNCH FROM OP ALPHA — MAP THE NEXT ASSAULT AXES',
+        text: 'ARM OP ALPHA — BREAK THE REINFORCEMENTS BEFORE THEY ENTER THE BLOCK',
         launch: [-2, 9.45, -6],
         yaw: Math.PI,
-        targets: [[-8, 0.1, 12], [10, 0.1, 6], [0, 0.1, -18]],
-      },
+        keepStackVisible: true,
+        rifleRounds: 100,
+        grenades: 8,
+        result: 'OP ALPHA ASSAULT WAVE BROKEN — BUILDING APPROACH SECURE',
+        combatWave: {
+          label: 'OP ALPHA BUILDING REINFORCEMENTS',
+          baseCount: 10,
+          minCount: 10,
+          maxCount: 10,
+          // The wave arrives through the two real ground-floor doors, then keeps moving inside
+          // the joined apartment block instead of stopping at the threshold.
+          droneIngress: [
+            [[-7, 5.6], [-7, 2.8], [-7, 0.4], [-10, -2.4], [-10, -7], [-5, -7]],
+            [[7, 5.6], [7, 2.8], [7, 0.4], [10, -2.4], [10, -7], [5, -7]],
+            [[-5, 5.6], [-7, 2.8], [-7, 0.4], [-4, -2.4], [-4, -7], [-10, -5]],
+            [[5, 5.6], [7, 2.8], [7, 0.4], [4, -2.4], [4, -7], [10, -5]],
+            [[-2, 5.6], [-7, 2.8], [-7, 0.4], [-2, -2.4], [-2, -7], [-8, -7]],
+            [[2, 5.6], [7, 2.8], [7, 0.4], [2, -2.4], [2, -7], [8, -7]],
+          ],
+          enemies: [
+            { pos: [-13, 0, 16], patrol: [[-13, 16], [-10, 10], [-7, 6]] },
+            { pos: [13, 0, 16], patrol: [[13, 16], [10, 10], [7, 6]] },
+            { pos: [-7, 0, 18], patrol: [[-7, 18], [-5, 11], [-7, 6]] },
+            { pos: [7, 0, 18], patrol: [[7, 18], [5, 11], [7, 6]] },
+            { pos: [-2, 0, 15], patrol: [[-2, 15], [-7, 9], [-7, 6]] },
+            { pos: [2, 0, 15], patrol: [[2, 15], [7, 9], [7, 6]] },
+            { pos: [-11, 0, 12], patrol: [[-11, 12], [-8, 8], [-7, 6]] },
+            { pos: [11, 0, 12], patrol: [[11, 12], [8, 8], [7, 6]] },
+            { pos: [-4, 0, 20], patrol: [[-4, 20], [-6, 12], [-7, 6]] },
+            { pos: [4, 0, 20], patrol: [[4, 20], [6, 12], [7, 6]] },
+          ],
+        },
+        },
+      ]),
+    ],
+    objectiveDevices: [
+      { id: 'l3-drone', kind: 'launch', label: 'OP ALPHA ROOFTOP CONTROL', actionLabel: 'ARM', pos: [-2, 9.45, -6] },
     ],
   },
 
@@ -745,16 +860,32 @@ export const LEVELS = [
         [[2, 0, 42], [21, 0, 19], [-18, 0, -7], [8, 0, -35]],
       ] },
     objectives: [
-      { type: 'target', text: 'RUN HIM DOWN — DO NOT LET HIM REACH THE GATE' },
-      { type: 'clear', zone: [-5, -25, 30], text: 'CLEAR THE GARAGE' },
-      { type: 'reach', zone: [-6.5, -41, 3.5], text: 'EXFIL THROUGH THE GATE' },
+      phase('finder-stop', 'STOP THE DIRECTION FINDER', [
+        { type: 'target', text: 'RUN HIM DOWN — DO NOT LET HIM REACH THE GATE' },
+      ]),
+      phase('finder-log', 'CLEAR AND RECOVER THE GARAGE LOG', [
+        { type: 'clear', zone: [-5, -25, 30], text: 'CLEAR THE GARAGE' },
+        {
+          type: 'interact', device: 'l4-log', autoUse: true, radius: 2.8,
+          text: 'RECOVER THE DIRECTION-FINDING LOG',
+        },
+      ]),
+      phase('finder-exfil', 'OPEN THE EXFIL GATE', [
+        { type: 'reach', zone: [-6.5, -41, 3.5], text: 'EXFIL THROUGH THE GATE' },
+      ]),
+    ],
+    objectiveDevices: [
+      // The log is on the authored direction-finder table beside the escape gate, not in the
+      // middle of the parking deck. Keeping the pickup socket on that paper makes the marker,
+      // the physical prop and the interaction radius agree.
+      { id: 'l4-log', kind: 'console', label: 'DIRECTION-FINDING LOG', actionLabel: 'RECOVER', pos: [-11.1, 0, -35.8] },
     ],
   },
 
   // ---------------------------------------------------------------- 5
   {
     id: 5, name: 'MARKET INFILTRATION',
-    brief: 'Armed infiltrators are blending into the crowded aid market beside the launch route. They will present weapons only when the signal is given and the crowd will bolt at the first shot. Identify before firing; on Veteran, one civilian casualty ends the mission.',
+    brief: 'Armed infiltrators are blending into the crowded aid market beside the launch route. They will draw and fire when the contact breaks, while the unarmed crowd bolts at the first shot. Make the shoot/no-shoot call from the weapon in their hands; on Veteran, one civilian casualty ends the mission.',
     weapons: ['pistol', 'm4'], grenades: 0, squad: 2,
     sky: 0x2a2230, fog: [0x2a2230, 40, 140], ambient: 0.9, sun: 1.1,
     start: [0, 0, 34, 0],
@@ -763,34 +894,79 @@ export const LEVELS = [
       g.push(...GROUND(90, 90, C.sidewalk));
       // plaza perimeter walls
       g.push(...wall(-35, 38, 35, 38, 6, C.building, [{ off: 32, w: 6, h: 3 }]));
-      g.push(...wall(-35, -38, 35, -38, 6, C.building, [{ off: 32, w: 6, h: 3 }]));
+      // The south boundary is a vehicle compound, not a solid pedestrian wall. Leave a
+      // twelve-metre-wide, 4.6m-high passage for the aid trucks and keep the opening aligned
+      // with the authored exfil lane outside the market.
+      g.push(...wall(-35, -38, 35, -38, 6, C.building, [{ off: 29, w: 12, h: 4.6 }]));
       g.push(...wall(-35, 38, -35, -38, 6, C.buildingB));
       g.push(...wall(35, 38, 35, -38, 6, C.buildingB));
       // Point these inward: this is a walled market courtyard, so its occupied faces belong
       // on the side the player can actually see.
       g.push(...facade(35, 38, -35, 38, 0, 6, 501, { step: 4.2 }));
-      g.push(...facade(-35, -38, 35, -38, 0, 6, 502, { step: 4.2 }));
+      g.push(...facade(-35, -38, 35, -38, 0, 6, 502, {
+        step: 4.2,
+        // Do not place a window/sign panel over the vehicle passage. The wall shell owns the
+        // lintel; the mission art adds the steel leaves and portal frame below.
+        skip: [{ from: 27.5, to: 42.5 }],
+      }));
       g.push(...facade(-35, 38, -35, -38, 0, 6, 503, { step: 4.2 }));
       g.push(...facade(35, -38, 35, 38, 0, 6, 504, { step: 4.2 }));
-      // market stalls: rows of counters with awning posts
-      for (const sz of [18, 6, -6, -18]) {
-        for (const sx of [-22, -8, 8, 22]) {
-          g.push(...marketStall(sx, sz, (sx + sz) % 3 ? 0x7a4a4a : 0x3e596d));
+      // Market stalls: four rows, each with its own x offsets so the plaza reads as a bazaar
+      // that grew stall by stall rather than a parade-ground 4x4 grid. The offsets are
+      // constrained, not free: row 18 anchors the authored infiltrator holds and patrols,
+      // and every other row was shifted only where no enemy/civilian position, difficulty
+      // spawn socket, or crowd socket lands inside a 5x2 counter footprint.
+      const stallRows = [
+        [18, [-22, -8, 8, 22]],
+        [6, [-18, -4, 12, 26]],
+        [-6, [-16, -2, 14, 28]],
+        [-18, [-27, -13, 3, 17]],
+      ];
+      const stallColors = [0x7a4a4a, 0x3e596d, 0x5d6b3f, 0x8a6a3a];
+      for (const [sz, xs] of stallRows) {
+        for (const sx of xs) {
+          g.push(...marketStall(sx, sz, stallColors[Math.abs(sx * 7 + sz * 3) % stallColors.length]));
         }
       }
-      g.push(...crate(0, 0), ...crate(-15, 12), ...crate(15, -12));
+      // Plaza centre: the aid point the market exists around — a canopied distribution table
+      // ringed with pallet crates and a low sandbag face, strung to the stall rows overhead.
+      // Kept inside |x|<4, |z|<4 so the aisle spawn sockets and crowd lanes stay clear.
+      g.push(...awning(0, 0, 4.6, 5.4, 3.3, 0x8a6a3a));
+      // awning() is a wall-mount canopy with no legs of its own; a free-standing one needs
+      // its corners held up. Non-solid so a 12cm post can never wedge a fleeing civilian.
+      for (const [px, pz] of [[-2.1, -2.5], [2.1, -2.5], [-2.1, 2.5], [2.1, 2.5]]) {
+        g.push([px, 1.65, pz, 0.12, 3.3, 0.12, 0x6b563d, false]);
+      }
+      g.push(...table(0, 1.1, 2.4, 1.0, 0x6b563d), ...table(-1.6, -1.2, 1.4, 0.9, 0x5d4a33));
+      g.push(...crate(2.6, -1.8), ...crate(3.2, -0.6, 0, 0.8), ...crate(-2.8, 1.9, 0, 0.9));
+      g.push(...sandbags(0, -3.2, 4, 2, false, 51));
+      // Wire runs strung down both centre aisles. Axis-aligned only: poleWire's catenary
+      // boxes are thin in exactly one axis, so a diagonal run would render as hanging slabs.
+      // It also only plants a pole at its start point — the far ends get bare poles.
+      g.push(...poleWire(-22, 12, 22, 12, 6.2, 8));
+      g.push(...poleWire(22, -12, -22, -12, 6.2, 8));
+      g.push([22, 3.1, 12, 0.2, 6.2, 0.2, 0x6a5340], [-22, 3.1, -12, 0.2, 6.2, 0.2, 0x6a5340]);
+      g.push(...crate(-15, 12), ...crate(15, -12));
       return g;
     },
     doors: [],
     enemies: [
-      { pos: [-22, 0, 15], positions: [[-22, 0, 15], [-19, 0, 9], [-25, 0, 13]], hold: true, yaw: 180, concealed: true },
+      { pos: [-22, 0, 15], positions: [[-22, 0, 15], [-19, 0, 9], [-25, 0, 13]], hold: true, yaw: 180, concealed: true, identifyTarget: true, targetPlayer: true, tag: 'market-infiltrator' },
       { pos: [8, 0, 18], patrol: [[8, 18], [22, 18]] },
-      { pos: [-8, 0, 4], positions: [[-8, 0, 4], [-11, 0, 1], [-5, 0, 8]], hold: true, yaw: 160, concealed: true },
+      { pos: [-8, 0, 4], positions: [[-8, 0, 4], [-11, 0, 1], [-5, 0, 8]], hold: true, yaw: 160, concealed: true, identifyTarget: true, targetPlayer: true, tag: 'market-infiltrator' },
       { pos: [22, 0, 4], patrol: [[22, 4], [22, -8]], aggro: true },
-      { pos: [-15, 0, -8], positions: [[-15, 0, -8], [-19, 0, -12], [-11, 0, -10]], hold: true, yaw: 20, concealed: true },
+      { pos: [-15, 0, -8], positions: [[-15, 0, -8], [-19, 0, -12], [-11, 0, -10]], hold: true, yaw: 20, concealed: true, identifyTarget: true, targetPlayer: true, tag: 'market-infiltrator' },
       { pos: [8, 0, -20], patrol: [[8, -20], [-8, -20]], aggro: true },
-      { pos: [26, 0, -30], hold: true, yaw: 0, concealed: true },
+      { pos: [26, 0, -30], hold: true, yaw: 0, concealed: true, identifyTarget: true, targetPlayer: true, tag: 'market-infiltrator' },
       { pos: [-26, 0, -30], hold: true, yaw: 0 },
+    ],
+    // Free sockets for difficulty scaling. Without these the market had only four scalable
+    // guards, every one already standing on its own socket, so Veteran's extra bodies fell
+    // back to stacking two and three men inside each other at the authored spawns. Aisle
+    // centres between the stall rows, clear of the crates, crowd and infiltrator positions.
+    enemySpawns: [
+      [15, 0, 12], [-15, 0, 0], [15, 0, 0],
+      [0, 0, -12], [-15, 0, -24], [15, 0, 24],
     ],
     civilians: [
       { pos: [-18, 0, 20], rush: true }, { pos: [-4, 0, 16] }, { pos: [12, 0, 12] },
@@ -825,15 +1001,40 @@ export const LEVELS = [
         [[30, 0, 32], [-30, 0, -30], [0, 0, -34]],
       ] },
     objectives: [
-      { type: 'clear', zone: null, text: 'NEUTRALIZE EMBEDDED SHOOTERS — ZERO CIVILIAN CASUALTIES' },
-      { type: 'reach', zone: [0, -40, 3.5], text: 'EXIT THE MARKET SOUTH GATE' },
+      phase('market-contact', 'BREAK THE MARKET CONTACT', [
+        { type: 'clear', zone: null,
+          text: 'CLEAR THE AID MARKET — ENGAGE ARMED CONTACTS, PROTECT UNARMED CIVILIANS' },
+      ]),
+      phase('market-manifest', 'RECOVER THE MARKET MANIFEST', [
+        { type: 'interact', device: 'l5-manifest', autoUse: true,
+          text: 'RECOVER THE AID MARKET MANIFEST' },
+      ]),
+      phase('market-exit', 'OPEN AND SECURE THE MARKET EXIT', [
+        // The gold control ring is the action: stepping into it opens the gate, just like the
+        // manifest pickup, so the exit cannot strand the player behind an unexplained button.
+        { type: 'interact', device: 'l5-gate', autoUse: true, text: 'OPEN THE SOUTH MARKET GATE' },
+        { type: 'reach', zone: [0, -42.5, 4.5], text: 'REACH THE SOUTH VEHICLE EXFIL' },
+      ]),
+    ],
+    objectiveDevices: [
+      {
+        id: 'l5-manifest', kind: 'console', label: 'AID MARKET MANIFEST', actionLabel: 'RECOVER',
+        pos: [0, 0.92, -29.5], width: 0.82, height: 0.42, depth: 0.46, radius: 2.5,
+      },
+      {
+        id: 'l5-gate', kind: 'gate', label: 'SOUTH MARKET GATE', actionLabel: 'OPEN',
+        // Put the control post beside the truck lane. The blocker itself spans the opening.
+        pos: [-7.4, 0, -36.7], width: 0.85, radius: 3.0,
+        visualId: 'market-south-gate-visual',
+        blocker: { x: 0, y: 2.3, z: -38.02, width: 12, height: 4.6, depth: 0.62 },
+      },
     ],
   },
 
   // ---------------------------------------------------------------- 6
   {
     id: 6, name: 'RELAY CROSSING',
-    brief: 'Cover Vektor’s black-clad assault element as it crosses the plaza to seize a 37th relay and release three detained technicians. Riflemen occupy windows beside civilians, so read every opening. A sniper in the unlit centre block is hunting you; only his muzzle flash reveals the room, and he relocates after two rounds.',
+    brief: 'Cover Vektor’s black-clad assault element as it crosses the plaza to seize a 37th relay and release three detained technicians. Riflemen occupy windows beside civilians, so read every opening. A sniper in the unlit centre block is hunting you; only his muzzle flash reveals the room, and he relocates after two rounds. When the team reaches the relay, arm the rooftop drone and repel the extraction attack while they withdraw.',
     weapons: ['barrett'], grenades: 0, sniper: true, lockPlayer: true,
     sky: 0x1a2432, fog: [0x1a2432, 120, 500], ambient: 0.9, sun: 1.2,
     start: [0, 24, 61.2, 0],
@@ -918,6 +1119,32 @@ export const LEVELS = [
       for (const b of BAY_C) g.push(...windowBay(b[0], b[1], -100, 1, { frame: 0x5a6066, room: 0x606c7a }));
       g.push(...lift(acUnit(-34, 14, -92, 1.3), 0), ...lift(waterTank(44, 14, -93), 0));
       g.push(...lift(ventStack(-6, 14, -112), 0));
+      // Squaring off the plaza. It used to be four buildings in a field with the skyline off
+      // in the fog: open the way a parking lot is open, not the way a town square is. These
+      // blocks close the east, west and near sides so the fight happens in a room made of
+      // buildings. The engagement frontage at z=-80/-100 is untouched, and the flanks stay
+      // out of the scope's sight cone: the ray from the perch to the outermost bay (x=53.2,
+      // z=-80) passes |x|=40 at z=-44, so inner faces hold at |x|=43 and the deep blocks end
+      // at z=-44 — which also keeps the corner streets the reinforcements arrive through.
+      const flank = (cx, cz, w, h, d, col, seed) => {
+        g.push([cx, h / 2, cz, w, h, d, col]);
+        const ix = cx > 0 ? cx - w / 2 : cx + w / 2; // the face on the square
+        g.push(...facade(ix, cz - d / 2, ix, cz + d / 2, 0, h, seed, { away: [cx, cz], staticWindows: true }));
+      };
+      flank(-53, -26, 20, 14, 36, C.building, 621);
+      flank(-51, 20, 16, 12, 30, C.buildingB, 622);
+      flank(53, -26, 20, 14, 36, C.buildingB, 623);
+      flank(51, 20, 16, 12, 30, C.building, 624);
+      // Near corners flanking the perch, faces set 5m proud of it, so the player's own
+      // building reads as part of a terrace on the square instead of a lone tower in a lot.
+      g.push([-30, 6.5, 64, 24, 13, 18, C.buildingB]);
+      g.push(...facade(-42, 55, -18, 55, 0, 13, 625, { away: [-30, 64], staticWindows: true }));
+      g.push([30, 6.5, 64, 24, 13, 18, C.building]);
+      g.push(...facade(18, 55, 42, 55, 0, 13, 626, { away: [30, 64], staticWindows: true }));
+      // Rooftop clutter so the new blocks hold a silhouette against the sky like the far pair.
+      g.push(...lift(acUnit(-53, 14, -34, 1.2), 0), ...lift(waterTank(53, 14, -18), 0));
+      g.push(...lift(acUnit(-51, 12, 16, 1.1), 0), ...lift(ventStack(51, 12, 24), 0));
+      g.push(...lift(ventStack(-30, 13, 68), 0), ...lift(acUnit(30, 13, 66, 1.0), 0));
       // plaza furniture: scale cues so the distance to the fountain is legible through glass
       for (const [lx, lz] of [[-22, -18], [22, -18], [-22, -52], [22, -52], [-34, -34], [34, -34]]) {
         g.push(...lamp(lx, lz, 7.0, 1.7, lx < 0 ? 1 : -1));
@@ -1004,8 +1231,71 @@ export const LEVELS = [
     reinforce: { every: 32, first: 45, max: 5, group: 2, range: 220,
       at: [[-44, 0, -78], [44, 0, -78], [4, 0, -98]] },
     objectives: [
-      { type: 'rescue', text: 'COVER THE ASSAULT TEAM — THEY ARE GOING IN FOR THE HOSTAGES' },
-      { type: 'clear', zone: null, text: 'CLEAR THE WINDOWS — AND FIND THE SNIPER IN THE DARK BLOCK' },
+      phase('relay-cover', 'COVER THE ASSAULT TEAM', [
+        {
+          // The sniper is covering an extraction: the first operator through the relay is the
+          // handoff. The rest can be wounded or still moving, but if the last man falls the
+          // existing assault-team failure path ends the mission immediately.
+          type: 'escort', minAlive: 1,
+          destination: [-35, -77.5, 5.5], destinationLabel: 'THE RELAY CONTROL',
+          text: 'COVER VEKTOR — FIRST OPERATOR IN THE RELAY CONTROL AREA TRIGGERS DRONE OVERWATCH',
+        },
+      ]),
+      phase('relay-extraction', 'COVER THE EXTRACTION', [
+        {
+          type: 'interact', device: 'l6-drone', autoUse: true, radius: 5.5,
+          text: 'ARM THE RELAY OVERWATCH DRONE — COVER VEKTOR’S EXTRACTION',
+        },
+        {
+          type: 'drone',
+          mode: 'combat',
+          unlockPlayer: true,
+          label: 'RELAY OVERWATCH // EXTRACTION COVER',
+          text: 'BREAK THE EXTRACTION ATTACK — COVER VEKTOR’S WITHDRAWAL',
+          launch: [-4, 25.24, 61.25],
+          maxRange: 175,
+          yaw: Math.PI,
+          keepStackVisible: true,
+          rifleRounds: 100,
+          grenades: 8,
+          result: 'EXTRACTION CORRIDOR SECURE — VEKTOR MOVING',
+          combatWave: {
+            label: 'RELAY EXTRACTION ATTACK',
+            baseCount: 10,
+            minCount: 10,
+            maxCount: 10,
+            enemies: [
+              { pos: [-48, 0, -78], patrol: [[-48, -78], [-42, -75], [-35, -77.5]] },
+              { pos: [-42, 0, -93], patrol: [[-42, -93], [-40, -84], [-35, -77.5]] },
+              { pos: [-22, 0, -108], patrol: [[-22, -108], [-18, -94], [-28, -82]] },
+              { pos: [0, 0, -120], patrol: [[0, -120], [0, -104], [-4, -90]] },
+              { pos: [22, 0, -108], patrol: [[22, -108], [18, -94], [28, -82]] },
+              { pos: [42, 0, -93], patrol: [[42, -93], [40, -84], [35, -77.5]] },
+              { pos: [48, 0, -78], patrol: [[48, -78], [42, -75], [35, -77.5]] },
+              { pos: [-60, 0, -68], patrol: [[-60, -68], [-48, -64], [-35, -72]] },
+              { pos: [60, 0, -68], patrol: [[60, -68], [48, -64], [35, -72]] },
+              { pos: [0, 0, -78], patrol: [[0, -78], [-8, -74], [-4, -68]] },
+            ],
+            droneIngress: [
+              [[-35, -72], [-35, -77.5], [-30, -82]],
+              [[-35, -72], [-32, -77.5], [-24, -84]],
+              [[-35, -72], [-35, -77.5], [-40, -82]],
+              [[-35, -72], [-32, -77.5], [-28, -90]],
+              [[-35, -72], [-35, -77.5], [-48, -82]],
+              [[-35, -72], [-38, -77.5], [-44, -88]],
+            ],
+          },
+        },
+        { type: 'clear', zone: null, text: 'CLEAR THE CROSSING — MOVE OFF THE ROOF AND SECURE THE EXTRACTION CORRIDOR' },
+      ]),
+      phase('relay-activate', 'ACTIVATE THE RELAY', [
+        { type: 'rescue', text: 'CUT EVERY HOSTAGE LOOSE — FREE THE RELAY TECHNICIANS' },
+        { type: 'interact', device: 'l6-relay', autoUse: true, radius: 2.8, text: 'ACTIVATE THE RELAY CONTROL' },
+      ]),
+    ],
+    objectiveDevices: [
+      { id: 'l6-drone', kind: 'launch', label: 'RELAY OVERWATCH DRONE', actionLabel: 'ARM', pos: [-4, 24.2, 61.25], width: 0.7, height: 0.72, depth: 0.5 },
+      { id: 'l6-relay', kind: 'relay', label: 'RELAY CONTROL', actionLabel: 'ACTIVATE', pos: [-35, 0, -77.5] },
     ],
   },
 
@@ -1019,7 +1309,9 @@ export const LEVELS = [
     geo: () => {
       const g = [];
       g.push(...GROUND(70, 70, C.street));
-      g.push(...tower(0, -4, 16, 14, 4, { door: true, mirror: true }));
+      g.push(...tower(0, -4, 16, 14, 4, {
+        door: true, mirror: true, stairwellClearance: 0.6, roofCaps: false,
+      }));
       g.push(...car(12, 12)); g.push(...car(-14, 8, true));
       return g;
     },
@@ -1065,7 +1357,8 @@ export const LEVELS = [
         [[-6, 0, 8], [4, 0, 11]],
       ] },
     objectives: [
-      {
+      phase('bravo-drone', 'BREAK THE ASSAULT WITH THE ROOFTOP DRONE', [
+        {
         type: 'drone',
         mode: 'combat',
         label: 'OP BRAVO // JURY-RIGGED GUNSHIP',
@@ -1119,10 +1412,37 @@ export const LEVELS = [
             { pos: [6, 0, 35], positions: [[6, 0, 35], [8, 0, 33], [5, 0, 34]],
               patrols: [[[6, 30], [4, 18]], [[8, 28], [5, 16]], [[5, 29], [3, 17]]] },
           ],
+          // The old wave exhausted its short patrol list and held at the last truck socket.
+          // Keep six men moving through the south door and around the ground floor; the
+          // remaining five circulate outside so the drone view never turns into a static row.
+          droneInteriorCount: 6,
+          droneInteriorThreshold: 2,
+          droneIngress: [
+            [[0, 4], [0, 1.9], [3.8, -3], [3.8, -8], [0, -9], [-3.8, -8]],
+            [[0, 4], [0, 1.9], [-3.8, -3], [-3.8, -8], [0, -9], [3.8, -8]],
+            [[2, 4], [1.2, 1.9], [5, -3], [5, -8], [2, -9], [-2, -8]],
+            [[-2, 4], [-1.2, 1.9], [-5, -3], [-5, -8], [-2, -9], [2, -8]],
+            [[0, 4], [0, 1.9], [0, -3], [4, -8], [0, -9], [-4, -8]],
+            [[0, 4], [0, 1.9], [0, -3], [-4, -8], [0, -9], [4, -8]],
+            [[18, 8], [18, 0], [22, 7], [18, 14], [12, 10]],
+            [[-18, 8], [-18, 0], [-22, 7], [-18, 14], [-12, 10]],
+            [[10, 18], [10, 10], [16, 7], [18, 14], [12, 20]],
+            [[-10, 18], [-10, 10], [-16, 7], [-18, 14], [-12, 20]],
+            [[0, 18], [0, 10], [6, 8], [-6, 8], [0, 18]],
+          ],
         },
-      },
-      { type: 'clear', zone: null, text: 'CLEAR THE TOWER TOP TO BOTTOM' },
-      { type: 'reach', zone: [0, 14, 4], text: 'EXTRACT AT STREET LEVEL' },
+        },
+      ]),
+      phase('bravo-clear', 'CLEAR THE TOWER FLOOR BY FLOOR', [
+        { type: 'clear', zone: null, text: 'CLEAR THE TOWER TOP TO BOTTOM' },
+      ]),
+      phase('bravo-antenna', 'RESTORE OP BRAVO CONTROL', [
+        { type: 'interact', device: 'l7-antenna', text: 'RESTORE THE OP BRAVO ANTENNA CONTROL' },
+        { type: 'reach', zone: [0, 14, 4], text: 'EXTRACT AT STREET LEVEL' },
+      ]),
+    ],
+    objectiveDevices: [
+      { id: 'l7-antenna', kind: 'antenna', label: 'OP BRAVO ANTENNA CONTROL', actionLabel: 'RESTORE', pos: [0, 0, 2.4] },
     ],
   },
 
@@ -1212,8 +1532,29 @@ export const LEVELS = [
         [[-3, 0, 18], [13, 0, 8]],
       ] },
     objectives: [
-      { type: 'clear', zone: null, text: 'NVGs ON — CLEAR THE DARK FLOOR' },
-      { type: 'reach', zone: [0, -18, 2.5], text: 'SECURE THE SERVER ROOM' },
+      phase('ew-power', 'RESTORE EMERGENCY POWER', [
+        { type: 'interact', device: 'l8-breaker', text: 'RESET THE EMERGENCY POWER BREAKER' },
+      ]),
+      phase('ew-clear', 'CLEAR THE EW TEAM', [
+        { type: 'clear', zone: null, text: 'CLEAR THE DARK FLOOR — STOP THE EW TEAM' },
+        { type: 'rescue', text: 'FREE THE RECORDS STAFF' },
+      ]),
+      phase('ew-jammer', 'SHUT THE JAMMER AND SECURE THE SERVER', [
+        { type: 'interact', device: 'l8-server', text: 'SHUT DOWN THE JAMMER — SECURE THE SERVER' },
+        { type: 'reach', zone: [0, -18, 2.5], text: 'SECURE THE SERVER ROOM' },
+      ]),
+    ],
+    // The red circuit the breaker brings back (emergencyPower() in main.js): one pool per
+    // waypoint of the route to the server — vestibule, main door, both partition gaps, the
+    // server-room door, the server itself. The floor between the pools stays black, so the
+    // goggles remain the tool for the cubicles while the amber marks the spine.
+    emergencyLights: [
+      [0, 2.7, 22], [0, 2.7, 18.5], [-3, 2.7, 10],
+      [2, 2.7, -1], [1, 2.7, -13.5], [0, 2.6, -17.5],
+    ],
+    objectiveDevices: [
+      { id: 'l8-breaker', kind: 'breaker', label: 'EMERGENCY POWER BREAKER', actionLabel: 'RESET', pos: [0, 0, 24], effect: 'emergencyPower' },
+      { id: 'l8-server', kind: 'server', label: 'JAMMER SERVER', actionLabel: 'SHUT DOWN', pos: [0, 0, -18] },
     ],
   },
 
@@ -1300,17 +1641,42 @@ export const LEVELS = [
       { pos: [-7.2, 0, 8], hostage: true }, { pos: [8.2, 0, -12], hostage: true },
       { pos: [-7.2, 0, -22], hostage: true }, { pos: [0, 0, -56], hostage: true },
     ],
-    reinforce: { every: 26, first: 30, max: 6, group: 2, range: 55,
-      at: [[0, 0, 24], [0, 0, -28]],
-      atVariants: [
-        [[0, 0, 24], [0, 0, -28]],
-        [[-10, 0, 24], [4, 0, -29]],
-        [[10, 0, 24], [-4, 0, -29]],
-      ] },
+    reinforce: [
+      { every: 26, first: 30, max: 6, group: 2, range: 55,
+        at: [[0, 0, 24], [0, 0, -28]],
+        atVariants: [
+          [[0, 0, 24], [0, 0, -28]],
+          [[-10, 0, 24], [4, 0, -29]],
+          [[10, 0, 24], [-4, 0, -29]],
+        ] },
+      // The push south is not a mop-up: once the engineers are free (phase 2), the platform
+      // detachment doubles back and chases the squad down the tunnel. startPhase exempts it
+      // from the generic last-objective spawn refusal — its hard cap and converging hostiles
+      // guarantee the clear step still terminates, and sealing the bulkhead ends the level.
+      // Sockets sit at the tunnel mouth behind the player; hidden staging plus the distance
+      // floor mean they only enter once the squad is deep enough not to see it happen.
+      { startPhase: 2, every: 18, first: 5, max: 4, group: 2, range: 60,
+        minDistance: 16, scatter: 1.5, hidden: true,
+        message: 'REAR PURSUIT — THE PLATFORM DETACHMENT IS ON YOUR TAIL',
+        // Platform-side sockets tucked BEHIND the z=-30 wall segments, wide of the tunnel
+        // doorway (its opening spans x -6..0): a straight tunnel offers no occlusion of its
+        // own centreline, so staging on the tunnel axis would never pass the hidden check.
+        at: [[-14, 0, -26], [14, 0, -26], [-18, 0, -20]] },
+    ],
     objectives: [
-      { type: 'clear', zone: [0, 0, 40], text: 'CLEAR THE PLATFORM — HOSTAGES ON THE COLUMNS' },
-      { type: 'clear', zone: null, text: 'PUSH THE SOUTH TUNNEL' },
-      { type: 'rescue', text: 'CUT EVERY HOSTAGE LOOSE' },
+      phase('rear-platform', 'SECURE THE PLATFORM', [
+        { type: 'clear', zone: [0, 0, 40], text: 'CLEAR THE PLATFORM — HOSTAGES ON THE COLUMNS' },
+      ]),
+      phase('rear-engineers', 'FREE THE ENGINEERS', [
+        { type: 'rescue', text: 'CUT EVERY HOSTAGE LOOSE — FREE THE ENGINEERS' },
+      ]),
+      phase('rear-seal', 'SEAL THE SOUTH TUNNEL', [
+        { type: 'clear', zone: null, text: 'PUSH THE SOUTH TUNNEL' },
+        { type: 'interact', device: 'l9-seal', text: 'SEAL THE SOUTH TUNNEL' },
+      ]),
+    ],
+    objectiveDevices: [
+      { id: 'l9-seal', kind: 'seal', label: 'SOUTH TUNNEL BULKHEAD', actionLabel: 'SEAL', pos: [0, 0, -56] },
     ],
   },
 
@@ -1407,11 +1773,9 @@ export const LEVELS = [
       return g;
     },
     doors: [
-      // tower() authors its south-wall opening at x=-0.8 on the z=-3 facade. Keep the leaf
-      // and reveal on that exact plane: the old [0,-3.9] placement sat behind intact stucco,
-      // then exposed daylight gaps on both sides once the player clipped through the wall.
-      { pos: [-0.8, 0, -3], rot: 0, w: 1.6 },       // tower entry
-      { pos: [22.2, -5, -24], rot: 0, w: 2.4, unlockObjective: 4 },
+      // The tower opening, portico and door leaf share the centred x=0 axis on the z=-3 wall.
+      { pos: [0, 0, -3], rot: 0, w: 1.6 },          // tower entry
+      { pos: [22.2, -5, -24], rot: 0, w: 2.4, unlockObjective: 2 },
       // The bunker is physically present from mission load but remains sealed until the
       // observation network destroys its supporting armour, guns and jammer.
     ],
@@ -1481,14 +1845,18 @@ export const LEVELS = [
         ],
       ] },
     objectives: [
-      { type: 'clear', zone: [0, 10, 34], text: 'TAKE THE COURTYARD' },
-      {
-        type: 'clear',
-        zone: [0, -10, 14, 8],
-        requireReach: [0, -10, 8, 6],
-        text: 'CLEAR THE TOWER — REACH THE ROOFTOP DRONE',
-      },
-      {
+      phase('district-roof', 'TAKE THE COMPOUND AND FIRE-CONTROL ROOF', [
+        { type: 'clear', zone: [0, 10, 34], text: 'TAKE THE COURTYARD' },
+        {
+          type: 'clear',
+          zone: [0, -10, 14, 8],
+          requireReach: [0, -10, 8, 6],
+          text: 'CLEAR THE TOWER — REACH THE FIRE-CONTROL ROOF',
+        },
+      ]),
+      phase('district-network', 'BREAK THE ASSAULT AND SUPPORT NETWORK', [
+        { type: 'interact', device: 'l10-roof-control', text: 'ARM THE FIRE-CONTROL ROOF LAUNCH TABLE' },
+        {
         type: 'drone',
         mode: 'combat',
         label: 'FIRE-CONTROL ROOF // ARMED UAS',
@@ -1542,6 +1910,21 @@ export const LEVELS = [
               { pos: [16, 0, 29], positions: [[16, 0, 29], [-16, 0, 29], [0, 0, 28]],
                 patrols: [[[16, 29], [5, -5]], [[-16, 29], [-5, -5]], [[0, 28], [0, -4]]] },
           ],
+          // The wave does not stop when it reaches the last truck waypoint. The first half
+          // pushes through the tower door and keeps circulating on its ground floor; the rest
+          // keep a moving screen through the courtyard while the drone is overhead.
+          droneInteriorCount: 6,
+          droneInteriorThreshold: 2,
+          droneIngress: [
+            [[0, 4], [0, -1.9], [3.8, -5], [3.8, -12], [0, -15], [-3.8, -12]],
+            [[0, 4], [0, -1.9], [-3.8, -5], [-3.8, -12], [0, -15], [3.8, -12]],
+            [[2, 4], [1.2, -1.9], [5, -6], [5, -13], [2, -15], [-2, -13]],
+            [[-2, 4], [-1.2, -1.9], [-5, -6], [-5, -13], [-2, -15], [2, -13]],
+            [[0, 4], [0, -1.9], [0, -6], [4, -10], [0, -15], [-4, -10]],
+            [[0, 4], [0, -1.9], [0, -6], [-4, -10], [0, -15], [4, -10]],
+            [[18, 8], [18, 0], [22, 7], [18, 14], [12, 10]],
+            [[-18, 8], [-18, 0], [-22, 7], [-18, 14], [-12, 10]],
+          ],
         },
       },
       {
@@ -1552,17 +1935,29 @@ export const LEVELS = [
         text: 'NETWORK ONLINE — BREAK THE SUPPORT GROUP',
         launch: [0, 6.45, -10],
         yaw: Math.PI,
-        // The battery is north of the compound, away from the player's southern insertion.
-        // All three targets are crewed firing positions, rather than abstract barricades.
+        rifleRounds: 72,
+        grenades: 6,
+        result: 'BATTERY DESTROYED — FLEEING GUN CREWS STOPPED',
+        // A straight three-gun battery north of the compound. All tubes face south at high
+        // elevation, firing over the walls; two men per position survive the strikes and run.
         targets: [
-          { pos: [-18, 0.1, -54], kind: 'artillery', label: 'GUN ONE', yaw: -0.12, firing: true },
-          { pos: [0, 0.1, -56], kind: 'artillery', label: 'GUN TWO', yaw: 0.08, firing: true },
-          { pos: [18, 0.1, -54], kind: 'artillery', label: 'GUN THREE', yaw: 0.16, firing: true },
+          { pos: [-14, 0.1, -47], kind: 'artillery', label: 'GUN ONE',
+            yaw: Math.PI / 2, elevation: 0.92, firing: true, squirters: 2 },
+          { pos: [0, 0.1, -47], kind: 'artillery', label: 'GUN TWO',
+            yaw: Math.PI / 2, elevation: 0.92, firing: true, squirters: 2 },
+          { pos: [14, 0.1, -47], kind: 'artillery', label: 'GUN THREE',
+            yaw: Math.PI / 2, elevation: 0.92, firing: true, squirters: 2 },
         ],
-      },
-      { type: 'rescue', zone: [22, -34, 16, -5], text: 'BREACH THE BUNKER — CUT THE HUMAN SHIELDS LOOSE' },
-      { type: 'clear', zone: [22, -34, 16, -5], excludeHvt: true, text: 'SHIELDS CLEAR — ELIMINATE THE BUNKER GUARD' },
-      { type: 'target', text: 'BASTION — END HIS COMMAND' },
+        },
+      ]),
+      phase('district-bunker', 'BREACH THE BUNKER AND END BASTION', [
+        { type: 'rescue', zone: [22, -34, 16, -5], text: 'BREACH THE BUNKER — CUT THE HUMAN SHIELDS LOOSE' },
+        { type: 'clear', zone: [22, -34, 16, -5], excludeHvt: true, text: 'SHIELDS CLEAR — ELIMINATE THE BUNKER GUARD' },
+        { type: 'target', text: 'BASTION — END HIS COMMAND' },
+      ]),
+    ],
+    objectiveDevices: [
+      { id: 'l10-roof-control', kind: 'launch', label: 'FIRE-CONTROL ROOF LAUNCH TABLE', actionLabel: 'ARM', pos: [0, 6.45, -10] },
     ],
   },
 ];

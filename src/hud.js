@@ -45,7 +45,11 @@ export const hud = {
     setTimeout(() => arc.remove(), 1100);
   },
   flashWhite(amount) { $('flash-white').style.opacity = String(Math.max(0, Math.min(1, amount))); },
-  breachBtn(on) { $('btn-breach').style.display = on ? 'flex' : 'none'; },
+  breachBtn(on, label = 'BREACH') {
+    const button = $('btn-breach');
+    button.textContent = label;
+    button.style.display = on ? 'flex' : 'none';
+  },
   flashBtn(on) { $('btn-flash').style.display = on ? 'flex' : 'none'; },
   breathBtn(on) { $('btn-breath').style.display = on ? 'flex' : 'none'; },
   nadeBtn(on) { $('btn-nade').style.display = on ? 'flex' : 'none'; },
