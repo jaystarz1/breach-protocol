@@ -1983,7 +1983,8 @@ export const LEVELS = [
     // units; the drawer scales into the corner canvas. The briefs say "west road" and
     // "kolkhoz" — this is what makes those words mean something in the goggles.
     minimap: {
-      bounds: [-360, 505, 360, -1420],
+      bounds: [-962, 505, 962, -1420],
+      opArea: [-360, 500, 360, -1416],
       roads: [
         [-6, 500, -6, -1460],
         [-180, -700, 140, -700],

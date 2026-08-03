@@ -980,23 +980,15 @@ export class DroneController {
     const ctx = stat.getContext('2d');
     // Sheet background, then the operational area as a lighter panel with hatched lanes
     // outside it — the boundary IS the outline of where the sortie is allowed to happen.
-    ctx.fillStyle = 'rgba(7,8,6,0.94)';
-    ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(170,180,170,0.07)';
-    ctx.lineWidth = 1;
-    for (let hx = -H; hx < W; hx += 7) {
-      ctx.beginPath();
-      ctx.moveTo(hx, 0);
-      ctx.lineTo(hx + H, H);
-      ctx.stroke();
-    }
+    // Land edge to edge — the sheet shows countryside everywhere, and the operational
+    // area is a marked rectangle ON the map, not the map's own border.
     ctx.fillStyle = 'rgba(16,19,13,0.97)';
-    ctx.fillRect(xOff, 0, opW, H);
+    ctx.fillRect(0, 0, W, H);
     // Hypsometric underlay from the real DEM: gully bottoms dark, rises pale. This is the
     // relief the pilot plans ingress around, so it sits under every other feature.
     if (droneTerrain) {
       for (let py = 0; py < H; py += 2) {
-        for (let px = Math.floor(xOff); px < xOff + opW; px += 2) {
+        for (let px = 0; px < W; px += 2) {
           const wx = x1 + (px - xOff) / scale;
           const wz = zN + py / scale;
           const t = Math.max(0, Math.min(1, (droneTerrain(wx, wz) + 6) / 21));
@@ -1005,10 +997,15 @@ export class DroneController {
         }
       }
     }
-    ctx.strokeStyle = 'rgba(233,239,233,0.4)';
-    ctx.setLineDash([4, 3]);
-    ctx.strokeRect(xOff, 0.5, opW, H - 1);
-    ctx.setLineDash([]);
+    if (def.opArea) {
+      const [oax, oaz] = this.mapPoint(def.opArea[0], def.opArea[1]);
+      const [obx, obz] = this.mapPoint(def.opArea[2], def.opArea[3]);
+      ctx.strokeStyle = 'rgba(233,239,233,0.4)';
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(Math.min(oax, obx), Math.min(oaz, obz),
+        Math.abs(obx - oax), Math.abs(obz - oaz));
+      ctx.setLineDash([]);
+    }
     const strokeRuns = (runs, style, width) => {
       ctx.strokeStyle = style;
       ctx.lineWidth = width;
