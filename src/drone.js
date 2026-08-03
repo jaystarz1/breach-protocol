@@ -508,6 +508,8 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     // FPV target attributes: `cage` arms the rear-aspect rule, `label` names the kill feed.
     cage: !!definition.cage,
     label: definition.label || null,
+    // Optional instructor line delivered when this target dies (the flight-school voice).
+    killMessage: definition.killMessage || null,
     dead: false,
     route: (definition.route || []).map(point => ({
       x: point[0],

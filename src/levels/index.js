@@ -1964,14 +1964,332 @@ export const LEVELS = [
   },
 
   // ---------------------------------------------------------------- 11
-  // The drone-warfare testbed. No ground fight: the operator never leaves the treeline OP.
-  // Three sorties over kilometres of open farmland — two kamikaze FPV hunts and one heavy
-  // bomber run — teaching the doctrine directly: terrain masking beats altitude, jammer
-  // bubbles are terrain, cope cages make aspect matter, battery is the fuel plan, and a
-  // drop munition is led like a bomb, not aimed like a gun. Distances are compressed
-  // (metersPerUnit 3.5): the 1,700-unit rail leg reads as the ~6 km sortie it stands for.
+  // Flight school, day one: the Dronarium. Modelled on the real Ukrainian pipeline —
+  // warheads live from the first minute, one lesson per target, the instructor's line
+  // arriving at the moment it matters. No enemy. The range hulks are already dead.
   {
-    id: 11, name: 'DEEP FENCE',
+    id: 11, name: 'DRONARIUM',
+    brief: 'FPV certification at the Dronarium range. Three sorties, warheads live: first kill on an open hulk, a hunt below the windbreaks, and a caged hull that only dies from the rear. Instructor KAVUN is on the feed.',
+    weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
+    lockPlayer: true,
+    cameraFar: 2600,
+    sky: 0x2b2733, fog: [0x35303c, 500, 2250], ambient: 0.8, sun: 0.85,
+    backdrop: 'rural',
+    terrainDef: DEEP_FENCE_TERRAIN,
+    minimap: {
+      bounds: [-720, 505, 720, -935],
+      opArea: [-300, 500, 300, -200],
+      roads: [[-6, 500, -6, -900]],
+      woods: [
+        [-210, 428, -16, 430], [14, 430, 210, 428],
+        [40, 122, 240, 118], [-240, 62, -60, 58],
+      ],
+      places: [],
+    },
+    start: [0, 0, 462, 0],
+    geo: () => {
+      const g = [];
+      const r = rng(1103);
+      const th = terrainSampler(DEEP_FENCE_TERRAIN);
+      g.push(...floorSlab(0, 462, 40, 32, th(0, 462), 1, 0x4a4636));
+      const road = (x1, z1, x2, z2, width) => {
+        const length = Math.hypot(x2 - x1, z2 - z1);
+        const steps = Math.max(2, Math.round(length / 34));
+        for (let i = 0; i < steps; i++) {
+          const t0 = i / steps, t1 = (i + 1) / steps;
+          const ax = x1 + (x2 - x1) * t0, az = z1 + (z2 - z1) * t0;
+          const bx = x1 + (x2 - x1) * t1, bz = z1 + (z2 - z1) * t1;
+          const cx = (ax + bx) / 2, cz = (az + bz) / 2;
+          const y = Math.max(th(ax, az), th(cx, cz), th(bx, bz)) + 0.07;
+          g.push([cx, y, cz,
+            Math.abs(bx - ax) + (Math.abs(bx - ax) < 1 ? width : 1.2), 0.12,
+            Math.abs(bz - az) + (Math.abs(bz - az) < 1 ? width : 1.2), 0x3b3833, false]);
+        }
+      };
+      road(-6, 500, -6, -900, 8);
+      const canopyTones = [
+        [0x293c20, 0x334a28, 0x415c31],
+        [0x263a1e, 0x2f4426, 0x3c522c],
+        [0x2c4023, 0x374e2b, 0x466036],
+      ];
+      const tree = (x, z, s = 1) => {
+        const tones = canopyTones[Math.floor(r() * canopyTones.length)];
+        const ty = th(x, z);
+        g.push([x, ty + 0.9 * s, z, 0.38 * s, 1.8 * s, 0.38 * s, 0x453727]);
+        const tiers = [[3.0, 2.4, 1.5, 0], [2.5, 3.3, 1.4, 1], [1.9, 4.2, 1.3, 1], [1.1, 5.0, 1.2, 2]];
+        for (const [w, y, h, tone] of tiers) {
+          g.push([x + (r() - 0.5) * 0.55 * s, ty + y * s, z + (r() - 0.5) * 0.55 * s,
+            w * s, h * s, w * s, tones[tone]]);
+        }
+      };
+      const treeRow = (x1, z1, x2, z2, step) => {
+        const length = Math.hypot(x2 - x1, z2 - z1);
+        const n = Math.max(2, Math.round(length / step));
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          tree(x1 + (x2 - x1) * t + (r() - 0.5) * 5, z1 + (z2 - z1) * t + (r() - 0.5) * 5,
+            0.85 + r() * 0.5);
+        }
+      };
+      // The OP treeline, and the two range windbreaks the second lesson hides behind.
+      treeRow(-210, 428, -16, 430, 15);
+      treeRow(14, 430, 210, 428, 15);
+      treeRow(40, 122, 240, 118, 16);
+      treeRow(-240, 62, -60, 58, 16);
+      // The OP itself: same pad the fence sorties fly from. Certification happens here.
+      const oy = th(0, 462);
+      g.push(...lift(floorSlab(0, 462, 26, 14, 0.02, 0.5, 0x413d31), oy));
+      g.push(...lift([...sandbags(-6, 452, 6, 2, false, 71), ...sandbags(7, 452, 5, 2, false, 72)], oy));
+      g.push(...lift([...table(-3, 461, 2.6, 1.1, 0x554a38), ...table(3.4, 461, 1.8, 1.0, 0x4c4234)], oy));
+      g.push([12, oy + 4.2, 458, 0.5, 8.4, 0.5, 0x3a3f3a]);
+      g.push([0, oy + 4.4, 460, 30, 0.18, 16, 0x36402e, false]);
+      for (const [px, pz] of [[-14, 454], [14, 466], [-14, 466], [14, 454]]) {
+        g.push([px, oy + 2.2, pz, 0.22, 4.4, 0.22, 0x453727, false]);
+      }
+      // Range flags marking the firing line.
+      for (const fx of [-40, 0, 40]) {
+        const fy = th(fx, 400);
+        g.push([fx, fy + 1.9, 400, 0.18, 3.8, 0.18, 0x3a3f3a, false]);
+        g.push([fx + 0.7, fy + 3.4, 400, 1.3, 0.8, 0.06, 0xa8552e, false]);
+      }
+      return g;
+    },
+    doors: [],
+    enemies: [],
+    civilians: [],
+    objectives: [
+      phase('school-first', 'FIRST KILL', [
+        {
+          type: 'drone', mode: 'fpv', noHandoff: true,
+          label: 'FPV TRAINER',
+          text: 'LESSON 1 — FLY INTO THE HULK ON THE OPEN DIRT.',
+          launch: [6, 0, 455], yaw: 0,
+          metersPerUnit: 3.5, maxRange: 1400, airframes: 3,
+          ceiling: 55, maxSpeed: 18, accel: 24, batteryDrain: 0.28,
+          jammers: [],
+          vehicles: [{
+            kind: 'default', label: 'RANGE HULK A', health: 200, pos: [10, 0, 300], yaw: 0.4,
+            killMessage: 'KAVUN — GOOD. THAT IS THE WHOLE JOB: EYES, STICKS, IMPACT.',
+          }],
+          startMessage: 'KAVUN — SEE THE HULK ON THE DIRT AHEAD? PUSH THE NOSE DOWN AND FLY INTO IT.',
+          result: 'FIRST KILL LOGGED — THE WARHEAD DOES THE REST',
+          handoffMessage: 'NEXT AIRFRAME PREPPED — THE RANGE GETS MEANER',
+        },
+      ]),
+      phase('school-hunt', 'HUNT BELOW THE TREES', [
+        {
+          type: 'drone', mode: 'fpv', noHandoff: true,
+          label: 'FPV TRAINER',
+          text: 'LESSON 2 — THE TARGET HIDES BEHIND THE WINDBREAK. FLY LOW AND HUNT.',
+          launch: [6, 0, 455], yaw: 0,
+          metersPerUnit: 3.5, maxRange: 1500, airframes: 2,
+          ceiling: 55, maxSpeed: 18, accel: 24, batteryDrain: 0.5,
+          jammers: [],
+          vehicles: [{
+            kind: 'technical', label: 'RANGE TRUCK', health: 160, pos: [148, 0, 84], yaw: 1.2,
+            killMessage: 'KAVUN — YOU FOUND IT BECAUSE YOU FLEW LOW. REMEMBER THE CELLS: 3.5 IS GO-HOME.',
+          }],
+          startMessage: 'KAVUN — TRUCK IS PARKED BEHIND THE WINDBREAK. YOU WON’T SEE IT FROM HERE. LOW ALONG THE TREES, AND WATCH YOUR BATTERY — THIS PACK DRAINS FAST.',
+          result: 'HUNT COMPLETE — LOW IS HOW YOU SEE, LOW IS HOW YOU LIVE',
+          handoffMessage: 'LAST FPV LESSON — THE CAGE',
+        },
+      ]),
+      phase('school-cage', 'KILL THE CAGED HULL', [
+        {
+          type: 'drone', mode: 'fpv', noHandoff: true,
+          label: 'FPV TRAINER',
+          text: 'LESSON 3 — THE HULL WEARS A COPE CAGE. ONLY THE REAR ARC KILLS.',
+          launch: [6, 0, 455], yaw: 0,
+          metersPerUnit: 3.5, maxRange: 1500, airframes: 3,
+          ceiling: 55, maxSpeed: 18, accel: 24, batteryDrain: 0.28,
+          jammers: [],
+          vehicles: [{
+            kind: 'tank', label: 'CAGED HULL', cage: true, health: 500, pos: [-130, 0, 150], yaw: 2.2,
+            killMessage: 'KAVUN — REAR ARC. THAT LESSON COSTS AIRFRAMES AT THE FRONT. YOU GOT IT FREE.',
+          }],
+          startMessage: 'KAVUN — THE SLATS EAT WARHEADS. IF YOU HIT THE CAGE, YOU FED IT. CIRCLE WIDE, COME IN FLAT ON THE ENGINE DECK.',
+          result: 'FPV CERTIFICATION COMPLETE — CLEARED FOR JAMMED AIRSPACE',
+        },
+      ]),
+    ],
+  },
+
+  // ---------------------------------------------------------------- 12
+  // Flight school, day two: graduation. The jammer is real, the mover is real, the bomb
+  // falls with real drift. Pass this and the fence sorties are deployment, not ambush.
+  {
+    id: 12, name: 'GRADUATION',
+    brief: 'Last day at the Dronarium: kill through a live jamming bubble by flying the low ground, take a moving truck with a kamikaze strike, then put gravity bombs on the practice siding from the HERON.',
+    weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
+    lockPlayer: true,
+    cameraFar: 2600,
+    sky: 0x2b2733, fog: [0x35303c, 500, 2250], ambient: 0.8, sun: 0.85,
+    backdrop: 'rural',
+    terrainDef: DEEP_FENCE_TERRAIN,
+    minimap: {
+      bounds: [-720, 505, 720, -935],
+      opArea: [-300, 500, 300, -640],
+      roads: [[-6, 500, -6, -900], [-120, -350, 120, -350]],
+      rail: [[150, -420, 150, -600]],
+      woods: [
+        [-210, 428, -16, 430], [14, 430, 210, 428],
+        [40, 122, 240, 118], [-240, 62, -60, 58],
+      ],
+      places: [],
+    },
+    start: [0, 0, 462, 0],
+    geo: () => {
+      const g = [];
+      const r = rng(1104);
+      const th = terrainSampler(DEEP_FENCE_TERRAIN);
+      g.push(...floorSlab(0, 462, 40, 32, th(0, 462), 1, 0x4a4636));
+      const road = (x1, z1, x2, z2, width) => {
+        const length = Math.hypot(x2 - x1, z2 - z1);
+        const steps = Math.max(2, Math.round(length / 34));
+        for (let i = 0; i < steps; i++) {
+          const t0 = i / steps, t1 = (i + 1) / steps;
+          const ax = x1 + (x2 - x1) * t0, az = z1 + (z2 - z1) * t0;
+          const bx = x1 + (x2 - x1) * t1, bz = z1 + (z2 - z1) * t1;
+          const cx = (ax + bx) / 2, cz = (az + bz) / 2;
+          const y = Math.max(th(ax, az), th(cx, cz), th(bx, bz)) + 0.07;
+          g.push([cx, y, cz,
+            Math.abs(bx - ax) + (Math.abs(bx - ax) < 1 ? width : 1.2), 0.12,
+            Math.abs(bz - az) + (Math.abs(bz - az) < 1 ? width : 1.2), 0x3b3833, false]);
+        }
+      };
+      road(-6, 500, -6, -900, 8);
+      road(-120, -350, 120, -350, 8);
+      const canopyTones = [
+        [0x293c20, 0x334a28, 0x415c31],
+        [0x263a1e, 0x2f4426, 0x3c522c],
+        [0x2c4023, 0x374e2b, 0x466036],
+      ];
+      const tree = (x, z, s = 1) => {
+        const tones = canopyTones[Math.floor(r() * canopyTones.length)];
+        const ty = th(x, z);
+        g.push([x, ty + 0.9 * s, z, 0.38 * s, 1.8 * s, 0.38 * s, 0x453727]);
+        const tiers = [[3.0, 2.4, 1.5, 0], [2.5, 3.3, 1.4, 1], [1.9, 4.2, 1.3, 1], [1.1, 5.0, 1.2, 2]];
+        for (const [w, y, h, tone] of tiers) {
+          g.push([x + (r() - 0.5) * 0.55 * s, ty + y * s, z + (r() - 0.5) * 0.55 * s,
+            w * s, h * s, w * s, tones[tone]]);
+        }
+      };
+      const treeRow = (x1, z1, x2, z2, step) => {
+        const length = Math.hypot(x2 - x1, z2 - z1);
+        const n = Math.max(2, Math.round(length / step));
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          tree(x1 + (x2 - x1) * t + (r() - 0.5) * 5, z1 + (z2 - z1) * t + (r() - 0.5) * 5,
+            0.85 + r() * 0.5);
+        }
+      };
+      treeRow(-210, 428, -16, 430, 15);
+      treeRow(14, 430, 210, 428, 15);
+      treeRow(40, 122, 240, 118, 16);
+      treeRow(-240, 62, -60, 58, 16);
+      // The captured jammer on its mast, dead centre of the approach.
+      const jy = th(0, -80);
+      g.push([0, jy + 2.6, -80, 1.1, 5.2, 1.1, 0x3a3f3a]);
+      g.push([0, jy + 5.5, -80, 2.4, 0.5, 0.6, 0x2c3130]);
+      // Practice siding: a short draped ballast run for the bomber wagons.
+      for (let rz = -420; rz > -600; rz -= 55) {
+        const mz = rz - 27.5;
+        const ry = th(150, mz);
+        g.push([150, ry + 0.25, mz, 8, 0.5, 56, 0x3f3b34]);
+        g.push([147.4, ry + 0.61, mz, 0.5, 0.22, 56, 0x50524f, false]);
+        g.push([152.6, ry + 0.61, mz, 0.5, 0.22, 56, 0x50524f, false]);
+      }
+      // The OP.
+      const oy = th(0, 462);
+      g.push(...lift(floorSlab(0, 462, 26, 14, 0.02, 0.5, 0x413d31), oy));
+      g.push(...lift([...sandbags(-6, 452, 6, 2, false, 71), ...sandbags(7, 452, 5, 2, false, 72)], oy));
+      g.push(...lift([...table(-3, 461, 2.6, 1.1, 0x554a38), ...table(3.4, 461, 1.8, 1.0, 0x4c4234)], oy));
+      g.push([12, oy + 4.2, 458, 0.5, 8.4, 0.5, 0x3a3f3a]);
+      g.push([0, oy + 4.4, 460, 30, 0.18, 16, 0x36402e, false]);
+      for (const [px, pz] of [[-14, 454], [14, 466], [-14, 466], [14, 454]]) {
+        g.push([px, oy + 2.2, pz, 0.22, 4.4, 0.22, 0x453727, false]);
+      }
+      return g;
+    },
+    doors: [],
+    enemies: [],
+    civilians: [],
+    objectives: [
+      phase('grad-bubble', 'KILL THROUGH THE BUBBLE', [
+        {
+          type: 'drone', mode: 'fpv', noHandoff: true,
+          label: 'FPV TRAINER',
+          text: 'LESSON 4 — THE JAMMER IS LIVE. HIGH IS LOUD, LOW IS QUIET.',
+          launch: [6, 0, 455], yaw: 0,
+          metersPerUnit: 3.5, maxRange: 1600, airframes: 3,
+          ceiling: 55, maxSpeed: 18, accel: 24, batteryDrain: 0.28,
+          jammers: [{ x: 0, z: -80, r: 170 }],
+          vehicles: [{
+            kind: 'default', label: 'RANGE HULK B', health: 200, pos: [-20, 0, -250], yaw: 2.8,
+            killMessage: 'KAVUN — YOU FLEW UNDER THE NOISE. THAT IS THE WHOLE COUNTER-EW COURSE.',
+          }],
+          startMessage: 'KAVUN — CAPTURED JAMMER AHEAD, LIVE. THE BUBBLE REACHES FURTHER THE HIGHER YOU FLY. FIND THE LOW GROUND AND WALK IT IN THROUGH THE STATIC.',
+          result: 'BUBBLE PENETRATED — STATIC IS INFORMATION',
+          handoffMessage: 'NEXT AIRFRAME UP — THE TARGET MOVES THIS TIME',
+        },
+      ]),
+      phase('grad-mover', 'KILL THE MOVER', [
+        {
+          type: 'drone', mode: 'fpv', noHandoff: true,
+          label: 'FPV TRAINER',
+          text: 'LESSON 5 — THE TRUCK IS MOVING. AIM WHERE IT WILL BE.',
+          launch: [6, 0, 455], yaw: 0,
+          metersPerUnit: 3.5, maxRange: 1600, airframes: 3,
+          ceiling: 55, maxSpeed: 18, accel: 24, batteryDrain: 0.28,
+          jammers: [],
+          vehicles: [{
+            kind: 'technical', label: 'MOVING TRUCK', health: 160,
+            pos: [-100, 0, -350], yaw: 0, speed: 5.2, loop: true,
+            route: [[-100, -350], [100, -350]],
+            killMessage: 'KAVUN — LED IT LIKE A HUNTER. MOVERS DIE FROM AHEAD, NOT BEHIND.',
+          }],
+          startMessage: 'KAVUN — THE TRUCK RUNS THE RANGE ROAD. CHASING ITS TAIL WASTES BATTERY. CUT THE ANGLE — FLY TO WHERE IT WILL BE.',
+          result: 'MOVER KILLED — LEAD IS LIFE',
+          handoffMessage: 'HERON SPOOLING UP — PAYLOAD SCHOOL',
+        },
+      ]),
+      phase('grad-payload', 'PUT BOMBS ON THE SIDING', [
+        {
+          type: 'drone', mode: 'bomber', noHandoff: true,
+          label: 'HERON TRAINER',
+          text: 'LESSON 6 — GRAVITY DROPS. THE BOMB LEAVES WITH YOUR DRIFT.',
+          launch: [-3, 0, 455], yaw: 0,
+          metersPerUnit: 3.5, maxRange: 1800, airframes: 1,
+          ceiling: 95, maxSpeed: 10, accel: 12, batteryDrain: 0.12,
+          bombs: 8, thermalPersistent: true, fov: 84,
+          jammers: [],
+          vehicles: [
+            {
+              kind: 'fuelcar', label: 'PRACTICE WAGON ONE', health: 220, pos: [150, 0.5, -470], yaw: Math.PI / 2,
+              killMessage: 'KAVUN — HOVER, LET THE DRIFT DIE, DROP. TEXTBOOK.',
+            },
+            {
+              kind: 'fuelcar', label: 'PRACTICE WAGON TWO', health: 220, pos: [150, 0.5, -482], yaw: Math.PI / 2,
+            },
+            {
+              kind: 'fuelcar', label: 'PRACTICE WAGON THREE', health: 220, pos: [150, 0.5, -494], yaw: Math.PI / 2,
+              killMessage: 'KAVUN — GRADUATED. THE FENCE IS WAITING FOR YOU.',
+            },
+          ],
+          startMessage: 'KAVUN — HERON UP, EIGHT BOMBS, THERMAL ON N. THE BOMB FALLS WITH YOU: HOVER FOR THE FIRST, THEN TRY ONE WITH SPEED ON AND LEAD THE AIM POINT.',
+          result: 'GRADUATION COMPLETE — STRIKE CELL CERTIFIED',
+        },
+      ]),
+    ],
+  },
+
+  // ---------------------------------------------------------------- 13
+  // The drone-warfare deployment. No ground fight: the operator never leaves the treeline
+  // OP. Three sorties over kilometres of open farmland — two kamikaze FPV hunts and one
+  // heavy bomber run — everything the Dronarium taught, now against a defended echelon.
+  // Distances are compressed (metersPerUnit 3.5): the 1,700-unit rail leg reads as ~6 km.
+  {
+    id: 13, name: 'DEEP FENCE',
     brief: 'BASTION is gone but the 37th’s echelon is intact beyond the fields. Fly the fence: kill the road patrol tank, the BTR at the kolkhoz, and burn the fuel siding feeding their next assault. You never leave the treeline.',
     weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
     lockPlayer: true,

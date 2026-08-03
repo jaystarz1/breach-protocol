@@ -1461,6 +1461,7 @@ function setObjective() {
         world.stats.score += 250;
         world.stats.kills++;
         hud.feed(`${vehicle.label || 'VEHICLE'} DESTROYED +250`, '#ffd54f');
+        if (vehicle.killMessage) hud.feed(vehicle.killMessage, '#8cecff');
       },
       onFailed(reason) {
         failMission(`${reason} — THE SORTIE IS OVER`);

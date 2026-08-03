@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Level 11 (DEEP FENCE) end-to-end: the drone-warfare testbed.
+"""Level 13 (DEEP FENCE) end-to-end: the drone-warfare testbed.
 
 Exercises the real code paths of every new mechanic:
 - FPV kamikaze detonation on target proximity
@@ -33,9 +33,9 @@ def main():
         )
         page.goto(args.url, wait_until="domcontentloaded")
         page.wait_for_function("() => !!window.BP")
-        page.evaluate("() => BP.startLevel(11)")
+        page.evaluate("() => BP.startLevel(13)")
         page.wait_for_function(
-            "() => BP.mode === 'playing' && BP.world?.level?.id === 11"
+            "() => BP.mode === 'playing' && BP.world?.level?.id === 13"
             " && !!BP.world.drone?.active")
         page.wait_for_timeout(600)
 
