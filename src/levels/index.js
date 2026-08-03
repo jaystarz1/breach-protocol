@@ -1976,6 +1976,31 @@ export const LEVELS = [
     cameraFar: 2600,
     sky: 0x2b2733, fog: [0x35303c, 500, 2250], ambient: 0.8, sun: 0.85,
     backdrop: 'rural',
+    // The operator's map board: drawn on the FPV OSD, north-up. Coordinates are world
+    // units; the drawer scales into the corner canvas. The briefs say "west road" and
+    // "kolkhoz" — this is what makes those words mean something in the goggles.
+    minimap: {
+      bounds: [-360, 505, 360, -1420],
+      roads: [
+        [-6, 500, -6, -1460],
+        [-180, -700, 140, -700],
+        [150, -700, 150, -1360],
+      ],
+      rail: [[330, -235, 330, -1420]],
+      woods: [
+        [-210, 428, -16, 430], [14, 430, 210, 428],
+        [-330, -160, -40, -166], [30, -166, 330, -160],
+        [-330, -382, -70, -378], [60, -378, 330, -384],
+        [-330, -940, -60, -936], [110, -936, 330, -940],
+        [-84, -430, -80, -880], [62, -560, 58, -1000],
+        [-330, -1150, -30, -1146],
+      ],
+      places: [
+        [-14, -527, 100, 70],
+        [134, -1030, 84, 90],
+        [330, -1237, 16, 44],
+      ],
+    },
     start: [0, 0, 462, 0],
     geo: () => {
       const g = [];

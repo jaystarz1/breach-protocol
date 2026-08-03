@@ -873,6 +873,7 @@ export class DroneController {
       <div class="fpv-batt"></div>
       <div class="fpv-link"></div>
       <div class="fpv-warn"></div>
+      <canvas class="fpv-map"></canvas>
       <div class="drone-result fpv-result"></div>
       <div class="fpv-help">${this.mode === 'bomber'
     ? 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP BOMB · N THERMAL'
@@ -897,6 +898,7 @@ export class DroneController {
       .fpv-batt{position:absolute;left:6%;bottom:7%;white-space:pre;font-size:17px}
       .fpv-link{position:absolute;right:6%;bottom:7%;text-align:right;white-space:pre}
       .fpv-warn{position:absolute;left:50%;top:63%;transform:translateX(-50%);color:#ffd8b0;font-size:18px;letter-spacing:3px;animation:fpvblink 0.6s steps(2) infinite}
+      .fpv-map{position:absolute;right:6%;bottom:calc(7% + 92px);border:1px solid rgba(233,239,233,.4);background:rgba(6,8,6,.68);image-rendering:pixelated}
       .fpv-help{position:absolute;left:50%;bottom:2.5%;transform:translateX(-50%);font-size:11px;font-weight:400;letter-spacing:1px;white-space:nowrap;color:#c9d2c9}
       .fpv-result{position:absolute;left:50%;top:26%;transform:translateX(-50%);padding:9px 14px;border:1px solid rgba(233,239,233,.5);background:rgba(8,10,8,.78);letter-spacing:2px;opacity:0;transition:opacity .18s}
       @keyframes fpvblink{50%{opacity:0.15}}
@@ -922,6 +924,7 @@ export class DroneController {
     this.noiseCanvas.height = 96;
     this.noiseCtx = this.noiseCanvas.getContext('2d');
     this.noiseClock = 0;
+    this.buildFpvMap(definition);
     // The analog cameras strike crews fly are colour-thin and contrast-hot.
     if (this.canvas) {
       this.canvas.style.filter = 'saturate(.62) contrast(1.14) brightness(.94)';
@@ -933,6 +936,72 @@ export class DroneController {
         if (!this.complete) this.result.style.opacity = '0';
       }, 2600);
     }
+  }
+
+  // The operator's map board, north-up in the corner of the goggles: terrain the brief
+  // talks about (roads, woods, rail, settlements), the jammer bubbles, launch, and live
+  // target tracks. Static features bake once; the per-frame pass only blits and stamps.
+  buildFpvMap(definition) {
+    const mapCanvas = this.overlay.querySelector('.fpv-map');
+    const def = definition.minimap;
+    if (!def) { mapCanvas.remove(); return; }
+    const [x1, zS, , zN] = def.bounds;
+    const x2 = def.bounds[2];
+    const H = 216;
+    const scale = H / (zS - zN);
+    const W = Math.round((x2 - x1) * scale);
+    mapCanvas.width = W;
+    mapCanvas.height = H;
+    mapCanvas.style.width = `${W}px`;
+    mapCanvas.style.height = `${H}px`;
+    this.mapW = W;
+    this.mapH = H;
+    this.mapPoint = (x, z) => [(x - x1) * scale, (z - zN) * scale];
+    this.mapScale = scale;
+    const stat = document.createElement('canvas');
+    stat.width = W;
+    stat.height = H;
+    const ctx = stat.getContext('2d');
+    ctx.fillStyle = 'rgba(13,16,11,0.92)';
+    ctx.fillRect(0, 0, W, H);
+    const strokeRuns = (runs, style, width) => {
+      ctx.strokeStyle = style;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      for (const [ax, az, bx, bz] of runs || []) {
+        ctx.beginPath();
+        ctx.moveTo(...this.mapPoint(ax, az));
+        ctx.lineTo(...this.mapPoint(bx, bz));
+        ctx.stroke();
+      }
+    };
+    strokeRuns(def.woods, '#33471f', 4);
+    strokeRuns(def.roads, '#5c584c', 2);
+    strokeRuns(def.rail, '#77776e', 1.5);
+    ctx.fillStyle = '#4a4438';
+    for (const [px, pz, pw, pd] of def.places || []) {
+      const [cx, cz] = this.mapPoint(px, pz);
+      ctx.fillRect(cx - pw * scale / 2, cz - pd * scale / 2, pw * scale, pd * scale);
+    }
+    // Jammer bubbles at full ground radius: the planning picture, not the live altitude cut.
+    for (const jammer of this.jammers) {
+      const [jx, jz] = this.mapPoint(jammer.x, jammer.z);
+      ctx.beginPath();
+      ctx.arc(jx, jz, jammer.r * scale, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,90,60,0.13)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,110,80,0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#aab3aa';
+    ctx.font = '700 9px ui-monospace, Menlo, monospace';
+    ctx.fillText('N', W / 2 - 3, 9);
+    ctx.fillText('S', W / 2 - 3, H - 3);
+    ctx.fillText('W', 2, H / 2 + 3);
+    ctx.fillText('E', W - 8, H / 2 + 3);
+    this.mapStatic = stat;
+    this.mapCtx = mapCanvas.getContext('2d');
   }
 
   markReconTarget(target) {
@@ -1380,9 +1449,38 @@ export class DroneController {
     let rel = yawHome - this.yaw;
     rel = ((rel % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
     const arrow = '↑↗→↘↓↙←↖'[((Math.round(-rel / (Math.PI / 4)) % 8) + 8) % 8];
-    osd.dist.textContent = meters >= 1000
+    // Heading: -Z is grid north. The briefs are written in cardinal language ("the west
+    // road"), so the OSD has to speak it too.
+    const hdg = Math.round((((-this.yaw * 180 / Math.PI) % 360) + 360) % 360) % 360;
+    const cardinal = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(hdg / 45) % 8];
+    const distText = meters >= 1000
       ? `DIST ${(meters / 1000).toFixed(1)}KM   HOME ${arrow}`
       : `DIST ${Math.round(meters)}M   HOME ${arrow}`;
+    osd.dist.textContent = `HDG ${String(hdg).padStart(3, '0')} ${cardinal}\n${distText}`;
+    if (this.mapCtx) {
+      const ctx = this.mapCtx;
+      ctx.clearRect(0, 0, this.mapW, this.mapH);
+      ctx.drawImage(this.mapStatic, 0, 0);
+      const [lx, lz] = this.mapPoint(this.launch.x, this.launch.z);
+      ctx.fillStyle = '#7ce4ff';
+      ctx.fillRect(lx - 2, lz - 2, 4, 4);
+      for (const vehicle of this.combatVehicles) {
+        const [vx, vz] = this.mapPoint(vehicle.pos.x, vehicle.pos.z);
+        ctx.fillStyle = vehicle.dead ? '#4d4d46' : '#ff5c46';
+        ctx.fillRect(vx - 2, vz - 2, 4, 4);
+      }
+      const [dx, dz] = this.mapPoint(this.pos.x, this.pos.z);
+      ctx.strokeStyle = '#e9efe9';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(dx, dz);
+      ctx.lineTo(dx - Math.sin(this.yaw) * 9, dz - Math.cos(this.yaw) * 9);
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(dx, dz, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     osd.warn.textContent = this.frozen ? ''
       : this.linkLowTimer > 0.3 ? 'SIGNAL CRITICAL'
         : signal < 0.3 ? 'JAMMING'

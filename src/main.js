@@ -1424,6 +1424,7 @@ function setObjective() {
     suspendGroundCombatForDrone(obj);
     const runtimeDefinition = ['fpv', 'bomber'].includes(obj.mode) ? {
       ...obj,
+      minimap: obj.minimap || world.level.minimap,
       combatVehicles,
       onCombatBlast(position) {
         sfx.explosion(position);
