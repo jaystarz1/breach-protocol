@@ -686,6 +686,11 @@ export class DroneController {
     this.linkLowTimer = 0;
     this.failedOut = false;
     this.detonated = false;
+    // A fresh airframe arms after launch, like the real munition. During the arming window
+    // a solid contact stops the aircraft instead of detonating it — without this, a crash
+    // followed by a respawn under live stick input chain-detonates every remaining airframe
+    // into the launch treeline before the pilot can reorient.
+    this.armTimer = this.isFpvFamily ? 1.2 : 0;
     this.targets = (definition.targets || []).map((entry, index) => ({
       ...(Array.isArray(entry) ? {} : entry),
       pos: new THREE.Vector3(...(Array.isArray(entry) ? entry : entry.pos)),
@@ -958,6 +963,7 @@ export class DroneController {
     this.updateThermalBurst(dt, input);
     // Jamming degrades the CONTROL link too, not just the picture: inside a bubble the
     // stick response goes mushy before it dies. Legacy modes fly with a clean link.
+    this.armTimer = Math.max(0, this.armTimer - dt);
     const control = this.isFpvFamily ? 0.3 + 0.7 * Math.max(this.signal, 0.05) : 1;
     this.yaw -= input.lookDelta.x * 0.72 * control;
     this.pitch = Math.max(-1.15, Math.min(0.72, this.pitch - input.lookDelta.y * 0.62 * control));
@@ -984,15 +990,18 @@ export class DroneController {
         solids, this.pos.x, this.pos.y, this.pos.z,
         this.move.x, this.move.y, this.move.z, distance + 0.16);
       if (hit > distance) this.pos.copy(this.next);
-      else if (this.mode === 'fpv') {
+      else if (this.mode === 'fpv' && this.armTimer <= 0) {
         // An armed FPV does not bounce off a wall. Whatever it touches, it touches once.
         this.fpvDetonate(this.pos.clone().addScaledVector(this.move, Math.max(0, hit - 0.05)));
         return;
+      } else if (this.mode === 'fpv') {
+        // Still arming: the contact stops the aircraft dead instead of expending it.
+        this.vel.set(0, 0, 0);
       } else this.vel.multiplyScalar(-0.18);
     }
     const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.12, this.pos.y + 1);
     const floor = (ground === -Infinity ? 0 : ground) + 0.65;
-    if (this.mode === 'fpv' && this.pos.y <= floor && this.vel.y < -2.2) {
+    if (this.mode === 'fpv' && this.armTimer <= 0 && this.pos.y <= floor && this.vel.y < -2.2) {
       this.fpvDetonate(this.pos.clone().setY(floor - 0.4));
       return;
     }
@@ -1298,6 +1307,7 @@ export class DroneController {
     this.pitch = -0.05;
     this.battery = 100;
     this.linkLowTimer = 0;
+    this.armTimer = 1.2;
     this.result.textContent = `${reason} — AIRFRAME ${this.airframesLost + 1}/${this.airframes} UP`;
     this.result.style.opacity = '1';
     clearTimeout(this.resultTimer);

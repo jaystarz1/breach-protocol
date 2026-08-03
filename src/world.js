@@ -150,12 +150,40 @@ function skyCanvas(skyHex, fogHex, seed, opts = {}) {
       px += bw + (R() < 0.25 ? 6 + R() * 18 : 0);
     }
   };
-  // Far ridge first, nearly dissolved into the haze, then a closer skyline over it.
-  // Heights are SMALL: painted buildings are effectively at infinity, so they must hug the
-  // horizon line. At SKY_H*0.13 they subtend 13 degrees and read as a city floating in the
-  // sky above the real mid-distance ring rather than as distance behind it.
-  layer(HORIZON_Y + 2, SKY_H * 0.028, horizon.clone().lerp(sky, 0.45).multiplyScalar(0.85), 0);
-  layer(HORIZON_Y + 3, SKY_H * 0.048, sky.clone().multiplyScalar(0.5), 0.2);
+  // Rural domes get rolling wooded ridges on the horizon instead of a painted city: open
+  // farmland must run out into woods and haze, not into a wall of window grids that hangs
+  // at infinity and never gets closer no matter how far the drone flies.
+  const ridge = (yTop, hMax, tint) => {
+    x.fillStyle = hex(tint);
+    let px = -40;
+    while (px < SKY_W + 40) {
+      const bw = 30 + R() * 90;
+      const bh = hMax * (0.3 + R() * 0.7);
+      x.beginPath();
+      x.ellipse(px + bw / 2, yTop + 1, bw * 0.72, bh, 0, Math.PI, 0);
+      x.fill();
+      x.fillRect(px, yTop, bw, 6);
+      px += bw * (0.5 + R() * 0.45);
+    }
+  };
+  if (opts.rural) {
+    // A continuous woodline covers far more of the horizon than sparse building blocks did,
+    // so both layers stay close to the haze value or they read as a hard ink band.
+    ridge(HORIZON_Y + 2, SKY_H * 0.022, horizon.clone().lerp(sky, 0.3).multiplyScalar(0.95));
+    ridge(HORIZON_Y + 3, SKY_H * 0.038, horizon.clone().multiplyScalar(0.62));
+    // A handful of farm pinpricks along the horizon — lone yard lights, not window grids.
+    x.fillStyle = 'rgba(255,204,146,0.55)';
+    for (let i = 0; i < 9; i++) {
+      x.fillRect(R() * SKY_W, HORIZON_Y + 1 + R() * 3, 1.7, 1.7);
+    }
+  } else {
+    // Far ridge first, nearly dissolved into the haze, then a closer skyline over it.
+    // Heights are SMALL: painted buildings are effectively at infinity, so they must hug the
+    // horizon line. At SKY_H*0.13 they subtend 13 degrees and read as a city floating in the
+    // sky above the real mid-distance ring rather than as distance behind it.
+    layer(HORIZON_Y + 2, SKY_H * 0.028, horizon.clone().lerp(sky, 0.45).multiplyScalar(0.85), 0);
+    layer(HORIZON_Y + 3, SKY_H * 0.048, sky.clone().multiplyScalar(0.5), 0.2);
+  }
 
   return c;
 }
@@ -165,10 +193,10 @@ const skyCache = new Map();
 // The dome is parented to nothing and re-centred on the camera every frame, so its radius
 // only has to beat the nearest real geometry, not the level size. 460 keeps it inside the
 // 500 far plane with room for the ground plate to fade out under it.
-export function skyDome(skyHex, fogHex, seed) {
-  const key = `${skyHex}|${fogHex}|${seed}`;
+export function skyDome(skyHex, fogHex, seed, opts = {}) {
+  const key = `${skyHex}|${fogHex}|${seed}|${opts.rural ? 'r' : 'c'}`;
   let canvas = skyCache.get(key);
-  if (!canvas) { canvas = skyCanvas(skyHex, fogHex, seed); skyCache.set(key, canvas); }
+  if (!canvas) { canvas = skyCanvas(skyHex, fogHex, seed, opts); skyCache.set(key, canvas); }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -188,8 +216,8 @@ export function skyDome(skyHex, fogHex, seed) {
 // A level's own ground stops at its edge and beyond it you saw straight through to the
 // background colour. This plate runs past the far plane so the ground always meets the sky.
 // Top at -0.06: below every level's y=0 surface, so it cannot z-fight with any of them.
-export function groundPlate(cx, cz, color) {
-  return [box(cx, -0.06 - 40, cz, 2400, 80, 2400, color, false)];
+export function groundPlate(cx, cz, color, size = 2400) {
+  return [box(cx, -0.06 - 40, cz, size, 80, size, color, false)];
 }
 
 // Buildings ringing the play area, placed to sit INSIDE the fog so they recede instead of
@@ -478,6 +506,100 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
   }
   if (window.__bpVisualProps) {
     window.__bpVisualProps.push({ kind: 'skyline-stats', stats });
+  }
+  return geo;
+}
+
+// ---------- rural horizon ----------
+// The countryside answer to skyline(): open farmland must NOT end in a wall of apartment
+// towers. Instead the play area runs out into broken treeline bands on the horizon, with a
+// handful of hazed village clusters — dark rooflines, a silo, lit windows — and one radio
+// mast with an obstruction light. Everything is non-solid scenery placed inside the fog.
+// Boxes are axis-aligned, so each treeline segment runs along whichever axis is closer to
+// the ring's tangent at that bearing; at these distances, under fog, the corners vanish.
+export function ruralHorizon(bounds, fogFar, seed) {
+  const geo = [];
+  const R = rng(seed);
+  const inner = Math.max(bounds.r + 80, fogFar * 0.42);
+  const outer = Math.max(inner + 200, fogFar * 0.88);
+
+  for (let ring = 0; ring < 2; ring++) {
+    const t = ring / 1;
+    const rad = inner + (outer - inner) * (0.12 + t * 0.75);
+    const fade = 0.8 - t * 0.3;
+    const count = 22 + ring * 6;
+    for (let i = 0; i < count; i++) {
+      // ~35% gaps so the horizon is hedgerow country, not a solid palisade.
+      if (R() < 0.35) continue;
+      const a = (i / count) * Math.PI * 2 + (R() - 0.5) * 0.12;
+      const rr = rad * (0.92 + R() * 0.16);
+      const bx = bounds.cx + Math.cos(a) * rr;
+      const bz = bounds.cz + Math.sin(a) * rr;
+      const span = 90 + R() * 120;
+      const alongX = Math.abs(Math.sin(a)) > Math.abs(Math.cos(a));
+      // A treeline is not one slab: overlapping lumps of varying height give the broken
+      // canopy top that separates "distant wood" from "distant warehouse".
+      const lumps = 4 + Math.floor(R() * 3);
+      for (let l = 0; l < lumps; l++) {
+        const off = (R() - 0.5) * span;
+        const len = 28 + R() * 44;
+        const thick = 10 + R() * 8;
+        const h = 3.2 + R() * 3.6;
+        const jit = (R() - 0.5) * 10;
+        const wood = new THREE.Color(0x2f4026)
+          .multiplyScalar(fade * (0.85 + R() * 0.3)).getHex();
+        geo.push(alongX
+          ? box(bx + off, h / 2, bz + jit, len, h, thick, wood)
+          : box(bx + jit, h / 2, bz + off, thick, h, len, wood));
+      }
+    }
+  }
+
+  // Village clusters: kept on the nearer band so their window lights survive the fog.
+  const villages = 5;
+  const baseBearing = R() * Math.PI * 2;
+  for (let v = 0; v < villages; v++) {
+    const a = baseBearing + (v / villages) * Math.PI * 2 + (R() - 0.5) * 0.5;
+    const rr = inner * (1.02 + R() * 0.22);
+    const vx = bounds.cx + Math.cos(a) * rr;
+    const vz = bounds.cz + Math.sin(a) * rr;
+    const houses = 4 + Math.floor(R() * 4);
+    for (let hI = 0; hI < houses; hI++) {
+      const hx = vx + (R() - 0.5) * 90;
+      const hz = vz + (R() - 0.5) * 90;
+      // Cottage scale, not block scale: too tall and the fogged silhouette is an office.
+      const w = 6 + R() * 4, d = 5 + R() * 4, hh = 2.2 + R() * 1.4;
+      geo.push(box(hx, hh / 2, hz, w, hh, d, 0x2e2b28));
+      // Roughly half the houses show one small warm window. This is the entire "there are
+      // people out there" read; more than that and the cluster reads as an apartment row.
+      if (R() < 0.55) {
+        geo.push(box(
+          hx + (R() - 0.5) * w * 0.6, 1.2 + R() * 0.5, hz + (d / 2 + 0.2) * (R() < 0.5 ? 1 : -1),
+          0.9, 0.7, 0.3, 0xd8913c, false, true));
+      }
+    }
+    // A slim silo breaks the roofline so the cluster reads as a farm village.
+    geo.push(box(vx + (R() - 0.5) * 60, 4, vz + (R() - 0.5) * 60, 2.6, 8, 2.6, 0x3a3d40));
+    // One yard light on a pole.
+    geo.push(box(vx + (R() - 0.5) * 40, 4.4, vz + (R() - 0.5) * 40, 0.6, 0.6, 0.6,
+      0xe8b46a, false, true));
+  }
+
+  // A single distant radio mast with a red obstruction light: the one vertical accent.
+  const ma = baseBearing + 0.7;
+  const mx = bounds.cx + Math.cos(ma) * inner * 1.15;
+  const mz = bounds.cz + Math.sin(ma) * inner * 1.15;
+  geo.push(box(mx, 24, mz, 1.4, 48, 1.4, 0x2c2f31));
+  geo.push(box(mx, 48.8, mz, 1.1, 1.1, 1.1, 0xff4034, false, true));
+
+  // Lone farmsteads between the villages: single lights in the dark, nothing else.
+  for (let f = 0; f < 7; f++) {
+    const a = R() * Math.PI * 2;
+    const rr = inner * (1.0 + R() * 0.35);
+    const fx = bounds.cx + Math.cos(a) * rr;
+    const fz = bounds.cz + Math.sin(a) * rr;
+    geo.push(box(fx, 1.5, fz, 8, 3, 6, 0x2c2a27));
+    geo.push(box(fx + 3, 1.3, fz + 3.4, 0.9, 0.7, 0.3, 0xcf8a3a, false, true));
   }
   return geo;
 }

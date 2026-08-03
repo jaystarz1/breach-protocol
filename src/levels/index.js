@@ -1975,7 +1975,7 @@ export const LEVELS = [
     lockPlayer: true,
     cameraFar: 2600,
     sky: 0x2b2733, fog: [0x35303c, 500, 2250], ambient: 0.8, sun: 0.85,
-    skylineTint: 0x232028,
+    backdrop: 'rural',
     start: [0, 0, 462, 0],
     geo: () => {
       const g = [];
@@ -1997,11 +1997,30 @@ export const LEVELS = [
       g.push([-6, 0.1, -480, 8, 0.1, 1960, 0x3b3833, false]);
       g.push([-20, 0.1, -700, 320, 0.1, 9, 0x3b3833, false]);
       g.push([150, 0.1, -1030, 9, 0.1, 660, 0x3b3833, false]);
-      // A tree: trunk and canopy, both SOLID. Clipping a windbreak at 60 km/h is how real
-      // airframes die, and the mission wants that lesson available.
+      // A tree: SOLID trunk and a tapered three-tier canopy, lighter toward the sunlit
+      // crown, with the upper tiers jittered off-axis so a row never reads as a picket of
+      // identical shapes. Still SOLID throughout: clipping a windbreak at 60 km/h is how
+      // real airframes die, and the mission wants that lesson available.
+      const canopyTones = [
+        [0x293c20, 0x334a28, 0x415c31],
+        [0x263a1e, 0x2f4426, 0x3c522c],
+        [0x2c4023, 0x374e2b, 0x466036],
+      ];
       const tree = (x, z, s = 1) => {
-        g.push([x, 1.5 * s, z, 0.5 * s, 3 * s, 0.5 * s, 0x453727]);
-        g.push([x, 3.7 * s, z, 2.8 * s, 2.9 * s, 2.8 * s, 0x2c4023]);
+        const tones = canopyTones[Math.floor(r() * canopyTones.length)];
+        g.push([x, 0.9 * s, z, 0.38 * s, 1.8 * s, 0.38 * s, 0x453727]);
+        // Four heavily-overlapped tiers approximate a rounded crown; distinct steps with
+        // clean gaps read as a stack of slabs, which is the hammer problem all over again.
+        const tiers = [
+          [3.0, 2.4, 1.5, 0],
+          [2.5, 3.3, 1.4, 1],
+          [1.9, 4.2, 1.3, 1],
+          [1.1, 5.0, 1.2, 2],
+        ];
+        for (const [w, y, h, tone] of tiers) {
+          g.push([x + (r() - 0.5) * 0.55 * s, y * s, z + (r() - 0.5) * 0.55 * s,
+            w * s, h * s, w * s, tones[tone]]);
+        }
       };
       const treeRow = (x1, z1, x2, z2, step) => {
         const length = Math.hypot(x2 - x1, z2 - z1);

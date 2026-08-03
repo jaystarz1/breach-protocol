@@ -28,6 +28,14 @@ const el = id => document.getElementById(id);
 // Populated by initInput; read by applyKeyLook each frame.
 let keyLookHeld = null;
 
+// Populated by initInput; called by resetInput so main can clear held state on level start.
+let resetHeld = null;
+export function resetInput() {
+  resetHeld?.();
+  input.lookDelta.x = 0;
+  input.lookDelta.y = 0;
+}
+
 // Radians/sec at sensitivity 1. A key is binary, so a flat rate makes the smallest
 // possible tap a big fixed chunk you can't aim with. Start slow enough to nudge a
 // few degrees, then ramp to a fast turn so crossing the room stays quick.
@@ -259,6 +267,9 @@ export function initInput() {
     if (isDesktop) input.ads = false;
     input.leanLeft = false; input.leanRight = false;
   };
+  // Level starts call this too: a key latched through the debrief must not fly the next
+  // mission's aircraft into the treeline before the player has touched anything.
+  resetHeld = releaseAll;
   window.addEventListener('blur', releaseAll);
   document.addEventListener('pointerlockchange', () => {
     if (document.pointerLockElement !== canvas) releaseAll();

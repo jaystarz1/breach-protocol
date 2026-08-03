@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { initInput, input, clearEdges, applyKeyLook } from './input.js';
+import { initInput, input, clearEdges, applyKeyLook, resetInput } from './input.js';
 import { Player } from './player.js';
 import { Weapons, Grenade, explosionEffect } from './weapons.js';
 import { Enemy, resetPathBudget } from './enemies.js';
@@ -15,7 +15,7 @@ import * as save from './save.js';
 import { sfx, unlock as audioUnlock, updateListener, startAmbient, stopAmbient } from './audio.js';
 import { quality } from './quality.js';
 import { environment, environmentFrom } from './textures.js';
-import { skyDome, groundPlate, skyline, takeLights } from './world.js';
+import { skyDome, groundPlate, skyline, ruralHorizon, takeLights } from './world.js';
 import { spawnSquad, spawnRouteTeam } from './squad.js';
 import { addStreetSweepArt } from './street-sweep-art.js';
 import {
@@ -319,6 +319,7 @@ function emergencyPower() {
 }
 
 function startLevel(id) {
+  resetInput();
   if (world?.drone) {
     world.drone.dispose();
     world.drone = null;
@@ -363,12 +364,19 @@ function startLevel(id) {
   const bounds = levelBounds(geo);
   skyMesh = null;
   if (!indoor) {
-    skyMesh = skyDome(L.sky, L.fog[0], L.id * 7919);
+    skyMesh = skyDome(L.sky, L.fog[0], L.id * 7919, { rural: L.backdrop === 'rural' });
     scene.add(skyMesh);
-    geo.push(...groundPlate(bounds.cx, bounds.cz, L.fog[0]));
-    // Skyline is decorative and non-solid, so it is appended AFTER bounds/shadow fitting:
+    // Rural levels need a plate that actually reaches their fog; the default 2400m square
+    // was sized for city maps and ends short of a 2250m fog far over a kilometre-wide plain.
+    const plateSize = L.backdrop === 'rural'
+      ? Math.ceil((bounds.r + L.fog[2]) * 2) : 2400;
+    geo.push(...groundPlate(bounds.cx, bounds.cz, L.fog[0], plateSize));
+    // Backdrop is decorative and non-solid, so it is appended AFTER bounds/shadow fitting:
     // a 300m ring of scenery must not blow out the shadow frustum it has no business in.
-    geo.push(...skyline(bounds, L.fog[2], L.id * 104729, { body: L.skylineTint }));
+    // Farmland levels get treelines and hazed villages instead of a ring of city towers.
+    geo.push(...(L.backdrop === 'rural'
+      ? ruralHorizon(bounds, L.fog[2], L.id * 104729)
+      : skyline(bounds, L.fog[2], L.id * 104729, { body: L.skylineTint })));
   }
   window.__bpBeacons = null;
   window.__bpVisualProps = null;
@@ -2346,7 +2354,7 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     $('debrief-intel-head').textContent = intel.heading;
     $('debrief-intel-result').textContent = intel.result;
     $('debrief-intel-lead').textContent = `NEXT LEAD — ${intel.nextLead}`;
-    $('debrief-next').style.display = won && currentLevel < 10 ? 'block' : 'none';
+    $('debrief-next').style.display = won && currentLevel < LEVELS.length ? 'block' : 'none';
     hud.screen('debrief');
   }, won ? 800 : 1200);
 }
