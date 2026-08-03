@@ -994,6 +994,30 @@ export class DroneController {
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+    // The target is NOT tracked live: intel gives a search box, the pilot does the finding.
+    // Box is the bounding area of the briefed patrol route (or parked position), padded.
+    if (this.combatVehicles.length) {
+      let bx1 = Infinity, bz1 = Infinity, bx2 = -Infinity, bz2 = -Infinity;
+      for (const vehicle of this.combatVehicles) {
+        const points = vehicle.route?.length
+          ? vehicle.route.map(p => [p.x, p.z]) : [[vehicle.pos.x, vehicle.pos.z]];
+        for (const [px, pz] of points) {
+          bx1 = Math.min(bx1, px); bx2 = Math.max(bx2, px);
+          bz1 = Math.min(bz1, pz); bz2 = Math.max(bz2, pz);
+        }
+      }
+      const pad = 45;
+      const [sx, sz] = this.mapPoint(bx1 - pad, bz2 + pad);
+      const [ex, ez] = this.mapPoint(bx2 + pad, bz1 - pad);
+      ctx.strokeStyle = 'rgba(255,92,70,0.85)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(Math.min(sx, ex), Math.min(sz, ez), Math.abs(ex - sx), Math.abs(ez - sz));
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,92,70,0.9)';
+      ctx.font = '700 8px ui-monospace, Menlo, monospace';
+      ctx.fillText('TGT', Math.min(sx, ex) + 2, Math.min(sz, ez) - 2);
+    }
     ctx.fillStyle = '#aab3aa';
     ctx.font = '700 9px ui-monospace, Menlo, monospace';
     ctx.fillText('N', W / 2 - 3, 9);
@@ -1464,11 +1488,6 @@ export class DroneController {
       const [lx, lz] = this.mapPoint(this.launch.x, this.launch.z);
       ctx.fillStyle = '#7ce4ff';
       ctx.fillRect(lx - 2, lz - 2, 4, 4);
-      for (const vehicle of this.combatVehicles) {
-        const [vx, vz] = this.mapPoint(vehicle.pos.x, vehicle.pos.z);
-        ctx.fillStyle = vehicle.dead ? '#4d4d46' : '#ff5c46';
-        ctx.fillRect(vx - 2, vz - 2, 4, 4);
-      }
       const [dx, dz] = this.mapPoint(this.pos.x, this.pos.z);
       ctx.strokeStyle = '#e9efe9';
       ctx.lineWidth = 1.4;
