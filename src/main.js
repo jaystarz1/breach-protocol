@@ -37,7 +37,7 @@ import {
 import {
   createDroneAssaultVehicle, DroneController, dronePrewarmGroup, setDroneTerrain,
 } from './drone.js';
-import { terrainSampler, terrainMin, buildTerrainMesh } from './terrain.js';
+import { terrainSampler, terrainMin, buildTerrainMesh, buildTerrainApron } from './terrain.js';
 import {
   authoredActorSockets,
   resolveActorVariant,
@@ -376,9 +376,15 @@ function startLevel(id) {
   if (L.terrainDef) {
     terrainSample = terrainSampler(L.terrainDef);
     terrainFloor = terrainMin(L.terrainDef) - 2.5;
-    const terrainMesh = buildTerrainMesh(L.terrainDef, terrainFloor);
-    scene.add(terrainMesh);
-    scene.userData.terrain = terrainMesh;
+    const terrainGroup = new THREE.Group();
+    terrainGroup.add(buildTerrainMesh(L.terrainDef, terrainFloor));
+    // Rolling fields to the fog line: the world must never show the bare plate.
+    terrainGroup.add(buildTerrainApron(L.terrainDef));
+    terrainGroup.userData.dispose = () => {
+      for (const child of terrainGroup.children) child.userData.dispose?.();
+    };
+    scene.add(terrainGroup);
+    scene.userData.terrain = terrainGroup;
   }
   setDroneTerrain(terrainSample);
   if (!indoor) {
@@ -388,7 +394,10 @@ function startLevel(id) {
     // was sized for city maps and ends short of a 2250m fog far over a kilometre-wide plain.
     const plateSize = L.backdrop === 'rural'
       ? Math.ceil((bounds.r + L.fog[2]) * 2) : 2400;
-    geo.push(...groundPlate(bounds.cx, bounds.cz, L.fog[0], plateSize, terrainFloor));
+    // Terrain levels dye the plate field-olive: even at the extreme edge of vision the
+    // ground reads as land, never as a bare grey void.
+    geo.push(...groundPlate(bounds.cx, bounds.cz,
+      L.terrainDef ? 0x3f3d2e : L.fog[0], plateSize, terrainFloor));
     // Backdrop is decorative and non-solid, so it is appended AFTER bounds/shadow fitting:
     // a 300m ring of scenery must not blow out the shadow frustum it has no business in.
     // Farmland levels get treelines and hazed villages instead of a ring of city towers.

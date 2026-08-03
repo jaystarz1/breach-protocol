@@ -522,8 +522,11 @@ export function ruralHorizon(bounds, fogFar, seed) {
   const R = rng(seed);
   // Terrain levels lower the backdrop plate below the deepest gully, so every mass here
   // extends down to -14: tops stay authored, bases always meet ground somewhere.
+  // LIFT rides the scenery over the procedural apron's rolling amplitude so village
+  // windows and rooflines are never buried under a noise hill.
+  const LIFT = 4.5;
   const sunk = (x, y, z, w, h, d, color, solid = false, emissive = false) => {
-    const top = y + h / 2;
+    const top = y + h / 2 + LIFT;
     return box(x, (top - 14) / 2, z, w, top + 14, d, color, solid, emissive);
   };
   const inner = Math.max(bounds.r + 80, fogFar * 0.42);
@@ -580,14 +583,14 @@ export function ruralHorizon(bounds, fogFar, seed) {
       // people out there" read; more than that and the cluster reads as an apartment row.
       if (R() < 0.55) {
         geo.push(box(
-          hx + (R() - 0.5) * w * 0.6, 1.2 + R() * 0.5, hz + (d / 2 + 0.2) * (R() < 0.5 ? 1 : -1),
+          hx + (R() - 0.5) * w * 0.6, LIFT + 1.2 + R() * 0.5, hz + (d / 2 + 0.2) * (R() < 0.5 ? 1 : -1),
           0.9, 0.7, 0.3, 0xd8913c, false, true));
       }
     }
     // A slim silo breaks the roofline so the cluster reads as a farm village.
     geo.push(sunk(vx + (R() - 0.5) * 60, 4, vz + (R() - 0.5) * 60, 2.6, 8, 2.6, 0x3a3d40));
     // One yard light on a pole.
-    geo.push(box(vx + (R() - 0.5) * 40, 4.4, vz + (R() - 0.5) * 40, 0.6, 0.6, 0.6,
+    geo.push(box(vx + (R() - 0.5) * 40, LIFT + 4.4, vz + (R() - 0.5) * 40, 0.6, 0.6, 0.6,
       0xe8b46a, false, true));
   }
 
@@ -596,7 +599,7 @@ export function ruralHorizon(bounds, fogFar, seed) {
   const mx = bounds.cx + Math.cos(ma) * inner * 1.15;
   const mz = bounds.cz + Math.sin(ma) * inner * 1.15;
   geo.push(sunk(mx, 24, mz, 1.4, 48, 1.4, 0x2c2f31));
-  geo.push(box(mx, 48.8, mz, 1.1, 1.1, 1.1, 0xff4034, false, true));
+  geo.push(box(mx, LIFT + 48.8, mz, 1.1, 1.1, 1.1, 0xff4034, false, true));
 
   // Lone farmsteads between the villages: single lights in the dark, nothing else.
   for (let f = 0; f < 7; f++) {
@@ -605,7 +608,7 @@ export function ruralHorizon(bounds, fogFar, seed) {
     const fx = bounds.cx + Math.cos(a) * rr;
     const fz = bounds.cz + Math.sin(a) * rr;
     geo.push(sunk(fx, 1.5, fz, 8, 3, 6, 0x2c2a27));
-    geo.push(box(fx + 3, 1.3, fz + 3.4, 0.9, 0.7, 0.3, 0xcf8a3a, false, true));
+    geo.push(box(fx + 3, LIFT + 1.3, fz + 3.4, 0.9, 0.7, 0.3, 0xcf8a3a, false, true));
   }
   return geo;
 }
