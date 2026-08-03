@@ -947,23 +947,43 @@ export class DroneController {
     if (!def) { mapCanvas.remove(); return; }
     const [x1, zS, , zN] = def.bounds;
     const x2 = def.bounds[2];
+    // The board is square regardless of the operational area's shape: the op area sits
+    // centred with margin lanes either side, like a printed map sheet on the table.
     const H = 216;
+    const W = 216;
     const scale = H / (zS - zN);
-    const W = Math.round((x2 - x1) * scale);
+    const opW = (x2 - x1) * scale;
+    const xOff = (W - opW) / 2;
     mapCanvas.width = W;
     mapCanvas.height = H;
     mapCanvas.style.width = `${W}px`;
     mapCanvas.style.height = `${H}px`;
     this.mapW = W;
     this.mapH = H;
-    this.mapPoint = (x, z) => [(x - x1) * scale, (z - zN) * scale];
+    this.mapPoint = (x, z) => [xOff + (x - x1) * scale, (z - zN) * scale];
     this.mapScale = scale;
     const stat = document.createElement('canvas');
     stat.width = W;
     stat.height = H;
     const ctx = stat.getContext('2d');
-    ctx.fillStyle = 'rgba(13,16,11,0.92)';
+    // Sheet background, then the operational area as a lighter panel with hatched lanes
+    // outside it — the boundary IS the outline of where the sortie is allowed to happen.
+    ctx.fillStyle = 'rgba(7,8,6,0.94)';
     ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(170,180,170,0.07)';
+    ctx.lineWidth = 1;
+    for (let hx = -H; hx < W; hx += 7) {
+      ctx.beginPath();
+      ctx.moveTo(hx, 0);
+      ctx.lineTo(hx + H, H);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(16,19,13,0.97)';
+    ctx.fillRect(xOff, 0, opW, H);
+    ctx.strokeStyle = 'rgba(233,239,233,0.4)';
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(xOff, 0.5, opW, H - 1);
+    ctx.setLineDash([]);
     const strokeRuns = (runs, style, width) => {
       ctx.strokeStyle = style;
       ctx.lineWidth = width;
