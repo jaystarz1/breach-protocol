@@ -113,7 +113,7 @@ export const CAMPAIGN_MISSIONS = [
   {
     node: 'DRONARIUM',
     sitrep: 'The district holds, and Vektor is standing up a long-range strike cell. Before anyone flies the fence, every pilot certifies at the Dronarium — the range instructors rotate in from the front and the curriculum changed again last week.',
-    purpose: 'Fly the FPV certification: first kill on the range, a hunt below the treelines, and a caged hull that only dies from the rear arc. Warheads are live. Everything on the range is already dead — make it deader.',
+    purpose: 'Fly the day-one certification: four statics, then the moving range — jeep, APC, supply truck and a caged hull — then ten practice bombs from the HERON. Warheads live, twelve kills to pass. No jamming today.',
     target: 'No enemy contact. The only thing that can kill you out here is your own flying.',
     intel: 'Instructor KAVUN runs the range. Listen to the feed; every line is paid for in someone else’s airframes.',
     result: 'FPV certification complete. The instructors sign the card: cleared for jammed airspace.',
@@ -122,10 +122,19 @@ export const CAMPAIGN_MISSIONS = [
   {
     node: 'GRADUATION',
     sitrep: 'Second day at the Dronarium. A captured jammer is live on the range, a target truck is running loops, and the HERON heavy bomber is fuelled. This is the last day of school.',
-    purpose: 'Kill through the jamming bubble by flying the low ground, take a moving vehicle with a kamikaze strike, then put gravity bombs on the siding from altitude.',
+    purpose: 'Repeat day one under live jamming: statics inside the bubble, movers chased through the static, then walk gravity bombs down a rolling supply train. Ten kills to graduate.',
     target: 'No enemy contact. The jammer is real, the static is real, the physics of a falling bomb are real.',
     intel: 'KAVUN: “The bubble reaches further the higher you fly. The gully is your corridor. The bomb leaves with your drift — lead the mover like you mean it.”',
     result: 'Graduation flight complete. The strike cell is certified: FPV, EW penetration, heavy payload.',
+    nextLead: 'NAP OF THE EARTH — the last module: terrain flying, close and low.',
+  },
+  {
+    node: 'NAP OF THE EARTH',
+    sitrep: 'Final module at the Dronarium. The instructors stop teaching indicators and start teaching the ground itself: the gully chain north of the pad, the windbreak lanes, and the switchback road between two live bubbles.',
+    purpose: 'Run the gully under the mast, weave the timber lanes for hidden vehicles, then chase three movers down the switchback with jamming pinching the road from both flanks. Nine kills, all below the rim.',
+    target: 'No enemy contact. The ground and the timber are the opposition.',
+    intel: 'KAVUN: “Below the rim the mast cannot see you. The lanes hide what the map cannot show. The road is a tunnel — fly it like one.”',
+    result: 'Nap-of-the-earth certification complete. The cell flies terrain like the veterans do.',
     nextLead: 'DEEP FENCE — take the drone war past the fields to the 37th’s echelon.',
   },
   {

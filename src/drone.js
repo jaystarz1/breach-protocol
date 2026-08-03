@@ -888,6 +888,11 @@ export class DroneController {
       <div class="fpv-link"></div>
       <div class="fpv-warn"></div>
       <canvas class="fpv-map"></canvas>
+      <div class="fpv-lesson">
+        <div class="fpv-lesson-title"></div>
+        <div class="fpv-lesson-body"></div>
+        <div class="fpv-lesson-key">FIRE TO CONTINUE</div>
+      </div>
       <div class="drone-result fpv-result"></div>
       <div class="fpv-help">${this.mode === 'bomber'
     ? 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP BOMB · N THERMAL'
@@ -913,6 +918,10 @@ export class DroneController {
       .fpv-link{position:absolute;right:6%;bottom:7%;text-align:right;white-space:pre}
       .fpv-warn{position:absolute;left:50%;top:63%;transform:translateX(-50%);color:#ffd8b0;font-size:18px;letter-spacing:3px;animation:fpvblink 0.6s steps(2) infinite}
       .fpv-map{position:absolute;right:6%;bottom:calc(7% + 92px);border:1px solid rgba(233,239,233,.4);background:rgba(6,8,6,.68);image-rendering:pixelated}
+      .fpv-lesson{position:absolute;left:50%;top:34%;transform:translateX(-50%);max-width:520px;padding:16px 20px;border:1px solid rgba(255,213,79,.75);background:rgba(8,10,8,.92);display:none}
+      .fpv-lesson-title{color:#ffd54f;letter-spacing:2px;margin-bottom:8px}
+      .fpv-lesson-body{font-weight:400;font-size:14px;line-height:1.5;color:#e9efe9;white-space:pre-line}
+      .fpv-lesson-key{margin-top:10px;font-size:11px;color:#ffd54f;letter-spacing:2px;animation:fpvblink 1s steps(2) infinite}
       .fpv-help{position:absolute;left:50%;bottom:2.5%;transform:translateX(-50%);font-size:11px;font-weight:400;letter-spacing:1px;white-space:nowrap;color:#c9d2c9}
       .fpv-result{position:absolute;left:50%;top:26%;transform:translateX(-50%);padding:9px 14px;border:1px solid rgba(233,239,233,.5);background:rgba(8,10,8,.78);letter-spacing:2px;opacity:0;transition:opacity .18s}
       @keyframes fpvblink{50%{opacity:0.15}}
@@ -939,6 +948,16 @@ export class DroneController {
     this.noiseCtx = this.noiseCanvas.getContext('2d');
     this.noiseClock = 0;
     this.buildFpvMap(definition);
+    // Flight-school lesson cards: the sim freezes, one card explains one indicator (the
+    // named OSD element glows, everything else dims), FIRE advances. Authored per
+    // objective as definition.lessons = [{title, body, highlight}].
+    this.lessonQueue = (definition.lessons || []).slice();
+    this.lessonActive = false;
+    this.lessonDelay = this.lessonQueue.length ? 1.4 : 0;
+    this.lessonCard = this.overlay.querySelector('.fpv-lesson');
+    this.lessonDim = ['.fpv-name', '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt',
+      '.fpv-link', '.fpv-map', '.fpv-help']
+      .map(sel => this.overlay.querySelector(sel)).filter(Boolean);
     // The analog cameras strike crews fly are colour-thin and contrast-hot.
     if (this.canvas) {
       this.canvas.style.filter = 'saturate(.62) contrast(1.14) brightness(.94)';
@@ -950,6 +969,40 @@ export class DroneController {
         if (!this.complete) this.result.style.opacity = '0';
       }, 2600);
     }
+  }
+
+  showLesson() {
+    const lesson = this.lessonQueue[0];
+    if (!lesson) return;
+    this.lessonActive = true;
+    this.lessonCard.querySelector('.fpv-lesson-title').textContent = lesson.title || '';
+    this.lessonCard.querySelector('.fpv-lesson-body').textContent = lesson.body || '';
+    this.lessonCard.style.display = 'block';
+    const target = lesson.highlight ? this.overlay.querySelector(lesson.highlight) : null;
+    for (const element of this.lessonDim) {
+      element.style.opacity = target && element !== target ? '0.22' : '1';
+      element.style.outline = element === target ? '2px solid #ffd54f' : '';
+      element.style.outlineOffset = element === target ? '4px' : '';
+    }
+  }
+
+  advanceLesson() {
+    this.lessonQueue.shift();
+    if (this.lessonQueue.length) {
+      this.showLesson();
+      return;
+    }
+    this.lessonActive = false;
+    this.lessonCard.style.display = 'none';
+    for (const element of this.lessonDim) {
+      element.style.opacity = '1';
+      element.style.outline = '';
+    }
+  }
+
+  // QA hook: burn through any pending cards so scripted runs are never frozen.
+  skipLessons() {
+    while (this.lessonQueue?.length) this.advanceLesson();
   }
 
   // The operator's map board, north-up in the corner of the goggles: terrain the brief
@@ -1095,6 +1148,19 @@ export class DroneController {
       this.updateEffects(dt);
       if (this.isFpvFamily) this.updateFpvOsd(dt);
       return;
+    }
+    // Flight-school freeze: the sim holds on the pad while a lesson card walks one
+    // indicator. FIRE advances; the whole world (battery, timer, vehicles) waits.
+    if (this.isFpvFamily && this.lessonQueue?.length) {
+      if (!this.lessonActive) {
+        this.lessonDelay -= dt;
+        if (this.lessonDelay <= 0) this.showLesson();
+      }
+      if (this.lessonActive) {
+        this.updateFpvOsd(0);
+        if (input.firePressed || input.breachPressed) this.advanceLesson();
+        return;
+      }
     }
     this.flightTime += dt;
     this.updateThermalBurst(dt, input);
