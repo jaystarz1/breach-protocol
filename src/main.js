@@ -35,8 +35,9 @@ import {
   nextCampaignMission,
 } from './campaign.js';
 import {
-  createDroneAssaultVehicle, DroneController, dronePrewarmGroup,
+  createDroneAssaultVehicle, DroneController, dronePrewarmGroup, setDroneTerrain,
 } from './drone.js';
+import { terrainSampler, terrainMin, buildTerrainMesh } from './terrain.js';
 import {
   authoredActorSockets,
   resolveActorVariant,
@@ -336,6 +337,11 @@ function startLevel(id) {
     scene.remove(oldDroneWarmup);
     oldDroneWarmup.userData.dispose?.();
   }
+  if (scene?.userData.terrain) {
+    scene.remove(scene.userData.terrain);
+    scene.userData.terrain.userData.dispose?.();
+    scene.userData.terrain = null;
+  }
   const loadId = ++levelLoadId;
   currentLevel = id;
   const L = LEVELS[id - 1];
@@ -363,6 +369,18 @@ function startLevel(id) {
   const indoor = !!L.nvg || L.id === 9;
   const bounds = levelBounds(geo);
   skyMesh = null;
+  // Real-DEM heightfield: the visible land plus the height sampler that every airborne
+  // system reads. Built before the backdrop so the plate can duck under the gullies.
+  let terrainSample = null;
+  let terrainFloor = -0.06;
+  if (L.terrainDef) {
+    terrainSample = terrainSampler(L.terrainDef);
+    terrainFloor = terrainMin(L.terrainDef) - 2.5;
+    const terrainMesh = buildTerrainMesh(L.terrainDef, terrainFloor);
+    scene.add(terrainMesh);
+    scene.userData.terrain = terrainMesh;
+  }
+  setDroneTerrain(terrainSample);
   if (!indoor) {
     skyMesh = skyDome(L.sky, L.fog[0], L.id * 7919, { rural: L.backdrop === 'rural' });
     scene.add(skyMesh);
@@ -370,7 +388,7 @@ function startLevel(id) {
     // was sized for city maps and ends short of a 2250m fog far over a kilometre-wide plain.
     const plateSize = L.backdrop === 'rural'
       ? Math.ceil((bounds.r + L.fog[2]) * 2) : 2400;
-    geo.push(...groundPlate(bounds.cx, bounds.cz, L.fog[0], plateSize));
+    geo.push(...groundPlate(bounds.cx, bounds.cz, L.fog[0], plateSize, terrainFloor));
     // Backdrop is decorative and non-solid, so it is appended AFTER bounds/shadow fitting:
     // a 300m ring of scenery must not blow out the shadow frustum it has no business in.
     // Farmland levels get treelines and hazed villages instead of a ring of city towers.

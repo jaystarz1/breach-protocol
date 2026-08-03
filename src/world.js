@@ -216,8 +216,8 @@ export function skyDome(skyHex, fogHex, seed, opts = {}) {
 // A level's own ground stops at its edge and beyond it you saw straight through to the
 // background colour. This plate runs past the far plane so the ground always meets the sky.
 // Top at -0.06: below every level's y=0 surface, so it cannot z-fight with any of them.
-export function groundPlate(cx, cz, color, size = 2400) {
-  return [box(cx, -0.06 - 40, cz, size, 80, size, color, false)];
+export function groundPlate(cx, cz, color, size = 2400, top = -0.06) {
+  return [box(cx, top - 40, cz, size, 80, size, color, false)];
 }
 
 // Buildings ringing the play area, placed to sit INSIDE the fog so they recede instead of
@@ -520,6 +520,12 @@ export function skyline(bounds, fogFar, seed, opts = {}) {
 export function ruralHorizon(bounds, fogFar, seed) {
   const geo = [];
   const R = rng(seed);
+  // Terrain levels lower the backdrop plate below the deepest gully, so every mass here
+  // extends down to -14: tops stay authored, bases always meet ground somewhere.
+  const sunk = (x, y, z, w, h, d, color, solid = false, emissive = false) => {
+    const top = y + h / 2;
+    return box(x, (top - 14) / 2, z, w, top + 14, d, color, solid, emissive);
+  };
   const inner = Math.max(bounds.r + 80, fogFar * 0.42);
   const outer = Math.max(inner + 200, fogFar * 0.88);
 
@@ -549,8 +555,8 @@ export function ruralHorizon(bounds, fogFar, seed) {
         const wood = new THREE.Color(0x2f4026)
           .multiplyScalar(fade * (0.85 + R() * 0.3)).getHex();
         geo.push(alongX
-          ? box(bx + off, h / 2, bz + jit, len, h, thick, wood)
-          : box(bx + jit, h / 2, bz + off, thick, h, len, wood));
+          ? sunk(bx + off, h / 2, bz + jit, len, h, thick, wood)
+          : sunk(bx + jit, h / 2, bz + off, thick, h, len, wood));
       }
     }
   }
@@ -569,7 +575,7 @@ export function ruralHorizon(bounds, fogFar, seed) {
       const hz = vz + (R() - 0.5) * 90;
       // Cottage scale, not block scale: too tall and the fogged silhouette is an office.
       const w = 6 + R() * 4, d = 5 + R() * 4, hh = 2.2 + R() * 1.4;
-      geo.push(box(hx, hh / 2, hz, w, hh, d, 0x2e2b28));
+      geo.push(sunk(hx, hh / 2, hz, w, hh, d, 0x2e2b28));
       // Roughly half the houses show one small warm window. This is the entire "there are
       // people out there" read; more than that and the cluster reads as an apartment row.
       if (R() < 0.55) {
@@ -579,7 +585,7 @@ export function ruralHorizon(bounds, fogFar, seed) {
       }
     }
     // A slim silo breaks the roofline so the cluster reads as a farm village.
-    geo.push(box(vx + (R() - 0.5) * 60, 4, vz + (R() - 0.5) * 60, 2.6, 8, 2.6, 0x3a3d40));
+    geo.push(sunk(vx + (R() - 0.5) * 60, 4, vz + (R() - 0.5) * 60, 2.6, 8, 2.6, 0x3a3d40));
     // One yard light on a pole.
     geo.push(box(vx + (R() - 0.5) * 40, 4.4, vz + (R() - 0.5) * 40, 0.6, 0.6, 0.6,
       0xe8b46a, false, true));
@@ -589,7 +595,7 @@ export function ruralHorizon(bounds, fogFar, seed) {
   const ma = baseBearing + 0.7;
   const mx = bounds.cx + Math.cos(ma) * inner * 1.15;
   const mz = bounds.cz + Math.sin(ma) * inner * 1.15;
-  geo.push(box(mx, 24, mz, 1.4, 48, 1.4, 0x2c2f31));
+  geo.push(sunk(mx, 24, mz, 1.4, 48, 1.4, 0x2c2f31));
   geo.push(box(mx, 48.8, mz, 1.1, 1.1, 1.1, 0xff4034, false, true));
 
   // Lone farmsteads between the villages: single lights in the dark, nothing else.
@@ -598,7 +604,7 @@ export function ruralHorizon(bounds, fogFar, seed) {
     const rr = inner * (1.0 + R() * 0.35);
     const fx = bounds.cx + Math.cos(a) * rr;
     const fz = bounds.cz + Math.sin(a) * rr;
-    geo.push(box(fx, 1.5, fz, 8, 3, 6, 0x2c2a27));
+    geo.push(sunk(fx, 1.5, fz, 8, 3, 6, 0x2c2a27));
     geo.push(box(fx + 3, 1.3, fz + 3.4, 0.9, 0.7, 0.3, 0xcf8a3a, false, true));
   }
   return geo;

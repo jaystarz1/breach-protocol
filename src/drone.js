@@ -6,6 +6,13 @@ import {
 const MAX_RANGE = 95;
 const MAX_SPEED = 16;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
+
+// Heightfield sampler for terrain levels, set by main on level start (null elsewhere).
+// Everything airborne reads it: flight floor, vehicle ground-follow, munition impact,
+// and jammer line-of-sight. Sampling the grid replaces raycasting a mesh.
+let droneTerrain = null;
+export function setDroneTerrain(sampler) { droneTerrain = sampler; }
+export function droneTerrainHeight(x, z) { return droneTerrain ? droneTerrain(x, z) : 0; }
 const THERMAL_BURST_SECONDS = 3;
 const THERMAL_RECHARGE_SECONDS = 5;
 const DRONE_MUNITION_GEO = new THREE.SphereGeometry(0.12, 10, 7);
@@ -485,11 +492,14 @@ function strikeTargetModel(target) {
 
 export function createDroneAssaultVehicle(scene, definition = {}) {
   const pos = new THREE.Vector3(...(definition.pos || [0, 0, 0]));
+  // On a heightfield level the authored y is an offset above the sampled surface.
+  pos.y += droneTerrain ? droneTerrain(pos.x, pos.z) : 0;
   const mesh = strikeTargetModel({
     pos, kind: definition.kind || 'technical', yaw: definition.yaw || 0,
   });
   mesh.name = 'drone-assault-technical';
   scene.add(mesh);
+  mesh.position.copy(pos);
   const vehicle = {
     pos,
     mesh,
@@ -533,7 +543,9 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
         this.mesh.rotation.y = Math.atan2(dz, -dx);
       }
       const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.2, this.pos.y + 2);
-      if (ground !== -Infinity) this.pos.y = ground;
+      const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : -Infinity;
+      const surface = Math.max(ground, terrainY);
+      if (surface !== -Infinity) this.pos.y = surface;
       this.mesh.position.copy(this.pos);
       this.mesh.position.y += 0.02;
     },
@@ -980,6 +992,19 @@ export class DroneController {
     }
     ctx.fillStyle = 'rgba(16,19,13,0.97)';
     ctx.fillRect(xOff, 0, opW, H);
+    // Hypsometric underlay from the real DEM: gully bottoms dark, rises pale. This is the
+    // relief the pilot plans ingress around, so it sits under every other feature.
+    if (droneTerrain) {
+      for (let py = 0; py < H; py += 2) {
+        for (let px = Math.floor(xOff); px < xOff + opW; px += 2) {
+          const wx = x1 + (px - xOff) / scale;
+          const wz = zN + py / scale;
+          const t = Math.max(0, Math.min(1, (droneTerrain(wx, wz) + 6) / 21));
+          ctx.fillStyle = `rgb(${Math.round(40 + t * 49)},${Math.round(44 + t * 40)},${Math.round(33 + t * 27)})`;
+          ctx.fillRect(px, py, 2, 2);
+        }
+      }
+    }
     ctx.strokeStyle = 'rgba(233,239,233,0.4)';
     ctx.setLineDash([4, 3]);
     ctx.strokeRect(xOff, 0.5, opW, H - 1);
@@ -1113,23 +1138,45 @@ export class DroneController {
       } else this.vel.multiplyScalar(-0.18);
     }
     const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.12, this.pos.y + 1);
-    const floor = (ground === -Infinity ? 0 : ground) + 0.65;
+    const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : 0;
+    // Without terrain the old flat-world datum (0) stands in; with it, the gully floor is
+    // genuinely below datum and the drone may descend into it.
+    const solidTop = ground === -Infinity ? (droneTerrain ? -1e9 : 0) : ground;
+    const floor = Math.max(solidTop, terrainY) + 0.65;
     if (this.mode === 'fpv' && this.armTimer <= 0 && this.pos.y <= floor && this.vel.y < -2.2) {
       this.fpvDetonate(this.pos.clone().setY(floor - 0.4));
       return;
     }
-    this.pos.y = Math.max(floor, Math.min(this.ceiling, this.pos.y));
+    // Ceiling rides the ground under the aircraft: service height is above terrain, so a
+    // rise does not silently eat the drone's working band.
+    this.pos.y = Math.max(floor, Math.min(this.ceiling + Math.max(0, terrainY), this.pos.y));
 
     const fromLaunch = this.pos.distanceTo(this.launch);
     const base = Math.max(0, Math.min(1, 1 - fromLaunch / this.maxRange));
     // Jammer bubbles. Radius grows with altitude: high and straight is line-of-sight to the
     // jammer, low along the treeline is terrain masking — the doctrine the mission teaches.
     this.jamFactor = 1;
+    const droneAgl = this.pos.y - terrainY;
     for (const jammer of this.jammers) {
-      const reach = jammer.r * (0.55 + 0.45 * Math.min(1, this.pos.y / 40));
+      const reach = jammer.r * (0.55 + 0.45 * Math.min(1, Math.max(0, droneAgl) / 40));
       const d = Math.hypot(this.pos.x - jammer.x, this.pos.z - jammer.z);
       if (d < reach) {
-        this.jamFactor = Math.min(this.jamFactor, Math.pow(Math.max(0, d / reach), 1.4));
+        let factor = Math.pow(Math.max(0, d / reach), 1.4);
+        // Real terrain masking: if a ridge stands between the airframe and the jammer
+        // mast, most of the jamming energy never arrives. Flying the gully IS the counter.
+        if (droneTerrain && d > 24) {
+          const mastY = droneTerrain(jammer.x, jammer.z) + 7;
+          for (let s = 1; s < 10; s++) {
+            const t = s / 10;
+            const ly = this.pos.y + (mastY - this.pos.y) * t;
+            if (droneTerrain(this.pos.x + (jammer.x - this.pos.x) * t,
+              this.pos.z + (jammer.z - this.pos.z) * t) > ly + 1.2) {
+              factor = Math.max(factor, 0.72);
+              break;
+            }
+          }
+        }
+        this.jamFactor = Math.min(this.jamFactor, factor);
       }
     }
     this.signal = base * this.jamFactor;
@@ -1854,9 +1901,12 @@ export class DroneController {
         munition.mesh.position.addScaledVector(munition.velocity, dt);
         munition.mesh.rotation.x += dt * 10;
         munition.mesh.rotation.z += dt * 7;
-        const ground = groundHeight(
+        const solidGround = groundHeight(
           solids, munition.mesh.position.x, munition.mesh.position.z,
           0.08, munition.mesh.position.y + 0.35);
+        const ground = droneTerrain
+          ? Math.max(solidGround, droneTerrain(munition.mesh.position.x, munition.mesh.position.z))
+          : solidGround;
         const impact = hitDistance <= travel + 0.04
           || (ground !== -Infinity && munition.mesh.position.y <= ground + 0.11)
           || munition.fuse <= 0;

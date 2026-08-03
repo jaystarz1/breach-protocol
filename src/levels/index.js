@@ -3,6 +3,8 @@ import {
 } from '../levelgen.js';
 import { quality } from '../quality.js';
 import { streetShopLayout } from '../mission-variants.js';
+import { terrainSampler } from '../terrain.js';
+import { DEEP_FENCE_TERRAIN } from './terrain-deep-fence.js';
 import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
@@ -1976,6 +1978,7 @@ export const LEVELS = [
     cameraFar: 2600,
     sky: 0x2b2733, fog: [0x35303c, 500, 2250], ambient: 0.8, sun: 0.85,
     backdrop: 'rural',
+    terrainDef: DEEP_FENCE_TERRAIN,
     // The operator's map board: drawn on the FPV OSD, north-up. Coordinates are world
     // units; the drawer scales into the corner canvas. The briefs say "west road" and
     // "kolkhoz" — this is what makes those words mean something in the goggles.
@@ -2005,23 +2008,32 @@ export const LEVELS = [
     geo: () => {
       const g = [];
       const r = rng(1101);
-      // One continuous field plain. floorSlab keeps it a real solid for ground checks.
-      g.push(...floorSlab(0, -480, 920, 2040, 0, 1, 0x4a4636));
-      // Crop-strip patches: alternating tones so kilometres of plain read as farmland, and
-      // so the pilot can navigate by field boundaries the way real FPV crews do.
-      const strips = [0x51502f, 0x474a30, 0x555037, 0x424636, 0x4e4b2e];
-      let sz = 380;
-      let stripIndex = 0;
-      while (sz > -1420) {
-        const depth = 90 + r() * 130;
-        g.push([r() * 120 - 60, 0.06, sz - depth / 2, 820, 0.1,
-          depth - 14, strips[stripIndex++ % strips.length], false]);
-        sz -= depth;
-      }
-      // Main supply road north, and the east-west road the tank patrols.
-      g.push([-6, 0.1, -480, 8, 0.1, 1960, 0x3b3833, false]);
-      g.push([-20, 0.1, -700, 320, 0.1, 9, 0x3b3833, false]);
-      g.push([150, 0.1, -1030, 9, 0.1, 660, 0x3b3833, false]);
+      const th = terrainSampler(DEEP_FENCE_TERRAIN);
+      // The ground itself is the real-DEM heightfield mesh (built by startLevel from
+      // L.terrainDef); crop strips live in its vertex colours. What remains here is a
+      // small solid pad under the OP so the operator has a floor to stand on.
+      g.push(...floorSlab(0, 462, 40, 32, th(0, 462), 1, 0x4a4636));
+      // Roads follow the graded corridors stamped into the DEM: short draped segments,
+      // each sitting on the sampled surface, instead of one impossible kilometre slab.
+      const road = (x1, z1, x2, z2, width) => {
+        const length = Math.hypot(x2 - x1, z2 - z1);
+        const steps = Math.max(2, Math.round(length / 34));
+        for (let i = 0; i < steps; i++) {
+          const t0 = i / steps, t1 = (i + 1) / steps;
+          const ax = x1 + (x2 - x1) * t0, az = z1 + (z2 - z1) * t0;
+          const bx = x1 + (x2 - x1) * t1, bz = z1 + (z2 - z1) * t1;
+          const cx = (ax + bx) / 2, cz = (az + bz) / 2;
+          const y = Math.max(th(ax, az), th(cx, cz), th(bx, bz)) + 0.07;
+          g.push([cx, y, cz,
+            Math.abs(bx - ax) + (Math.abs(bx - ax) < 1 ? width : 1.2),
+            0.12,
+            Math.abs(bz - az) + (Math.abs(bz - az) < 1 ? width : 1.2),
+            0x3b3833, false]);
+        }
+      };
+      road(-6, 500, -6, -1460, 8);
+      road(-180, -700, 140, -700, 9);
+      road(150, -700, 150, -1360, 9);
       // A tree: SOLID trunk and a tapered three-tier canopy, lighter toward the sunlit
       // crown, with the upper tiers jittered off-axis so a row never reads as a picket of
       // identical shapes. Still SOLID throughout: clipping a windbreak at 60 km/h is how
@@ -2033,7 +2045,8 @@ export const LEVELS = [
       ];
       const tree = (x, z, s = 1) => {
         const tones = canopyTones[Math.floor(r() * canopyTones.length)];
-        g.push([x, 0.9 * s, z, 0.38 * s, 1.8 * s, 0.38 * s, 0x453727]);
+        const ty = th(x, z);
+        g.push([x, ty + 0.9 * s, z, 0.38 * s, 1.8 * s, 0.38 * s, 0x453727]);
         // Four heavily-overlapped tiers approximate a rounded crown; distinct steps with
         // clean gaps read as a stack of slabs, which is the hammer problem all over again.
         const tiers = [
@@ -2043,7 +2056,7 @@ export const LEVELS = [
           [1.1, 5.0, 1.2, 2],
         ];
         for (const [w, y, h, tone] of tiers) {
-          g.push([x + (r() - 0.5) * 0.55 * s, y * s, z + (r() - 0.5) * 0.55 * s,
+          g.push([x + (r() - 0.5) * 0.55 * s, ty + y * s, z + (r() - 0.5) * 0.55 * s,
             w * s, h * s, w * s, tones[tone]]);
         }
       };
@@ -2072,10 +2085,12 @@ export const LEVELS = [
       treeRow(-84, -430, -80, -880, 17);
       treeRow(62, -560, 58, -1000, 17);
       treeRow(-330, -1150, -30, -1146, 17);
-      // Village at the crossroads: the first jammer lives here.
+      // Village at the crossroads: the first jammer lives here. Settlement footprints are
+      // stamped flat in the DEM, so each building sits on its local sampled height.
       const house = (x, z, w, d, h, col) => {
-        g.push([x, h / 2, z, w, h, d, col]);
-        g.push([x, h + 0.35, z, w + 0.8, 0.7, d + 0.8, 0x33302c]);
+        const ty = th(x, z);
+        g.push([x, ty + h / 2, z, w, h, d, col]);
+        g.push([x, ty + h + 0.35, z, w + 0.8, 0.7, d + 0.8, 0x33302c]);
       };
       house(-52, -498, 10, 8, 3.4, 0x5d5548);
       house(-34, -540, 12, 9, 3.8, 0x555c4e);
@@ -2083,34 +2098,41 @@ export const LEVELS = [
       house(14, -502, 11, 8, 3.6, 0x605646);
       house(30, -544, 10, 9, 3.4, 0x555c4e);
       house(4, -556, 9, 7, 3.1, 0x5d5548);
-      g.push([-11, 2.6, -524, 1.1, 5.2, 1.1, 0x3a3f3a]);   // the jammer mast
-      g.push([-11, 5.5, -524, 2.4, 0.5, 0.6, 0x2c3130]);
+      const jy = th(-11, -524);
+      g.push([-11, jy + 2.6, -524, 1.1, 5.2, 1.1, 0x3a3f3a]);   // the jammer mast
+      g.push([-11, jy + 5.5, -524, 2.4, 0.5, 0.6, 0x2c3130]);
       // The kolkhoz: barn, house and a walled yard the BTR crawls around.
       house(128, -1042, 16, 11, 5.2, 0x59503f);
       house(158, -1008, 10, 8, 3.5, 0x5d5548);
-      g.push(...wall(96, -1072, 172, -1072, 2.2, 0x4c463a));
-      g.push(...wall(96, -988, 96, -1072, 2.2, 0x4c463a));
-      // Rail line east: two rails on a ballast bed, a parked box wagon pair, the siding.
-      g.push([330, 0.25, -860, 8, 0.5, 1250, 0x3f3b34]);
-      g.push([327.4, 0.61, -860, 0.5, 0.22, 1250, 0x50524f, false]);
-      g.push([332.6, 0.61, -860, 0.5, 0.22, 1250, 0x50524f, false]);
-      g.push([330, 1.8, -1130, 3.2, 2.6, 11, 0x4a423a]);
-      g.push([330, 1.8, -1108, 3.2, 2.6, 11, 0x45483e]);
+      g.push(...lift(wall(96, -1072, 172, -1072, 2.2, 0x4c463a), th(134, -1072)));
+      g.push(...lift(wall(96, -988, 96, -1072, 2.2, 0x4c463a), th(96, -1030)));
+      // Rail line east on its graded corridor: draped ballast/rail segments, box wagons.
+      for (let rz = -235; rz > -1420; rz -= 55) {
+        const mz = rz - 27.5;
+        const ry = th(330, mz);
+        g.push([330, ry + 0.25, mz, 8, 0.5, 56, 0x3f3b34]);
+        g.push([327.4, ry + 0.61, mz, 0.5, 0.22, 56, 0x50524f, false]);
+        g.push([332.6, ry + 0.61, mz, 0.5, 0.22, 56, 0x50524f, false]);
+      }
+      g.push([330, th(330, -1130) + 1.8, -1130, 3.2, 2.6, 11, 0x4a423a]);
+      g.push([330, th(330, -1108) + 1.8, -1108, 3.2, 2.6, 11, 0x45483e]);
       // The operator's OP: trench cut, sandbag lip, work table, antenna mast, camo net.
-      g.push(...floorSlab(0, 462, 26, 14, 0.02, 0.5, 0x413d31));
-      g.push(...sandbags(-6, 452, 6, 2, false, 71), ...sandbags(7, 452, 5, 2, false, 72));
-      g.push(...table(-3, 461, 2.6, 1.1, 0x554a38), ...table(3.4, 461, 1.8, 1.0, 0x4c4234));
-      g.push(...crate(8, 464), ...crate(-8.5, 464, 0, 0.85), ...crate(-7.6, 465.1, 0.85, 0.7));
-      g.push([12, 4.2, 458, 0.5, 8.4, 0.5, 0x3a3f3a]);
-      g.push([12, 8.6, 458, 3.4, 0.4, 0.5, 0x2c3130]);
-      g.push([0, 4.4, 460, 30, 0.18, 16, 0x36402e, false]);   // camo net canopy
+      // The OP footprint is stamped flat at the datum, so these sit on their old heights.
+      const oy = th(0, 462);
+      g.push(...lift(floorSlab(0, 462, 26, 14, 0.02, 0.5, 0x413d31), oy));
+      g.push(...lift([...sandbags(-6, 452, 6, 2, false, 71), ...sandbags(7, 452, 5, 2, false, 72)], oy));
+      g.push(...lift([...table(-3, 461, 2.6, 1.1, 0x554a38), ...table(3.4, 461, 1.8, 1.0, 0x4c4234)], oy));
+      g.push(...lift([...crate(8, 464), ...crate(-8.5, 464, 0, 0.85), ...crate(-7.6, 465.1, 0.85, 0.7)], oy));
+      g.push([12, oy + 4.2, 458, 0.5, 8.4, 0.5, 0x3a3f3a]);
+      g.push([12, oy + 8.6, 458, 3.4, 0.4, 0.5, 0x2c3130]);
+      g.push([0, oy + 4.4, 460, 30, 0.18, 16, 0x36402e, false]);   // camo net canopy
       for (const [px, pz] of [[-14, 454], [14, 466], [-14, 466], [14, 454]]) {
-        g.push([px, 2.2, pz, 0.22, 4.4, 0.22, 0x453727, false]);
+        g.push([px, oy + 2.2, pz, 0.22, 4.4, 0.22, 0x453727, false]);
       }
       // Power line following the supply road — the landmark home when the OSD arrow is
-      // all that survives the static.
+      // all that survives the static. Each run rides the road corridor's graded height.
       for (let pz = 420; pz > -1400; pz -= 210) {
-        g.push(...poleWire(-16, pz, -16, pz - 210, 7.2, 6));
+        g.push(...lift(poleWire(-16, pz, -16, pz - 210, 7.2, 6), th(-16, pz - 105)));
       }
       return g;
     },
