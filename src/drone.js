@@ -891,7 +891,7 @@ export class DroneController {
       <div class="fpv-lesson">
         <div class="fpv-lesson-title"></div>
         <div class="fpv-lesson-body"></div>
-        <div class="fpv-lesson-key">FIRE TO CONTINUE</div>
+        <div class="fpv-lesson-key">FIRE — NEXT · R — SKIP ALL</div>
       </div>
       <div class="drone-result fpv-result"></div>
       <div class="fpv-help">${this.mode === 'bomber'
@@ -951,7 +951,16 @@ export class DroneController {
     // Flight-school lesson cards: the sim freezes, one card explains one indicator (the
     // named OSD element glows, everything else dims), FIRE advances. Authored per
     // objective as definition.lessons = [{title, body, highlight}].
-    this.lessonQueue = (definition.lessons || []).slice();
+    // A card set only teaches once: after it has been sat through (or skipped with R),
+    // retries and replays go straight to the range. Persisted per set in localStorage.
+    const lessons = definition.lessons || [];
+    this.lessonKey = lessons.length
+      ? 'bp-lessons:' + lessons.map(l => l.title).join('/') : null;
+    let lessonsSeen = false;
+    try {
+      lessonsSeen = !!(this.lessonKey && localStorage.getItem(this.lessonKey));
+    } catch { lessonsSeen = false; }
+    this.lessonQueue = lessonsSeen ? [] : lessons.slice();
     this.lessonActive = false;
     this.lessonDelay = this.lessonQueue.length ? 1.4 : 0;
     this.lessonCard = this.overlay.querySelector('.fpv-lesson');
@@ -994,10 +1003,16 @@ export class DroneController {
     }
     this.lessonActive = false;
     this.lessonCard.style.display = 'none';
+    this.markLessonsSeen();
     for (const element of this.lessonDim) {
       element.style.opacity = '1';
       element.style.outline = '';
     }
+  }
+
+  markLessonsSeen() {
+    if (!this.lessonKey) return;
+    try { localStorage.setItem(this.lessonKey, '1'); } catch { /* storage unavailable */ }
   }
 
   // QA hook: burn through any pending cards so scripted runs are never frozen.
@@ -1091,6 +1106,21 @@ export class DroneController {
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+    // Authored training route: the flagged low line down the gully, dashed amber. Only
+    // levels that stake flags on the ground declare it — the map matches the terrain.
+    if (def.route?.length > 1) {
+      ctx.strokeStyle = 'rgba(255,179,71,0.8)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      def.route.forEach(([rx, rz], i) => {
+        const [mx, mz] = this.mapPoint(rx, rz);
+        if (i === 0) ctx.moveTo(mx, mz);
+        else ctx.lineTo(mx, mz);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // The target is NOT tracked live: intel gives a search box, the pilot does the finding.
     // Box is the bounding area of the briefed patrol route (or parked position), padded.
     if (this.combatVehicles.length) {
@@ -1158,7 +1188,8 @@ export class DroneController {
       }
       if (this.lessonActive) {
         this.updateFpvOsd(0);
-        if (input.firePressed || input.breachPressed) this.advanceLesson();
+        if (input.reloadPressed) this.skipLessons();
+        else if (input.firePressed || input.breachPressed) this.advanceLesson();
         return;
       }
     }

@@ -2445,6 +2445,7 @@ export const LEVELS = [
         [-210, 428, -16, 430], [14, 430, 210, 428],
         [-280, 320, -80, 320], [-280, 280, -80, 280], [-280, 240, -80, 240],
       ],
+      route: [[6, 448], [60, 380], [40, 280], [20, 160]],
       places: [],
     },
     start: [0, 0, 462, 0],
@@ -2503,6 +2504,29 @@ export const LEVELS = [
       treeRow(-280, 320, -80, 320, 13);
       treeRow(-280, 280, -80, 280, 13);
       treeRow(-280, 240, -80, 240, 13);
+      // Training flags: amber pennants staked down the gully floor from the pad to the
+      // mast generator. Each stake snaps to the lowest ground in a lateral window, so the
+      // line traces the real low route, not the straight line between waypoints.
+      const flagRoute = [[6, 448], [60, 380], [40, 280], [20, 160]];
+      for (let s = 0; s < flagRoute.length - 1; s++) {
+        const [ax, az] = flagRoute[s];
+        const [bx, bz] = flagRoute[s + 1];
+        const segLength = Math.hypot(bx - ax, bz - az);
+        const px = -(bz - az) / segLength, pz = (bx - ax) / segLength;
+        const n = Math.max(1, Math.round(segLength / 30));
+        for (let i = s === 0 ? 0 : 1; i <= n; i++) {
+          const t = i / n;
+          let fx = ax + (bx - ax) * t, fz = az + (bz - az) * t, fy = th(fx, fz);
+          for (let o = -14; o <= 14; o += 3.5) {
+            const sx = ax + (bx - ax) * t + px * o;
+            const sz = az + (bz - az) * t + pz * o;
+            const sy = th(sx, sz);
+            if (sy < fy) { fx = sx; fz = sz; fy = sy; }
+          }
+          g.push([fx, fy + 1.9, fz, 0.18, 3.8, 0.18, 0x8a8474, false]);
+          g.push([fx + 0.8, fy + 3.42, fz, 1.6, 0.85, 0.08, 0xffb347, false, true]);
+        }
+      }
       // Jammer masts: one at the mouth of the gully chain, two flanking the switchback.
       for (const [jx, jz] of [[0, 60], [-150, -120], [90, -260]]) {
         const jy = th(jx, jz);
@@ -2537,7 +2561,7 @@ export const LEVELS = [
           lessons: [
             {
               title: 'NAP OF THE EARTH', highlight: '.fpv-map',
-              body: 'A real gully chain runs north from the pad — dark on the map board. The jammer mast stands at its mouth. Below the rim, the walls block the mast’s line of sight and the static stays thin. Over the rim, the bubble owns you.\n\nFly the low ground the whole way. The gully IS the route.',
+              body: 'A real gully chain runs north from the pad — dark on the map board. The jammer mast stands at its mouth. Below the rim, the walls block the mast’s line of sight and the static stays thin. Over the rim, the bubble owns you.\n\nAmber training flags stake the low line from the pad to the mast, and the same route is dashed amber on the map board. Follow the flags and you are flying it right.',
             },
           ],
           vehicles: [
@@ -2551,7 +2575,7 @@ export const LEVELS = [
               killMessage: 'KAVUN — YOU CRAWLED INTO ITS SHADOW AND KILLED ITS POWER. TEXTBOOK.',
             },
           ],
-          startMessage: 'KAVUN — LAST MODULE: TERRAIN FLYING. THE GULLY RUNS NORTH, THE MAST WAITS AT ITS MOUTH. STAY BELOW THE RIM.',
+          startMessage: 'KAVUN — LAST MODULE: TERRAIN FLYING. THE GULLY RUNS NORTH, THE MAST WAITS AT ITS MOUTH. FOLLOW THE FLAGS, STAY BELOW THE RIM.',
           result: 'GULLY CHAIN RUN — THE WALLS KEPT THE LINK ALIVE',
           handoffMessage: 'NEXT AIRFRAME UP — THE WEAVE',
         },

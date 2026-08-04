@@ -135,6 +135,15 @@ def main():
         debrief11 = page.evaluate(
             "() => ({ won: BP.world.won, kills: BP.world.stats.kills })")
 
+        # Lessons must not replay: the set was completed (skipped counts), so a retry of
+        # the level goes straight to the range with an empty queue — no skipLessons here.
+        page.evaluate("(id) => BP.startLevel(id)", 11)
+        page.wait_for_function(
+            "() => BP.mode === 'playing' && BP.world?.level?.id === 11"
+            " && !!BP.world.drone?.active")
+        replay_cards = page.evaluate(
+            "() => (BP.world.drone.lessonQueue || []).length")
+
         # ---------------- Level 12: GRADUATION ----------------
         start_level(page, 12)
         # The bubble must actually jam: park high inside it and read the signal.
@@ -176,8 +185,8 @@ def main():
             "() => ({ won: BP.world.won, kills: BP.world.stats.kills })")
 
         result = {
-            "dronarium": {"lessonCards": lessons, "afterFront": after_front,
-                          "debrief": debrief11},
+            "dronarium": {"lessonCards": lessons, "replayCards": replay_cards,
+                          "afterFront": after_front, "debrief": debrief11},
             "graduation": {"jamSignalHighInBubble": jam, "jammedMovers": movers,
                            "trainCars": train, "debrief": debrief12},
             "napOfTheEarth": {"gullyTargetHeights": gully, "roadMovers": road_movers,
@@ -186,6 +195,7 @@ def main():
         }
         print(json.dumps(result, indent=2))
         assert lessons == 0, result            # skipLessons must have drained the queue
+        assert replay_cards == 0, result       # a seen card set never replays on retry
         assert after_front["dead"] is False, result
         assert after_front["health"] < 500, result
         assert debrief11["won"] is True, result
