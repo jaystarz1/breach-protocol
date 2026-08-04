@@ -37,7 +37,7 @@ import {
 import {
   createDroneAssaultVehicle, DroneController, dronePrewarmGroup, setDroneTerrain,
 } from './drone.js';
-import { terrainSampler, terrainMin, buildTerrainMesh, buildTerrainApron } from './terrain.js';
+import { terrainSampler, terrainMin, buildTerrainMesh, buildTerrainApron, buildRoadRibbons } from './terrain.js';
 import {
   authoredActorSockets,
   resolveActorVariant,
@@ -380,6 +380,8 @@ function startLevel(id) {
     terrainGroup.add(buildTerrainMesh(L.terrainDef, terrainFloor));
     // Rolling fields to the fog line: the world must never show the bare plate.
     terrainGroup.add(buildTerrainApron(L.terrainDef));
+    // Roads are ribbons draped onto the sampled surface, not boxes floating over it.
+    if (L.roadPaint) terrainGroup.add(buildRoadRibbons(L.terrainDef, L.roadPaint));
     terrainGroup.userData.dispose = () => {
       for (const child of terrainGroup.children) child.userData.dispose?.();
     };

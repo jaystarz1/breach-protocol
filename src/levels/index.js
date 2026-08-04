@@ -1970,6 +1970,11 @@ export const LEVELS = [
   // and the cage, then the bomber. Twelve kills, everything close to the pad.
   {
     id: 11, name: 'DRONARIUM',
+    roadPaint: [
+      { points: [[-6, 500], [-6, -520]], width: 8 },
+      { points: [[-160, 150], [160, 150]], width: 8 },
+      { points: [[40, 112], [240, 112]], width: 7 },
+    ],
     brief: 'Day one at the Dronarium, warheads live: four static hulls, a moving range of jeeps, trucks and APCs plus a caged hull, then ten practice bombs from the HERON. Twelve kills to pass. Instructor KAVUN is on the feed.',
     weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
     lockPlayer: true,
@@ -1994,23 +1999,6 @@ export const LEVELS = [
       const r = rng(1103);
       const th = terrainSampler(DEEP_FENCE_TERRAIN);
       g.push(...floorSlab(0, 462, 40, 32, th(0, 462), 1, 0x4a4636));
-      const road = (x1, z1, x2, z2, width) => {
-        const length = Math.hypot(x2 - x1, z2 - z1);
-        const steps = Math.max(2, Math.round(length / 34));
-        for (let i = 0; i < steps; i++) {
-          const t0 = i / steps, t1 = (i + 1) / steps;
-          const ax = x1 + (x2 - x1) * t0, az = z1 + (z2 - z1) * t0;
-          const bx = x1 + (x2 - x1) * t1, bz = z1 + (z2 - z1) * t1;
-          const cx = (ax + bx) / 2, cz = (az + bz) / 2;
-          const y = Math.max(th(ax, az), th(cx, cz), th(bx, bz)) + 0.07;
-          g.push([cx, y, cz,
-            Math.abs(bx - ax) + (Math.abs(bx - ax) < 1 ? width : 1.2), 0.12,
-            Math.abs(bz - az) + (Math.abs(bz - az) < 1 ? width : 1.2), 0x3b3833, false]);
-        }
-      };
-      road(-6, 500, -6, -520, 8);
-      road(-160, 150, 160, 150, 8);
-      road(40, 112, 240, 112, 7);
       const canopyTones = [
         [0x293c20, 0x334a28, 0x415c31],
         [0x263a1e, 0x2f4426, 0x3c522c],
@@ -2212,6 +2200,11 @@ export const LEVELS = [
   // bubble, movers through the static, then the bomber against a rolling supply train.
   {
     id: 12, name: 'GRADUATION',
+    roadPaint: [
+      { points: [[-6, 500], [-6, -520]], width: 8 },
+      { points: [[-150, -260], [150, -260]], width: 8 },
+      { points: [[-150, -330], [150, -330]], width: 8 },
+    ],
     brief: 'Last day at the Dronarium and the captured jammer is live. Kill the statics inside the bubble by flying the low ground, chase movers through the static, then walk bombs down a rolling supply train. Ten kills to graduate.',
     weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
     lockPlayer: true,
@@ -2236,23 +2229,6 @@ export const LEVELS = [
       const r = rng(1104);
       const th = terrainSampler(DEEP_FENCE_TERRAIN);
       g.push(...floorSlab(0, 462, 40, 32, th(0, 462), 1, 0x4a4636));
-      const road = (x1, z1, x2, z2, width) => {
-        const length = Math.hypot(x2 - x1, z2 - z1);
-        const steps = Math.max(2, Math.round(length / 34));
-        for (let i = 0; i < steps; i++) {
-          const t0 = i / steps, t1 = (i + 1) / steps;
-          const ax = x1 + (x2 - x1) * t0, az = z1 + (z2 - z1) * t0;
-          const bx = x1 + (x2 - x1) * t1, bz = z1 + (z2 - z1) * t1;
-          const cx = (ax + bx) / 2, cz = (az + bz) / 2;
-          const y = Math.max(th(ax, az), th(cx, cz), th(bx, bz)) + 0.07;
-          g.push([cx, y, cz,
-            Math.abs(bx - ax) + (Math.abs(bx - ax) < 1 ? width : 1.2), 0.12,
-            Math.abs(bz - az) + (Math.abs(bz - az) < 1 ? width : 1.2), 0x3b3833, false]);
-        }
-      };
-      road(-6, 500, -6, -520, 8);
-      road(-150, -260, 150, -260, 8);
-      road(-150, -330, 150, -330, 8);
       const canopyTones = [
         [0x293c20, 0x334a28, 0x415c31],
         [0x263a1e, 0x2f4426, 0x3c522c],
@@ -2427,6 +2403,12 @@ export const LEVELS = [
   // hide targets behind solid timber, and a switchback road is chased under flanking EW.
   {
     id: 13, name: 'NAP OF THE EARTH',
+    roadPaint: [
+      {
+        points: [[-6, 500], [-6, -40], [-80, -40], [-80, -200], [20, -200], [20, -360]],
+        width: 7.5,
+      },
+    ],
     brief: 'Close-in tactical flying: run the gully chain under a live jammer, weave the windbreak lanes for hidden trucks, then chase three movers down the switchback road between two bubbles. Nine kills, all of them low.',
     weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
     lockPlayer: true,
@@ -2454,26 +2436,6 @@ export const LEVELS = [
       const r = rng(1105);
       const th = terrainSampler(DEEP_FENCE_TERRAIN);
       g.push(...floorSlab(0, 462, 40, 32, th(0, 462), 1, 0x4a4636));
-      const road = (x1, z1, x2, z2, width) => {
-        const length = Math.hypot(x2 - x1, z2 - z1);
-        const steps = Math.max(2, Math.round(length / 34));
-        for (let i = 0; i < steps; i++) {
-          const t0 = i / steps, t1 = (i + 1) / steps;
-          const ax = x1 + (x2 - x1) * t0, az = z1 + (z2 - z1) * t0;
-          const bx = x1 + (x2 - x1) * t1, bz = z1 + (z2 - z1) * t1;
-          const cx = (ax + bx) / 2, cz = (az + bz) / 2;
-          const y = Math.max(th(ax, az), th(cx, cz), th(bx, bz)) + 0.07;
-          g.push([cx, y, cz,
-            Math.abs(bx - ax) + (Math.abs(bx - ax) < 1 ? width : 1.2), 0.12,
-            Math.abs(bz - az) + (Math.abs(bz - az) < 1 ? width : 1.2), 0x3b3833, false]);
-        }
-      };
-      // The switchback: graded corridors do not exist for it, so it hugs raw relief.
-      road(-6, 500, -6, -40, 8);
-      road(-6, -40, -80, -40, 7);
-      road(-80, -40, -80, -200, 7);
-      road(-80, -200, 20, -200, 7);
-      road(20, -200, 20, -360, 7);
       const canopyTones = [
         [0x293c20, 0x334a28, 0x415c31],
         [0x263a1e, 0x2f4426, 0x3c522c],
@@ -2661,6 +2623,11 @@ export const LEVELS = [
   // Distances are compressed (metersPerUnit 3.5): the 1,700-unit rail leg reads as ~6 km.
   {
     id: 14, name: 'DEEP FENCE',
+    roadPaint: [
+      { points: [[-6, 500], [-6, -1460]], width: 8 },
+      { points: [[-180, -700], [140, -700]], width: 9 },
+      { points: [[150, -700], [150, -1360]], width: 9 },
+    ],
     brief: 'BASTION is gone but the 37th’s echelon is intact beyond the fields. Fly the fence: kill the road patrol tank, the BTR at the kolkhoz, and burn the fuel siding feeding their next assault. You never leave the treeline.',
     weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
     lockPlayer: true,
@@ -2703,27 +2670,8 @@ export const LEVELS = [
       // L.terrainDef); crop strips live in its vertex colours. What remains here is a
       // small solid pad under the OP so the operator has a floor to stand on.
       g.push(...floorSlab(0, 462, 40, 32, th(0, 462), 1, 0x4a4636));
-      // Roads follow the graded corridors stamped into the DEM: short draped segments,
-      // each sitting on the sampled surface, instead of one impossible kilometre slab.
-      const road = (x1, z1, x2, z2, width) => {
-        const length = Math.hypot(x2 - x1, z2 - z1);
-        const steps = Math.max(2, Math.round(length / 34));
-        for (let i = 0; i < steps; i++) {
-          const t0 = i / steps, t1 = (i + 1) / steps;
-          const ax = x1 + (x2 - x1) * t0, az = z1 + (z2 - z1) * t0;
-          const bx = x1 + (x2 - x1) * t1, bz = z1 + (z2 - z1) * t1;
-          const cx = (ax + bx) / 2, cz = (az + bz) / 2;
-          const y = Math.max(th(ax, az), th(cx, cz), th(bx, bz)) + 0.07;
-          g.push([cx, y, cz,
-            Math.abs(bx - ax) + (Math.abs(bx - ax) < 1 ? width : 1.2),
-            0.12,
-            Math.abs(bz - az) + (Math.abs(bz - az) < 1 ? width : 1.2),
-            0x3b3833, false]);
-        }
-      };
-      road(-6, 500, -6, -1460, 8);
-      road(-180, -700, 140, -700, 9);
-      road(150, -700, 150, -1360, 9);
+      // Roads are painted onto the terrain as draped ribbons (L.roadPaint) — nothing
+      // road-shaped is boxed here anymore.
       // A tree: SOLID trunk and a tapered three-tier canopy, lighter toward the sunlit
       // crown, with the upper tiers jittered off-axis so a row never reads as a picket of
       // identical shapes. Still SOLID throughout: clipping a windbreak at 60 km/h is how

@@ -177,6 +177,77 @@ export function buildTerrainMesh(def, skirtY) {
   return mesh;
 }
 
+// Roads are painted onto the land, not stacked over it. Each run is a triangle ribbon
+// draped on the sampled surface — three vertices across so the crown follows the ground,
+// resampled every few metres so dips and rises never open a gap underneath, and depth-
+// biased so it wins the z-fight against the terrain triangles it sits on. The old
+// draped-box roads floated at the max height of each 34m segment, which over a dip left
+// air you could fly under; a ribbon cannot do that.
+export function buildRoadRibbons(def, runs) {
+  const sample = terrainSampler(def);
+  const STEP = 6;
+  const LIFT = 0.3;
+  const SURFACE = [0x3b, 0x38, 0x33];
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  const color = new THREE.Color();
+  for (const run of runs) {
+    const pts = run.points;
+    const width = run.width ?? 7;
+    // Resample the polyline at a fixed step, keeping every authored corner.
+    const line = [];
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s], [bx, bz] = pts[s + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(1, Math.round(len / STEP));
+      for (let i = s === 0 ? 0 : 1; i <= n; i++) {
+        line.push([ax + (bx - ax) * (i / n), az + (bz - az) * (i / n)]);
+      }
+    }
+    const base = positions.length / 3;
+    for (let i = 0; i < line.length; i++) {
+      const [x, z] = line[i];
+      // Tangent from the neighbours (averaged at corners, so bends get a mitre).
+      const [px, pz] = line[Math.max(0, i - 1)];
+      const [qx, qz] = line[Math.min(line.length - 1, i + 1)];
+      let tx = qx - px, tz = qz - pz;
+      const tl = Math.hypot(tx, tz) || 1;
+      tx /= tl; tz /= tl;
+      for (const o of [-width / 2, 0, width / 2]) {
+        const wx = x - tz * o, wz = z + tx * o;
+        positions.push(wx, sample(wx, wz) + LIFT, wz);
+        const jitter = 0.88 + hash(Math.round(wx * 2), Math.round(wz * 2)) * 0.24;
+        color.setRGB(
+          SURFACE[0] / 255 * jitter, SURFACE[1] / 255 * jitter, SURFACE[2] / 255 * jitter,
+          THREE.SRGBColorSpace);
+        colors.push(color.r, color.g, color.b);
+      }
+    }
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = base + i * 3;
+      indices.push(
+        a, a + 1, a + 3, a + 1, a + 4, a + 3,
+        a + 1, a + 2, a + 4, a + 2, a + 5, a + 4);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true, flatShading: true, roughness: 0.94, metalness: 0.02,
+    side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.receiveShadow = true;
+  mesh.name = 'terrain-roads';
+  mesh.userData.dispose = () => { geometry.dispose(); material.dispose(); };
+  return mesh;
+}
+
 // Rolling procedural countryside from the DEM patch's edge out past the fog. Four coarse
 // band meshes sampling the same combined sampler the flight model reads, so what the
 // pilot sees at the boundary is exactly what the airframe would hit.
