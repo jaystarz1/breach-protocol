@@ -1,9 +1,21 @@
 import { floorSlab } from '../levelgen.js';
-import { terrainSampler } from '../terrain.js';
+import { terrainSampler, carveRailGrade, RAIL_TOP } from '../terrain.js';
 import { lift, rng, sandbags, table, poleWire } from '../world.js';
 import { DEEP_FENCE_TERRAIN } from './terrain-deep-fence.js';
 
 const phase = (id, text, steps) => ({ id, text, steps });
+
+// The two rail lines are engineered into the land itself, once, before anything samples
+// it: carveRailGrade cuts and fills the DEM so the line holds a railway gradient, and
+// buildRailLine (via each level's railLines) drapes ballast, ties and narrow-gauge steel
+// on the result. Every training level shares this DEM, so the earthworks are permanent.
+const TRAINING_RAIL = [{ points: [[245, 130], [245, -560]] }];
+const DEEP_RAIL = [{ points: [[330, -260], [330, -1420]] }];
+carveRailGrade(DEEP_FENCE_TERRAIN, [...TRAINING_RAIL, ...DEEP_RAIL]);
+
+// A fuelcar's wheels (radius 0.34, axle at 0.55) bottom out 0.21 above its origin; this
+// authored y offset puts them on the railhead instead of sinking the bogies in ballast.
+const WAGON_LIFT = Math.round((RAIL_TOP - 0.21) * 100) / 100;
 const MPU = 3.5;
 const TRAINING_BOUNDS = [-720, 505, 720, -935];
 const TRAINING_AREA = [-330, 500, 330, -650];
@@ -63,7 +75,12 @@ function droneFieldGeo(seed, options = {}) {
     [0x263a1e, 0x2f4426, 0x3c522c],
     [0x2c4023, 0x374e2b, 0x466036],
   ];
+  // The rail corridors are a cleared right-of-way: no trunk grows on the formation.
+  const nearRail = (x, z) =>
+    (Math.abs(x - 245) < 8 && z < 140 && z > -570)
+    || (options.deep && Math.abs(x - 330) < 8 && z < -250 && z > -1430);
   const tree = (x, z, scale = 1) => {
+    if (nearRail(x, z)) return;
     const tones = canopyTones[Math.floor(random() * canopyTones.length)];
     const y = terrain(x, z);
     g.push([x, y + 0.9 * scale, z, 0.38 * scale, 1.8 * scale, 0.38 * scale, 0x453727]);
@@ -105,18 +122,8 @@ function droneFieldGeo(seed, options = {}) {
     g.push([jx, y + 2.6, jz, 1.1, 5.2, 1.1, 0x3a3f3a]);
     g.push([jx, y + 5.5, jz, 2.4, 0.5, 0.6, 0x2c3130]);
   }
-  if (options.rail) {
-    const railX = options.deep ? 330 : 245;
-    const railStart = options.deep ? -260 : 130;
-    const railEnd = options.deep ? -1420 : -560;
-    for (let z = railStart; z > railEnd; z -= 55) {
-      const middle = z - 27.5;
-      const y = terrain(railX, middle);
-      g.push([railX, y + 0.25, middle, 8, 0.5, 56, 0x3f3b34]);
-      g.push([railX - 2.6, y + 0.61, middle, 0.5, 0.22, 56, 0x50524f, false]);
-      g.push([railX + 2.6, y + 0.61, middle, 0.5, 0.22, 56, 0x50524f, false]);
-    }
-  }
+  // The track itself is no longer boxed here: railLines on the level def drapes the
+  // ballast, ties and rails onto the carved formation (see buildRailLine in terrain.js).
   const opY = terrain(0, 462);
   g.push(...lift(floorSlab(0, 462, 26, 14, 0.02, 0.5, 0x413d31), opY));
   g.push(...lift([...sandbags(-6, 452, 6, 2, false, seed), ...sandbags(7, 452, 5, 2, false, seed + 1)], opY));
@@ -149,6 +156,7 @@ function droneLevel(id, name, brief, objectives, options = {}) {
     fog: options.fog || [options.sky ?? 0x35303c, 500, 2600],
     ambient: options.ambient ?? 0.8, sun: options.sun ?? 0.85,
     backdrop: 'rural', terrainDef: DEEP_FENCE_TERRAIN,
+    railLines: options.geo?.deep ? [...TRAINING_RAIL, ...DEEP_RAIL] : TRAINING_RAIL,
     minimap: options.minimap || trainingMap(),
     start: [0, 0, 462, 0],
     geo: () => droneFieldGeo(2000 + id * 31, options.geo || {}),
@@ -264,7 +272,7 @@ export const DRONE_TRAINING_LEVELS = [
         ],
         vehicles: [
           { kind: 'technical', label: 'HOVER-DROP TRUCK', health: 150, pos: [-35, 0, 230], yaw: 0.5 },
-          { kind: 'fuelcar', label: 'DRIFT WAGON', health: 220, pos: [245, 0.5, 80], yaw: Math.PI / 2 },
+          { kind: 'fuelcar', label: 'DRIFT WAGON', health: 220, pos: [245, WAGON_LIFT,80], yaw: Math.PI / 2 },
         ],
         startMessage: 'RANGE CONTROL — DESTROY HOVER-DROP TRUCK AND DRIFT WAGON. FOUR BOMBS. RETURN AFTER BOTH EFFECTS.',
         result: 'PAYLOAD BASICS COMPLETE',
@@ -273,8 +281,8 @@ export const DRONE_TRAINING_LEVELS = [
         text: 'REQUIRED: TWO ROLLING WAGONS + ROAD ESCORT. FIVE BOMBS. STRIKE ALL THREE, THEN RETURN.', bombs: 5,
         training: { requireReturn: true, returnRadius: 14 },
         vehicles: [
-          { kind: 'fuelcar', label: 'ROLLING WAGON ONE', health: 220, pos: [245, 0.5, 80], route: [[245, 80], [245, -420]], speed: 3, loop: true },
-          { kind: 'fuelcar', label: 'ROLLING WAGON TWO', health: 220, pos: [245, 0.5, 35], route: [[245, 35], [245, -465]], speed: 3, loop: true },
+          { kind: 'fuelcar', label: 'ROLLING WAGON ONE', health: 220, pos: [245, WAGON_LIFT,80], route: [[245, 80], [245, -420]], speed: 3, loop: true },
+          { kind: 'fuelcar', label: 'ROLLING WAGON TWO', health: 220, pos: [245, WAGON_LIFT,35], route: [[245, 35], [245, -465]], speed: 3, loop: true },
           { kind: 'technical', label: 'ROAD ESCORT', health: 150, pos: [190, 0, 150], route: [[190, 150], [-170, 150]], speed: 4, loop: true },
         ],
         startMessage: 'RANGE CONTROL — THREE REQUIRED VEHICLES. FIVE BOMBS. EXPECT RETASKING; RETURN AFTER FINAL EFFECT.',
@@ -457,8 +465,8 @@ export const DRONE_TRAINING_LEVELS = [
         text: 'FIVE BOMBS — FINISH THE ROLLING STOCK UNDER CYCLING EW.', bombs: 5,
         jammers: [{ x: -75, z: -165, r: 195, estimated: true, pulse: { on: 10, off: 8 } }],
         vehicles: [
-          { kind: 'fuelcar', label: 'SUPPLY WAGON ONE', health: 220, pos: [245, 0.5, -210], route: [[245, -210], [245, -520]], speed: 3, loop: true },
-          { kind: 'fuelcar', label: 'SUPPLY WAGON TWO', health: 220, pos: [245, 0.5, -250], route: [[245, -250], [245, -560]], speed: 3, loop: true },
+          { kind: 'fuelcar', label: 'SUPPLY WAGON ONE', health: 220, pos: [245, WAGON_LIFT,-210], route: [[245, -210], [245, -520]], speed: 3, loop: true },
+          { kind: 'fuelcar', label: 'SUPPLY WAGON TWO', health: 220, pos: [245, WAGON_LIFT,-250], route: [[245, -250], [245, -560]], speed: 3, loop: true },
           { kind: 'technical', label: 'ESCORT TRUCK', health: 150, pos: [190, 0, -120], route: [[190, -120], [-170, -120]], speed: 4.7, loop: true },
         ],
         startMessage: 'KAVUN — FIVE BOMBS, THREE REQUIRED EFFECTS. GRADUATE WITH A RESERVE.',
@@ -507,10 +515,10 @@ export const DRONE_TRAINING_LEVELS = [
           { x: 62, z: -880, r: 190, hidden: true, pulse: { on: 12, off: 8 } },
         ],
         vehicles: [
-          { kind: 'fuelcar', label: 'FUEL WAGON ONE', health: 220, pos: [330, 0.5, -1225], yaw: Math.PI / 2 },
-          { kind: 'fuelcar', label: 'FUEL WAGON TWO', health: 220, pos: [330, 0.5, -1237], yaw: Math.PI / 2 },
-          { kind: 'fuelcar', label: 'FUEL WAGON THREE', health: 220, pos: [330, 0.5, -1249], yaw: Math.PI / 2 },
-          { kind: 'fuelcar', label: 'EMPTY DECOY WAGON', health: 100, decoy: true, pos: [330, 0.5, -1270], yaw: Math.PI / 2 },
+          { kind: 'fuelcar', label: 'FUEL WAGON ONE', health: 220, pos: [330, WAGON_LIFT,-1225], yaw: Math.PI / 2 },
+          { kind: 'fuelcar', label: 'FUEL WAGON TWO', health: 220, pos: [330, WAGON_LIFT,-1237], yaw: Math.PI / 2 },
+          { kind: 'fuelcar', label: 'FUEL WAGON THREE', health: 220, pos: [330, WAGON_LIFT,-1249], yaw: Math.PI / 2 },
+          { kind: 'fuelcar', label: 'EMPTY DECOY WAGON', health: 100, decoy: true, pos: [330, WAGON_LIFT,-1270], yaw: Math.PI / 2 },
         ],
         startMessage: 'OPERATIONS — NIGHT PAYLOAD RUN. CONFIRM THE WARM WAGONS, MANAGE DRIFT, RETAIN AN EGRESS RESERVE.',
         result: 'DEEP FENCE COMPLETE — ECHELON EFFECTS CONFIRMED',

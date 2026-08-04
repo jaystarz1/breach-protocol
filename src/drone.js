@@ -439,10 +439,14 @@ function strikeTargetModel(target) {
     // A rail tank wagon: flat frame over bogies, a long horizontal tank, filler dome. Built
     // to read as strategic logistics from bomber altitude, and to burn convincingly.
     add(new THREE.BoxGeometry(9.2, 0.3, 2.4), dark, [0, 1.05, 0]);
+    // Wheel pairs ride the two rails at the track gauge (see RAIL_GAUGE in terrain.js),
+    // so the wagon overhangs its track the way rolling stock does.
     for (const x of [-3.4, 3.4]) {
       for (const wx of [-0.55, 0.55]) {
-        add(new THREE.CylinderGeometry(0.34, 0.34, 0.2, 12), steel,
-          [x + wx, 0.55, 0], [Math.PI / 2, 0, 0]);
+        for (const wz of [-0.75, 0.75]) {
+          add(new THREE.CylinderGeometry(0.34, 0.34, 0.16, 12), steel,
+            [x + wx, 0.55, wz], [Math.PI / 2, 0, 0]);
+        }
       }
     }
     add(new THREE.CylinderGeometry(1.15, 1.15, 8.4, 16), olive,
@@ -541,6 +545,9 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     })),
     routeIdx: 0,
     loop: !!definition.loop,
+    // The authored y offset is height-above-surface (a wagon's wheels on the railhead);
+    // keep it while moving instead of letting the ground snap flatten it away.
+    surfaceLift: definition.pos?.[1] ?? 0,
     speed: worldSpeed,
     baseSpeed: worldSpeed,
     velocity: new THREE.Vector3(),
@@ -574,7 +581,7 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
       const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.2, this.pos.y + 2);
       const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : -Infinity;
       const surface = Math.max(ground, terrainY);
-      if (surface !== -Infinity) this.pos.y = surface;
+      if (surface !== -Infinity) this.pos.y = surface + this.surfaceLift;
       this.velocity.set(
         dt > 0 ? (this.pos.x - previousX) / dt : 0,
         0,

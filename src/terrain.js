@@ -248,6 +248,195 @@ export function buildRoadRibbons(def, runs) {
   return mesh;
 }
 
+// A railway is earthworks first: the land is cut and filled to meet the line, not the
+// other way round. This edits the height grid itself along each run — the centreline
+// profile is smoothed hard and clamped to a ruling gradient, then every cell near the
+// line is pulled toward that grade, full strength across the formation and feathering
+// out over the cutting and embankment slopes. Because the grid is the single source of
+// truth, the terrain mesh, the sampler, the drone floor and the wagons all agree on the
+// re-shaped ground. Call once per def, before anything samples it.
+export function carveRailGrade(def, runs) {
+  const grid = gridOf(def);
+  const { x0, z0, cell, nx, nz } = def;
+  const HALF = 6;        // full-grade half-width of the formation
+  const BLEND = 24;      // cut/fill slopes feather back into the land over this
+  const MAX_SLOPE = 0.03;
+  const sample = terrainSampler(def);
+  for (const run of runs) {
+    const pts = run.points;
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s], [bx, bz] = pts[s + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(2, Math.ceil(len / cell));
+      const raw = [];
+      for (let i = 0; i <= n; i++) {
+        raw.push(sample(ax + (bx - ax) * (i / n), az + (bz - az) * (i / n)));
+      }
+      // Wide moving average, then a two-way gradient clamp: the profile a survey crew
+      // would peg, riding through the mean of the ground it crosses.
+      const prof = raw.map((_, i) => {
+        let sum = 0, count = 0;
+        for (let k = -8; k <= 8; k++) {
+          sum += raw[Math.min(n, Math.max(0, i + k))]; count++;
+        }
+        return sum / count;
+      });
+      const maxStep = MAX_SLOPE * (len / n);
+      for (let i = 1; i <= n; i++) {
+        prof[i] = Math.min(prof[i - 1] + maxStep, Math.max(prof[i - 1] - maxStep, prof[i]));
+      }
+      for (let i = n - 1; i >= 0; i--) {
+        prof[i] = Math.min(prof[i + 1] + maxStep, Math.max(prof[i + 1] - maxStep, prof[i]));
+      }
+      const reach = HALF + BLEND;
+      const abx = bx - ax, abz = bz - az;
+      const ab2 = abx * abx + abz * abz || 1;
+      const ix0 = Math.max(0, Math.floor((Math.min(ax, bx) - reach - x0) / cell));
+      const ix1 = Math.min(nx - 1, Math.ceil((Math.max(ax, bx) + reach - x0) / cell));
+      const iz0 = Math.max(0, Math.floor((z0 - Math.max(az, bz) - reach) / cell));
+      const iz1 = Math.min(nz - 1, Math.ceil((z0 - Math.min(az, bz) + reach) / cell));
+      for (let iz = iz0; iz <= iz1; iz++) {
+        const wz = z0 - iz * cell;
+        for (let ix = ix0; ix <= ix1; ix++) {
+          const wx = x0 + ix * cell;
+          const t = Math.min(1, Math.max(0, ((wx - ax) * abx + (wz - az) * abz) / ab2));
+          const d = Math.hypot(wx - (ax + abx * t), wz - (az + abz * t));
+          if (d >= reach) continue;
+          const f = t * n, fi = Math.floor(f);
+          const grade = prof[fi] + (prof[Math.min(n, fi + 1)] - prof[fi]) * (f - fi);
+          const u = Math.max(0, (d - HALF) / BLEND);
+          const w = 1 - u * u * (3 - 2 * u);
+          const i = iz * nx + ix;
+          grid[i] = grid[i] * (1 - w) + grade * w;
+        }
+      }
+    }
+  }
+}
+
+// Track furniture heights, shared with the level authors: a wagon's wheels touch the
+// railhead when its authored y offset is RAIL_TOP minus the wheel-bottom height.
+export const RAIL_TOP = 0.05 + 0.3 + 0.13 + 0.17;   // lift + ballast + tie + rail
+export const RAIL_GAUGE = 0.75;                      // rail centreline offset from track axis
+
+// The permanent way, draped on the carved formation: a ballast prism with battered
+// shoulders, creosote ties at scale spacing, and two steel rails the rolling stock
+// overhangs — instead of the old 8-wide slab with rails wider than the wagons. One
+// merged vertex-coloured mesh; the corridor under it is already flattened by
+// carveRailGrade, so everything rides the centreline sample and stays rigid across.
+export function buildRailLine(def, runs) {
+  const sample = terrainSampler(def);
+  const STEP = 4;
+  const LIFT = 0.05;
+  const BALLAST_H = 0.3, BALLAST_HALF = 2.3, BALLAST_TOP_HALF = 1.5;
+  const TIE_SPACING = 2.1, TIE_HALF_LEN = 1.1, TIE_HALF_W = 0.13, TIE_H = 0.13;
+  const RAIL_HALF_W = 0.07, RAIL_H = 0.17;
+  const BALLAST_C = [0x4e, 0x49, 0x43];
+  const TIE_C = [0x38, 0x2c, 0x21];
+  const STEEL_C = [0x70, 0x73, 0x74];
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  const color = new THREE.Color();
+  const vert = (x, y, z, src, jitter) => {
+    positions.push(x, y, z);
+    color.setRGB(
+      src[0] / 255 * jitter, src[1] / 255 * jitter, src[2] / 255 * jitter,
+      THREE.SRGBColorSpace);
+    colors.push(color.r, color.g, color.b);
+    return positions.length / 3 - 1;
+  };
+  const quad = (a, b, c, d) => indices.push(a, b, c, a, c, d);
+  for (const run of runs) {
+    const pts = run.points;
+    const line = [];
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s], [bx, bz] = pts[s + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(1, Math.round(len / STEP));
+      for (let i = s === 0 ? 0 : 1; i <= n; i++) {
+        line.push([ax + (bx - ax) * (i / n), az + (bz - az) * (i / n)]);
+      }
+    }
+    // Ballast prism and the two rails: quad strips over the resampled centreline.
+    const strip = (offsets, heights, src, jitterFn) => {
+      const base = positions.length / 3;
+      for (let i = 0; i < line.length; i++) {
+        const [x, z] = line[i];
+        const [px, pz] = line[Math.max(0, i - 1)];
+        const [qx, qz] = line[Math.min(line.length - 1, i + 1)];
+        let tx = qx - px, tz = qz - pz;
+        const tl = Math.hypot(tx, tz) || 1;
+        tx /= tl; tz /= tl;
+        const cy = sample(x, z) + LIFT;
+        for (let k = 0; k < offsets.length; k++) {
+          const o = offsets[k];
+          vert(x - tz * o, cy + heights[k], z + tx * o, src, jitterFn(x, z, k));
+        }
+      }
+      const across = offsets.length;
+      for (let i = 0; i < line.length - 1; i++) {
+        const a = base + i * across;
+        for (let k = 0; k < across - 1; k++) {
+          quad(a + k, a + k + 1, a + k + 1 + across, a + k + across);
+        }
+      }
+    };
+    strip(
+      [-BALLAST_HALF, -BALLAST_TOP_HALF, BALLAST_TOP_HALF, BALLAST_HALF],
+      [0, BALLAST_H, BALLAST_H, 0], BALLAST_C,
+      (x, z, k) => 0.78 + hash(Math.round(x * 2) + k, Math.round(z * 2)) * 0.44);
+    const railBase = BALLAST_H + TIE_H;
+    for (const side of [-RAIL_GAUGE, RAIL_GAUGE]) {
+      strip(
+        [side - RAIL_HALF_W, side - RAIL_HALF_W, side + RAIL_HALF_W, side + RAIL_HALF_W],
+        [railBase, railBase + RAIL_H, railBase + RAIL_H, railBase], STEEL_C,
+        () => 0.96 + hash(Math.round(side * 100), 7) * 0.08);
+    }
+    // Ties: oriented boxes walked along the line at scale spacing, tops flush with the
+    // rail seats so the steel visibly sits on the timber.
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s], [bx, bz] = pts[s + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      let tx = (bx - ax) / (len || 1), tz = (bz - az) / (len || 1);
+      for (let d = TIE_SPACING / 2; d < len; d += TIE_SPACING) {
+        const x = ax + tx * d, z = az + tz * d;
+        const yb = sample(x, z) + LIFT + BALLAST_H - 0.04;
+        const yt = sample(x, z) + LIFT + railBase;
+        const jitter = 0.85 + hash(Math.round(x * 3), Math.round(z * 3)) * 0.3;
+        const corners = [];
+        for (const [alo, aco] of [[-TIE_HALF_W, -TIE_HALF_LEN], [TIE_HALF_W, -TIE_HALF_LEN],
+          [TIE_HALF_W, TIE_HALF_LEN], [-TIE_HALF_W, TIE_HALF_LEN]]) {
+          const cx = x + tx * alo - tz * aco, cz = z + tz * alo + tx * aco;
+          corners.push([cx, cz]);
+        }
+        const lo = corners.map(([cx, cz]) => vert(cx, yb, cz, TIE_C, jitter * 0.8));
+        const hi = corners.map(([cx, cz]) => vert(cx, yt, cz, TIE_C, jitter));
+        quad(hi[0], hi[1], hi[2], hi[3]);
+        for (let k = 0; k < 4; k++) {
+          const m = (k + 1) % 4;
+          quad(lo[k], lo[m], hi[m], hi[k]);
+        }
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true, flatShading: true, roughness: 0.86, metalness: 0.1,
+    side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.receiveShadow = true;
+  mesh.name = 'terrain-rail';
+  mesh.userData.dispose = () => { geometry.dispose(); material.dispose(); };
+  return mesh;
+}
+
 // Rolling procedural countryside from the DEM patch's edge out past the fog. Four coarse
 // band meshes sampling the same combined sampler the flight model reads, so what the
 // pilot sees at the boundary is exactly what the airframe would hit.
