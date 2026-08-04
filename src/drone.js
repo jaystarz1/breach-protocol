@@ -6,6 +6,14 @@ import {
 const MAX_RANGE = 95;
 const MAX_SPEED = 16;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const FPV_ATTEMPT = Object.freeze({
+  READY: 'ready',
+  FLYING: 'flying',
+  IMPACT_HOLD: 'impact_hold',
+  REPLAY: 'replay',
+  DEBRIEF: 'debrief',
+});
+const TELEMETRY_INTERVAL = 0.1;
 
 // Heightfield sampler for terrain levels, set by main on level start (null elsewhere).
 // Everything airborne reads it: flight floor, vehicle ground-follow, munition impact,
@@ -500,6 +508,9 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
   mesh.name = 'drone-assault-technical';
   scene.add(mesh);
   mesh.position.copy(pos);
+  const metersPerUnit = definition.metersPerUnit ?? 1;
+  const authoredSpeed = definition.speed ?? 4.4;
+  const worldSpeed = definition.speedPhysical === false ? authoredSpeed : authoredSpeed / metersPerUnit;
   const vehicle = {
     pos,
     mesh,
@@ -508,6 +519,18 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     // FPV target attributes: `cage` arms the rear-aspect rule, `label` names the kill feed.
     cage: !!definition.cage,
     label: definition.label || null,
+    targetId: definition.targetId || definition.label || null,
+    hostile: definition.hostile !== false,
+    decoy: !!definition.decoy,
+    protected: !!definition.protected,
+    optional: !!definition.optional,
+    identified: !definition.requiresIdentification,
+    requiresIdentification: !!definition.requiresIdentification,
+    identifySeconds: definition.identifySeconds ?? 1.8,
+    identifyProgress: 0,
+    jammerId: definition.jammerId || null,
+    reaction: definition.reaction || null,
+    reacted: false,
     // Optional instructor line delivered when this target dies (the flight-school voice).
     killMessage: definition.killMessage || null,
     dead: false,
@@ -518,7 +541,9 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     })),
     routeIdx: 0,
     loop: !!definition.loop,
-    speed: definition.speed ?? 4.4,
+    speed: worldSpeed,
+    baseSpeed: worldSpeed,
+    velocity: new THREE.Vector3(),
     damage(amount) {
       if (this.dead) return false;
       this.health = Math.max(0, this.health - amount);
@@ -529,6 +554,8 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     },
     update(dt, solids) {
       if (this.dead || !this.route.length) return;
+      const previousX = this.pos.x;
+      const previousZ = this.pos.z;
       const waypoint = this.route[Math.min(this.routeIdx, this.route.length - 1)];
       const dx = waypoint.x - this.pos.x;
       const dz = waypoint.z - this.pos.z;
@@ -548,6 +575,11 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
       const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : -Infinity;
       const surface = Math.max(ground, terrainY);
       if (surface !== -Infinity) this.pos.y = surface;
+      this.velocity.set(
+        dt > 0 ? (this.pos.x - previousX) / dt : 0,
+        0,
+        dt > 0 ? (this.pos.z - previousZ) / dt : 0,
+      );
       this.mesh.position.copy(this.pos);
       this.mesh.position.y += 0.02;
     },
@@ -640,6 +672,7 @@ export function dronePrewarmGroup(definition) {
 
 export class DroneController {
   constructor(scene, camera, definition, onComplete) {
+    this.definition = definition;
     this.scene = scene;
     this.camera = camera;
     this.launch = new THREE.Vector3(...definition.launch);
@@ -664,6 +697,8 @@ export class DroneController {
     this.resultText = definition.result || 'ASSAULT ROUTES MAPPED';
     this.combatants = definition.combatants || [];
     this.combatVehicles = definition.combatVehicles || [];
+    this.combatVehicleDefinitions = definition.combatVehicleDefinitions || [];
+    this.presentationIndex = definition.presentationSeed || 0;
     this.droneInteriorThreshold = definition.droneInteriorThreshold ?? 2;
     this.rifleRounds = ['combat', 'strike'].includes(this.mode)
       ? (definition.rifleRounds ?? (this.mode === 'strike' ? 72 : 100)) : 0;
@@ -684,22 +719,63 @@ export class DroneController {
     this.metersPerUnit = definition.metersPerUnit ?? 1;
     this.airframes = definition.airframes ?? 1;
     this.airframesLost = 0;
-    this.jammers = definition.jammers || [];
+    this.jammers = (definition.jammers || []).map((jammer, index) => ({
+      active: jammer.active !== false,
+      estimated: !!jammer.estimated,
+      pulse: jammer.pulse || null,
+      id: jammer.id || `jammer-${index + 1}`,
+      ...jammer,
+    }));
     this.ceiling = definition.ceiling ?? 34;
-    this.batteryDrain = definition.batteryDrain ?? 0.72;
+    this.batterySeconds = definition.batterySeconds || null;
+    this.batteryDrain = this.batterySeconds
+      ? 100 / this.batterySeconds / 1.3
+      : (definition.batteryDrain ?? 0.72);
     this.maxSpeed = definition.maxSpeed ?? MAX_SPEED;
     this.accel = definition.accel ?? 19;
+    this.worldMaxSpeed = this.isFpvFamily ? this.maxSpeed / this.metersPerUnit : this.maxSpeed;
+    this.worldAccel = this.isFpvFamily ? this.accel / this.metersPerUnit : this.accel;
     this.bombs = this.mode === 'bomber' ? (definition.bombs ?? 6) : 0;
     this.bombsTotal = this.bombs;
     this.craftName = definition.craftName || (this.mode === 'bomber' ? 'HW-16 HERON' : 'VMS-7 KESTREL');
     this.thermalPersistent = !!definition.thermalPersistent;
     this.onFailed = definition.onFailed || null;
     this.onVehicleKilled = definition.onVehicleKilled || null;
+    this.onAttemptReviewed = definition.onAttemptReviewed || null;
     this.flightTime = 0;
+    this.missionFlightTime = 0;
     this.jamFactor = 1;
     this.linkLowTimer = 0;
     this.failedOut = false;
     this.detonated = false;
+    this.training = definition.training || {};
+    this.attemptState = this.isFpvFamily ? FPV_ATTEMPT.FLYING : null;
+    this.attemptStateTime = 0;
+    this.attempts = [];
+    this.telemetry = [];
+    this.telemetryClock = 0;
+    this.attemptDistance = 0;
+    this.attemptJamTime = 0;
+    this.attemptCriticalTime = 0;
+    this.attemptMinSignal = 1;
+    this.attemptMaxAgl = 0;
+    this.attemptChaseTime = 0;
+    this.attemptAcquiredAt = null;
+    this.attemptCommittedAt = null;
+    this.attemptStartBattery = 100;
+    this.attemptStart = this.pos.clone();
+    this.lastTelemetryPos = this.pos.clone();
+    this.review = null;
+    this.replayGhost = null;
+    this.replayPath = null;
+    this.pendingMissionComplete = false;
+    this.pendingMissionFailure = false;
+    this.pendingRunReset = false;
+    this.egressRequired = false;
+    this.batteryCall30 = false;
+    this.batteryCall20 = false;
+    this.lastBombImpact = null;
+    this.identifyCandidate = null;
     // A fresh airframe arms after launch, like the real munition. During the arming window
     // a solid contact stops the aircraft instead of detonating it — without this, a crash
     // followed by a respawn under live stick input chain-detonates every remaining airframe
@@ -893,6 +969,31 @@ export class DroneController {
         <div class="fpv-lesson-body"></div>
         <div class="fpv-lesson-key">FIRE — NEXT · R — SKIP ALL</div>
       </div>
+      <div class="fpv-review fpv-replay-panel">
+        <div class="fpv-review-kicker">STRIKE CONFIRMATION</div>
+        <div class="fpv-review-title"></div>
+        <div class="fpv-replay-facts"></div>
+      </div>
+      <div class="fpv-review fpv-debrief-panel">
+        <div class="fpv-review-kicker">AIRFRAME DEBRIEF</div>
+        <div class="fpv-review-title fpv-debrief-title"></div>
+        <div class="fpv-debrief-grid">
+          <div><canvas class="fpv-aar-map" width="330" height="190"></canvas><div class="fpv-chart-label">ROUTE // LINK QUALITY</div></div>
+          <div><canvas class="fpv-aar-profile" width="330" height="190"></canvas><div class="fpv-chart-label">FLIGHT PROFILE // AGL</div></div>
+          <div class="fpv-aar-metrics"></div>
+        </div>
+        <div class="fpv-coaching">
+          <div><b>WORKED</b><ul class="fpv-good"></ul></div>
+          <div><b>IMPROVE</b><ul class="fpv-improve"></ul></div>
+        </div>
+        <div class="fpv-next-instruction"></div>
+        <div class="fpv-review-key"></div>
+      </div>
+      <div class="fpv-ready-panel">
+        <div class="fpv-review-kicker">NEXT AIRFRAME</div>
+        <div class="fpv-ready-title"></div>
+        <div class="fpv-review-key">FIRE — LAUNCH WHEN READY</div>
+      </div>
       <div class="drone-result fpv-result"></div>
       <div class="fpv-help">${this.mode === 'bomber'
     ? 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP BOMB · N THERMAL'
@@ -924,6 +1025,22 @@ export class DroneController {
       .fpv-lesson-key{margin-top:10px;font-size:11px;color:#ffd54f;letter-spacing:2px;animation:fpvblink 1s steps(2) infinite}
       .fpv-help{position:absolute;left:50%;bottom:2.5%;transform:translateX(-50%);font-size:11px;font-weight:400;letter-spacing:1px;white-space:nowrap;color:#c9d2c9}
       .fpv-result{position:absolute;left:50%;top:26%;transform:translateX(-50%);padding:9px 14px;border:1px solid rgba(233,239,233,.5);background:rgba(8,10,8,.78);letter-spacing:2px;opacity:0;transition:opacity .18s}
+      .fpv-review,.fpv-ready-panel{display:none;position:absolute;z-index:8;background:rgba(7,10,8,.94);border:1px solid rgba(233,239,233,.55);box-shadow:0 18px 70px rgba(0,0,0,.65);text-shadow:none}
+      .fpv-replay-panel{left:6%;top:8%;padding:15px 18px;width:310px}
+      .fpv-debrief-panel{inset:5% 7%;padding:18px 22px;overflow:hidden}
+      .fpv-ready-panel{left:50%;top:42%;transform:translate(-50%,-50%);padding:22px 30px;text-align:center;min-width:360px}
+      .fpv-review-kicker{font-size:11px;letter-spacing:3px;color:#ffd54f;margin-bottom:7px}
+      .fpv-review-title{font-size:22px;letter-spacing:2px;margin-bottom:12px;color:#fff}
+      .fpv-replay-facts,.fpv-aar-metrics{font-weight:400;font-size:13px;line-height:1.65;white-space:pre-line;color:#d9e2d9}
+      .fpv-debrief-grid{display:grid;grid-template-columns:minmax(250px,1fr) minmax(250px,1fr) minmax(210px,.75fr);gap:18px;align-items:start}
+      .fpv-debrief-grid canvas{width:100%;height:190px;border:1px solid rgba(233,239,233,.25);background:#0b100c}
+      .fpv-chart-label{font-size:9px;color:#98a498;letter-spacing:2px;margin-top:5px}
+      .fpv-coaching{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:17px;font-size:13px;font-weight:400}
+      .fpv-coaching b{font-size:11px;color:#ffd54f;letter-spacing:2px}
+      .fpv-coaching ul{margin:7px 0 0;padding-left:19px;line-height:1.55}
+      .fpv-next-instruction{margin-top:13px;padding:10px 12px;border-left:3px solid #ffd54f;background:rgba(255,213,79,.08);font-size:13px;font-weight:400}
+      .fpv-review-key{margin-top:13px;color:#ffd54f;font-size:11px;letter-spacing:2px;animation:fpvblink 1s steps(2) infinite}
+      @media(max-width:850px){.fpv-debrief-panel{inset:2%;overflow:auto}.fpv-debrief-grid{grid-template-columns:1fr 1fr}.fpv-aar-metrics{grid-column:1/-1}.fpv-coaching{grid-template-columns:1fr}.fpv-review-title{font-size:17px}}
       @keyframes fpvblink{50%{opacity:0.15}}
     `;
     this.overlay.appendChild(style);
@@ -932,6 +1049,15 @@ export class DroneController {
     this.lock = null;
     this.help = this.overlay.querySelector('.fpv-help');
     this.result = this.overlay.querySelector('.fpv-result');
+    this.replayPanel = this.overlay.querySelector('.fpv-replay-panel');
+    this.debriefPanel = this.overlay.querySelector('.fpv-debrief-panel');
+    this.readyPanel = this.overlay.querySelector('.fpv-ready-panel');
+    this.aarMap = this.overlay.querySelector('.fpv-aar-map');
+    this.aarProfile = this.overlay.querySelector('.fpv-aar-profile');
+    this.flightHudElements = [
+      '.fpv-noise', '.fpv-tear', '.fpv-cross', '.fpv-name', '.fpv-mode', '.fpv-timer',
+      '.fpv-dist', '.fpv-batt', '.fpv-link', '.fpv-warn', '.fpv-map', '.fpv-help',
+    ].map(selector => this.overlay.querySelector(selector)).filter(Boolean);
     this.osd = {
       timer: this.overlay.querySelector('.fpv-timer'),
       dist: this.overlay.querySelector('.fpv-dist'),
@@ -978,6 +1104,10 @@ export class DroneController {
         if (!this.complete) this.result.style.opacity = '0';
       }, 2600);
     }
+    // The first aircraft uses the same deliberate launch gate as every replacement:
+    // READY -> explicit pilot input -> FLYING. This keeps airframe ownership clear without
+    // putting a ground-school screen between the player and the controls.
+    this.prepareNextAirframe();
   }
 
   showLesson() {
@@ -1097,14 +1227,17 @@ export class DroneController {
     }
     // Jammer bubbles at full ground radius: the planning picture, not the live altitude cut.
     for (const jammer of this.jammers) {
-      const [jx, jz] = this.mapPoint(jammer.x, jammer.z);
+      if (jammer.hidden) continue;
+      const [jx, jz] = this.mapPoint(jammer.estimateX ?? jammer.x, jammer.estimateZ ?? jammer.z);
       ctx.beginPath();
-      ctx.arc(jx, jz, jammer.r * scale, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,90,60,0.13)';
+      ctx.arc(jx, jz, (jammer.estimateR ?? jammer.r) * scale, 0, Math.PI * 2);
+      ctx.fillStyle = jammer.estimated ? 'rgba(255,140,60,0.07)' : 'rgba(255,90,60,0.13)';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,110,80,0.5)';
+      ctx.strokeStyle = jammer.estimated ? 'rgba(255,184,90,0.48)' : 'rgba(255,110,80,0.5)';
       ctx.lineWidth = 1;
+      if (jammer.estimated) ctx.setLineDash([5, 5]);
       ctx.stroke();
+      ctx.setLineDash([]);
     }
     // Authored training route: the flagged low line down the gully, dashed amber. Only
     // levels that stake flags on the ground declare it — the map matches the terrain.
@@ -1120,6 +1253,22 @@ export class DroneController {
       });
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+    if (def.alternateRoute?.length > 1) {
+      ctx.strokeStyle = 'rgba(92,210,255,0.82)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath();
+      def.alternateRoute.forEach(([rx, rz], i) => {
+        const [mx, mz] = this.mapPoint(rx, rz);
+        if (i === 0) ctx.moveTo(mx, mz); else ctx.lineTo(mx, mz);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(92,210,255,0.9)';
+      ctx.font = '700 8px ui-monospace, Menlo, monospace';
+      const [ax, az] = this.mapPoint(...def.alternateRoute[1]);
+      ctx.fillText('ALT', ax + 2, az - 3);
     }
     // The target is NOT tracked live: intel gives a search box, the pilot does the finding.
     // Box is the bounding area of the briefed patrol route (or parked position), padded.
@@ -1171,8 +1320,600 @@ export class DroneController {
     return true;
   }
 
+  jammerLive(jammer) {
+    if (!jammer.active) return false;
+    if (jammer.linkedVehicle || jammer.vehicleId) {
+      const id = jammer.linkedVehicle || jammer.vehicleId;
+      const source = this.combatVehicles.find(vehicle =>
+        vehicle.jammerId === id || vehicle.targetId === id || vehicle.label === id);
+      if (source?.dead) return false;
+    }
+    if (jammer.pulse) {
+      const on = Math.max(0.2, jammer.pulse.on ?? 8);
+      const off = Math.max(0.2, jammer.pulse.off ?? 5);
+      const phase = (this.missionFlightTime + (jammer.pulse.offset || 0)) % (on + off);
+      if (phase >= on) return false;
+    }
+    return true;
+  }
+
+  nearestLiveVehicle(position = this.pos) {
+    let nearest = null;
+    let distance = Infinity;
+    for (const vehicle of this.combatVehicles) {
+      if (vehicle.dead || vehicle.decoy || vehicle.protected) continue;
+      const d = vehicle.pos.distanceTo(position);
+      if (d < distance) { nearest = vehicle; distance = d; }
+    }
+    return { vehicle: nearest, distance };
+  }
+
+  recordAttemptTelemetry(dt, solids) {
+    if (!this.isFpvFamily || this.attemptState !== FPV_ATTEMPT.FLYING) return;
+    const moved = this.pos.distanceTo(this.lastTelemetryPos);
+    if (Number.isFinite(moved) && moved < this.worldMaxSpeed * Math.max(dt, 0.05) * 3) {
+      this.attemptDistance += moved;
+    }
+    this.lastTelemetryPos.copy(this.pos);
+    const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : 0;
+    const agl = Math.max(0, this.pos.y - terrainY);
+    this.attemptMaxAgl = Math.max(this.attemptMaxAgl, agl);
+    this.attemptMinSignal = Math.min(this.attemptMinSignal, this.signal);
+    if (this.jamFactor < 0.92) this.attemptJamTime += dt;
+    if (this.signal < 0.3) this.attemptCriticalTime += dt;
+
+    const nearest = this.nearestLiveVehicle();
+    const target = nearest.vehicle;
+    if (target && nearest.distance < (this.training.acquireRange ?? 95)) {
+      if (this.attemptAcquiredAt === null) this.attemptAcquiredAt = this.flightTime;
+      if (nearest.distance < (this.training.commitRange ?? 38)
+        && this.attemptCommittedAt === null) this.attemptCommittedAt = this.flightTime;
+      const targetSpeed = target.velocity?.length?.() || 0;
+      if (targetSpeed > 0.35) {
+        const motion = target.velocity.clone().normalize();
+        const targetToDrone = this.pos.clone().sub(target.pos).setY(0);
+        if (targetToDrone.lengthSq() > 0.1
+          && motion.dot(targetToDrone.normalize()) < -0.45) this.attemptChaseTime += dt;
+      }
+      if (target.requiresIdentification && !target.identified) {
+        const toTarget = target.pos.clone().add(new THREE.Vector3(0, 1, 0)).sub(this.pos);
+        const range = toTarget.length();
+        const dot = range > 0 ? this.forward.dot(toTarget.multiplyScalar(1 / range)) : 0;
+        const visible = range < (this.training.identifyRange ?? 45) && dot > 0.94
+          && hasLOS(solids, this.pos.x, this.pos.y, this.pos.z,
+            target.pos.x, target.pos.y + 1, target.pos.z);
+        target.identifyProgress = visible ? target.identifyProgress + dt : Math.max(0, target.identifyProgress - dt * 0.5);
+        if (target.identifyProgress >= target.identifySeconds) {
+          target.identified = true;
+          this.identifyCandidate = target;
+          this.result.textContent = `${target.label || 'TARGET'} — POSITIVE IDENTIFICATION`;
+          this.result.style.opacity = '1';
+        }
+      }
+    }
+
+    this.telemetryClock -= dt;
+    if (this.telemetryClock > 0) return;
+    this.telemetryClock = TELEMETRY_INTERVAL;
+    const targetSpeed = target?.velocity?.length?.() || 0;
+    this.telemetry.push({
+      t: this.flightTime,
+      x: this.pos.x, y: this.pos.y, z: this.pos.z, agl,
+      speed: this.vel.length() * this.metersPerUnit,
+      battery: this.battery, signal: this.signal, jam: this.jamFactor,
+      targetX: target?.pos.x ?? null, targetY: target?.pos.y ?? null,
+      targetZ: target?.pos.z ?? null,
+      targetSpeed: targetSpeed * this.metersPerUnit,
+      targetHeading: targetSpeed > 0.01 ? Math.atan2(target.velocity.x, -target.velocity.z) : null,
+    });
+    if (this.telemetry.length > 7200) this.telemetry.shift();
+  }
+
+  resetAttemptTelemetry() {
+    this.flightTime = 0;
+    this.telemetry.length = 0;
+    this.telemetryClock = 0;
+    this.attemptDistance = 0;
+    this.attemptJamTime = 0;
+    this.attemptCriticalTime = 0;
+    this.attemptMinSignal = 1;
+    this.attemptMaxAgl = 0;
+    this.attemptChaseTime = 0;
+    this.attemptAcquiredAt = null;
+    this.attemptCommittedAt = null;
+    this.attemptStartBattery = this.battery;
+    this.attemptStart.copy(this.pos);
+    this.lastTelemetryPos.copy(this.pos);
+  }
+
+  coachAttempt(report) {
+    const good = [];
+    const improve = [];
+    if (['DESTROYED', 'MOBILITY KILL', 'EFFECTIVE'].includes(report.effect)) {
+      const aspectNote = report.targetCaged && report.aspect === 'REAR'
+        ? ' through the required rear opening'
+        : !report.targetCaged && ['REAR', 'FLANK'].includes(report.aspect)
+          ? ` from a valid ${report.aspect.toLowerCase()} presentation; no side-offset maneuver was required`
+          : '';
+      good.push(`The ${report.aspect.toLowerCase()} strike produced an assessed ${report.effect.toLowerCase()}${aspectNote}.`);
+    }
+    if (report.firstPass) good.push('You built the intercept early and reached the target on the first attack pass.');
+    if (report.routeEfficiency <= 1.55) good.push(`You flew ${Math.round(report.distance)} m against a ${Math.round(report.directDistance)} m direct line (${report.routeEfficiency.toFixed(2)}×).`);
+    if (report.jamTime < 4) good.push(`Electronic-warfare exposure was ${report.jamTime.toFixed(1)} seconds.`);
+    if (report.minSignal >= 0.36) good.push(`Minimum link quality remained at ${Math.round(report.minSignal * 100)}%.`);
+    if (report.batteryAtEnd >= 28) good.push(`You committed with ${Math.round(report.batteryAtEnd)}% battery still available.`);
+
+    if (report.chaseTime > 10) improve.push(`You spent ${Math.round(report.chaseTime)} seconds behind the target; move to a future intercept point.`);
+    if (report.batteryAtEnd < 20) improve.push('Battery reserve was nearly exhausted before impact; shorten the setup or commit earlier.');
+    if (report.jamTime > 8) improve.push(`The aircraft spent ${report.jamTime.toFixed(1)} seconds under electronic attack; the red route segments show exactly where exposure accumulated.`);
+    if (report.routeEfficiency > 1.7) improve.push(`You flew ${Math.round(report.routeExcess)} m beyond the direct ${Math.round(report.directDistance)} m line (${report.routeEfficiency.toFixed(2)}×); remove one turn visible on the route plot.`);
+    if (!report.acquired) improve.push('The terminal run began without a stable acquisition; establish the target before committing.');
+    if (report.effect === 'PROTECTION DEFEAT') improve.push(`The ${report.aspect.toLowerCase()} impact struck protection rather than the rear opening; only this protected target requires a rear attack.`);
+    else if (['NO EFFECT', 'MISS'].includes(report.effect)) improve.push(`The closest valid target was ${Math.round(report.impactDistance)} m from impact; correct the final line by that miss distance rather than changing aspect automatically.`);
+    if (this.training.maxAgl && report.maxAgl > this.training.maxAgl) {
+      improve.push(`You climbed above the ${Math.round(this.training.maxAgl * this.metersPerUnit)} m profile limit.`);
+    }
+    if (report.terminalCorrection > 95) improve.push(`You changed course by ${Math.round(report.terminalCorrection)}° during the final five seconds; establish the line earlier.`);
+    const instruction = report.chaseTime > 10
+      ? 'NEXT RUN: cross to the target’s flank and aim for where it will be, not where it is.'
+      : report.jamTime > 8
+        ? 'NEXT RUN: identify the masking terrain before launch and leave the exposed line early.'
+        : report.batteryAtEnd < 20
+          ? 'NEXT RUN: set a battery decision point and commit or abort when you reach it.'
+          : report.routeEfficiency > 1.7
+            ? `NEXT RUN: keep the route under ${Math.round(report.directDistance * 1.5)} m by removing the largest bend shown on the route plot.`
+            : !report.acquired
+              ? 'NEXT RUN: hold the target near the center of the feed until acquisition registers, then begin the terminal run.'
+          : ['NO EFFECT', 'PROTECTION DEFEAT', 'MISS'].includes(report.effect)
+            ? 'NEXT RUN: stabilize the final line earlier and verify the intended impact aspect.'
+            : report.terminalCorrection > 95
+              ? 'NEXT RUN: finish the offset maneuver before the final five seconds and hold one attack line.'
+              : 'NEXT RUN: no corrective task assigned; request a new target presentation or advance.';
+    return { good: good.slice(0, 2), improve: improve.slice(0, 2), instruction };
+  }
+
+  finalizeAttempt(reason, outcome = {}) {
+    const samples = this.telemetry.slice();
+    const target = outcome.target || this.nearestLiveVehicle(outcome.impact || this.pos).vehicle;
+    const straight = Math.max(1, this.attemptStart.distanceTo(outcome.impact || this.pos));
+    const routeEfficiency = this.attemptDistance / straight;
+    const targetSpeed = target?.velocity?.length?.() || 0;
+    let aspect = 'UNKNOWN';
+    if (target) {
+      const rearDirection = new THREE.Vector3(1, 0, 0)
+        .applyAxisAngle(UP_AXIS, target.mesh.rotation.y).normalize();
+      const targetToImpact = (outcome.impact || this.pos).clone().sub(target.pos).setY(0);
+      if (targetToImpact.lengthSq() > 0.01) {
+        const dot = rearDirection.dot(targetToImpact.normalize());
+        aspect = dot > 0.55 ? 'REAR' : dot < -0.55 ? 'FRONT' : 'FLANK';
+      }
+    }
+    const terminalSamples = samples.filter(sample => sample.t >= this.flightTime - 5);
+    let terminalCorrection = 0;
+    let previousHeading = null;
+    for (let index = 1; index < terminalSamples.length; index++) {
+      const dx = terminalSamples[index].x - terminalSamples[index - 1].x;
+      const dz = terminalSamples[index].z - terminalSamples[index - 1].z;
+      if (dx * dx + dz * dz < 0.01) continue;
+      const heading = Math.atan2(dx, -dz);
+      if (previousHeading !== null) {
+        const delta = Math.atan2(Math.sin(heading - previousHeading), Math.cos(heading - previousHeading));
+        terminalCorrection += Math.abs(delta) * 180 / Math.PI;
+      }
+      previousHeading = heading;
+    }
+    const effect = outcome.effect || (outcome.killed ? 'DESTROYED' : 'NO EFFECT');
+    const firstPass = this.attemptCommittedAt !== null && this.attemptChaseTime < 8;
+    const score = Math.max(0, Math.min(100,
+      20
+      + (this.attemptAcquiredAt !== null ? 15 : 0)
+      + (firstPass ? 20 : Math.max(0, 12 - this.attemptChaseTime * 0.5))
+      + (this.attemptJamTime < 5 ? 15 : Math.max(0, 15 - this.attemptJamTime))
+      + (this.battery >= 25 ? 15 : this.battery * 0.6)
+      + (['DESTROYED', 'MOBILITY KILL', 'EFFECTIVE'].includes(effect) ? 15 : 0)));
+    const report = {
+      reason, effect, aspect, score: Math.round(score), samples,
+      duration: this.flightTime,
+      distance: this.attemptDistance * this.metersPerUnit,
+      directDistance: straight * this.metersPerUnit,
+      routeExcess: Math.max(0, this.attemptDistance - straight) * this.metersPerUnit,
+      routeEfficiency,
+      batteryAtEnd: this.battery,
+      batteryUsed: this.attemptStartBattery - this.battery,
+      minSignal: this.attemptMinSignal,
+      jamTime: this.attemptJamTime,
+      criticalTime: this.attemptCriticalTime,
+      maxAgl: this.attemptMaxAgl,
+      chaseTime: this.attemptChaseTime,
+      acquired: this.attemptAcquiredAt !== null,
+      acquireTime: this.attemptAcquiredAt,
+      commitTime: this.attemptCommittedAt,
+      firstPass,
+      targetSpeed: targetSpeed * this.metersPerUnit,
+      targetCaged: !!target?.cage,
+      impactDistance: target ? target.pos.distanceTo(outcome.impact || this.pos) * this.metersPerUnit : 0,
+      terminalCorrection,
+      targetLabel: target?.label || 'NO CONFIRMED TARGET',
+      impact: (outcome.impact || this.pos).clone(),
+      target,
+      expended: outcome.expended !== false,
+      aborted: !!outcome.aborted,
+    };
+    report.coaching = this.coachAttempt(report);
+    this.attempts.push(report);
+    return report;
+  }
+
+  beginAttemptReview(reason, outcome = {}) {
+    if (!this.isFpvFamily || this.attemptState !== FPV_ATTEMPT.FLYING) return;
+    if (outcome.expended !== false) this.airframesLost++;
+    this.vel.set(0, 0, 0);
+    // A spent FPV or lost aircraft leaves a dead feed. A reusable bomber that merely ran
+    // out of payload still has a live link, so do not misrepresent that state as full EW.
+    this.signal = outcome.expended === false ? Math.max(this.signal, 0.35) : 0;
+    this.review = this.finalizeAttempt(reason, outcome);
+    this.onAttemptReviewed?.(this.review);
+    this.pendingMissionComplete = outcome.missionComplete
+      ?? (this.combatVehicles.length > 0 && this.combatVehicles.every(vehicle =>
+        vehicle.dead || vehicle.decoy || vehicle.protected || vehicle.optional));
+    this.pendingMissionFailure = !this.pendingMissionComplete
+      && (outcome.criticalFailure || this.airframesLost >= this.airframes);
+    this.pendingRunReset = !!outcome.restartRun;
+    this.attemptState = FPV_ATTEMPT.IMPACT_HOLD;
+    this.attemptStateTime = 0;
+    this.result.textContent = `${reason}\nAWAITING STRIKE CONFIRMATION`;
+    this.result.style.opacity = '1';
+    this.help.style.display = 'none';
+  }
+
+  clearReplayObjects() {
+    for (const object of [this.replayGhost, this.replayPath]) {
+      if (!object) continue;
+      this.scene.remove(object);
+      disposeObject(object);
+    }
+    this.replayGhost = null;
+    this.replayPath = null;
+  }
+
+  startAttemptReplay() {
+    this.attemptState = FPV_ATTEMPT.REPLAY;
+    this.attemptStateTime = 0;
+    this.result.style.opacity = '0';
+    for (const element of this.flightHudElements) element.style.display = 'none';
+    if (this.canvas) this.canvas.style.filter = 'saturate(.78) contrast(1.06) brightness(.86)';
+    const report = this.review;
+    const recent = report.samples.filter(sample => sample.t >= report.duration - 8);
+    report.replaySamples = recent.length > 1 ? recent : report.samples;
+    const points = report.replaySamples.map(sample => new THREE.Vector3(sample.x, sample.y, sample.z));
+    if (points.length > 1) {
+      this.replayPath = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({ color: 0xffd54f, transparent: true, opacity: 0.5 }),
+      );
+      this.scene.add(this.replayPath);
+    }
+    this.replayGhost = new THREE.Mesh(
+      new THREE.SphereGeometry(0.28, 10, 7),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    );
+    this.scene.add(this.replayGhost);
+    this.replayPanel.querySelector('.fpv-review-title').textContent = report.reason;
+    this.replayPanel.querySelector('.fpv-replay-facts').textContent = [
+      `TARGET       ${report.targetLabel}`,
+      `TARGET SPEED ${Math.round(report.targetSpeed * 3.6)} KM/H`,
+      `APPROACH     ${report.aspect}`,
+      `BATTERY      ${Math.round(report.batteryAtEnd)}%`,
+      `ASSESSED     ${report.effect}`,
+    ].join('\n');
+    this.replayPanel.style.display = 'block';
+    this.replayBlastShown = false;
+  }
+
+  updateAttemptReplay(dt) {
+    const report = this.review;
+    const samples = report.replaySamples || [];
+    const duration = 7.5;
+    const progress = Math.min(1, this.attemptStateTime / duration);
+    const index = Math.min(samples.length - 1, Math.floor(progress * Math.max(0, samples.length - 1)));
+    const sample = samples[Math.max(0, index)];
+    if (sample && this.replayGhost) this.replayGhost.position.set(sample.x, sample.y, sample.z);
+    const focus = report.impact.clone();
+    if (report.target && !report.target.dead && sample?.targetX !== null) {
+      focus.set(sample.targetX, sample.targetY, sample.targetZ);
+    }
+    const previous = samples[Math.max(0, index - 3)] || sample;
+    const approach = sample && previous
+      ? new THREE.Vector3(sample.x - previous.x, 0, sample.z - previous.z).normalize()
+      : new THREE.Vector3(0, 0, -1);
+    if (approach.lengthSq() < 0.1) approach.set(0, 0, -1);
+    const side = new THREE.Vector3(-approach.z, 0, approach.x);
+    this.camera.position.copy(focus).addScaledVector(side, 10).addScaledVector(approach, -6);
+    this.camera.position.y = focus.y + 6.5;
+    this.camera.lookAt(focus.x, focus.y + 1.1, focus.z);
+    if (progress > 0.88 && !this.replayBlastShown) {
+      this.replayBlastShown = true;
+      this.createImpactEffect(report.impact, this.attempts.length + 20);
+    }
+    if (this.attemptStateTime >= duration) this.showAttemptDebrief();
+  }
+
+  drawAttemptCharts(report) {
+    const samples = report.samples;
+    const map = this.aarMap.getContext('2d');
+    const profile = this.aarProfile.getContext('2d');
+    for (const [ctx, canvas] of [[map, this.aarMap], [profile, this.aarProfile]]) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#0b100c'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'rgba(210,225,210,.13)'; ctx.lineWidth = 1;
+      for (let i = 1; i < 5; i++) {
+        ctx.beginPath(); ctx.moveTo(0, i * canvas.height / 5); ctx.lineTo(canvas.width, i * canvas.height / 5); ctx.stroke();
+      }
+    }
+    if (!samples.length) return;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const sample of samples) {
+      minX = Math.min(minX, sample.x, sample.targetX ?? sample.x);
+      maxX = Math.max(maxX, sample.x, sample.targetX ?? sample.x);
+      minZ = Math.min(minZ, sample.z, sample.targetZ ?? sample.z);
+      maxZ = Math.max(maxZ, sample.z, sample.targetZ ?? sample.z);
+    }
+    const margin = 18;
+    const sx = (this.aarMap.width - margin * 2) / Math.max(1, maxX - minX);
+    const sz = (this.aarMap.height - margin * 2) / Math.max(1, maxZ - minZ);
+    const scale = Math.min(sx, sz);
+    const mapPoint = sample => [margin + (sample.x - minX) * scale, margin + (sample.z - minZ) * scale];
+    if (samples.length > 1) {
+      const [sx0, sz0] = mapPoint(samples[0]);
+      const [sx1, sz1] = mapPoint(samples[samples.length - 1]);
+      map.strokeStyle = 'rgba(233,239,233,.45)';
+      map.lineWidth = 1;
+      map.setLineDash([5, 4]);
+      map.beginPath(); map.moveTo(sx0, sz0); map.lineTo(sx1, sz1); map.stroke();
+      map.setLineDash([]);
+      map.fillStyle = 'rgba(233,239,233,.72)';
+      map.font = '700 8px ui-monospace, Menlo, monospace';
+      map.fillText('DIRECT', (sx0 + sx1) / 2 + 3, (sz0 + sz1) / 2 - 3);
+    }
+    map.lineWidth = 2.2;
+    for (let i = 1; i < samples.length; i++) {
+      const [ax, az] = mapPoint(samples[i - 1]);
+      const [bx, bz] = mapPoint(samples[i]);
+      const signal = samples[i].signal;
+      map.strokeStyle = signal < 0.3 ? '#ff695f' : signal < 0.65 ? '#ffd54f' : '#72e58a';
+      map.beginPath(); map.moveTo(ax, az); map.lineTo(bx, bz); map.stroke();
+    }
+    const targetSamples = samples.filter(sample => sample.targetX !== null);
+    if (targetSamples.length > 1) {
+      map.strokeStyle = '#ff8b72'; map.lineWidth = 1.3; map.setLineDash([4, 3]); map.beginPath();
+      targetSamples.forEach((sample, index) => {
+        const [x, z] = mapPoint({ x: sample.targetX, z: sample.targetZ });
+        if (!index) map.moveTo(x, z); else map.lineTo(x, z);
+      });
+      map.stroke(); map.setLineDash([]);
+    }
+    const maxAgl = Math.max(5, ...samples.map(sample => sample.agl));
+    profile.lineWidth = 2;
+    profile.strokeStyle = '#e9efe9'; profile.beginPath();
+    samples.forEach((sample, index) => {
+      const x = index / Math.max(1, samples.length - 1) * this.aarProfile.width;
+      const y = this.aarProfile.height - 12 - sample.agl / maxAgl * (this.aarProfile.height - 24);
+      if (!index) profile.moveTo(x, y); else profile.lineTo(x, y);
+    });
+    profile.stroke();
+    profile.strokeStyle = '#ffd54f'; profile.lineWidth = 1.4; profile.beginPath();
+    samples.forEach((sample, index) => {
+      const x = index / Math.max(1, samples.length - 1) * this.aarProfile.width;
+      const y = this.aarProfile.height - 8 - sample.battery / 100 * (this.aarProfile.height - 16);
+      if (!index) profile.moveTo(x, y); else profile.lineTo(x, y);
+    });
+    profile.stroke();
+  }
+
+  showAttemptDebrief() {
+    this.attemptState = FPV_ATTEMPT.DEBRIEF;
+    this.attemptStateTime = 0;
+    this.replayPanel.style.display = 'none';
+    this.clearReplayObjects();
+    const report = this.review;
+    this.debriefPanel.querySelector('.fpv-debrief-title').textContent = `${report.targetLabel} // ${report.effect}`;
+    this.debriefPanel.querySelector('.fpv-aar-metrics').textContent = [
+      `SCORE             ${report.score}/100`,
+      `FLIGHT TIME       ${report.duration.toFixed(1)} SEC`,
+      `DISTANCE FLOWN    ${Math.round(report.distance)} M`,
+      `ROUTE EFFICIENCY  ${report.routeEfficiency.toFixed(2)}×`,
+      `BATTERY AT END    ${Math.round(report.batteryAtEnd)}%`,
+      `MINIMUM LINK      ${Math.round(report.minSignal * 100)}%`,
+      `EW EXPOSURE       ${report.jamTime.toFixed(1)} SEC`,
+      `CHASE TIME        ${report.chaseTime.toFixed(1)} SEC`,
+      `FIRST PASS        ${report.firstPass ? 'YES' : 'NO'}`,
+    ].join('\n');
+    const fill = (selector, entries) => {
+      const list = this.debriefPanel.querySelector(selector);
+      list.replaceChildren(...entries.map(entry => {
+        const item = document.createElement('li'); item.textContent = entry; return item;
+      }));
+    };
+    fill('.fpv-good', report.coaching.good);
+    fill('.fpv-improve', report.coaching.improve);
+    this.debriefPanel.querySelector('.fpv-next-instruction').textContent = report.coaching.instruction;
+    this.debriefPanel.querySelector('.fpv-review-key').textContent = this.training.openRange
+      ? this.pendingMissionComplete || this.pendingMissionFailure || this.pendingRunReset
+        ? 'FIRE — NEW TARGET SET  ·  F — NEXT STAGE'
+        : 'FIRE — NEXT AIRFRAME  ·  F — END STAGE'
+      : this.pendingMissionComplete
+        ? 'FIRE — SUBMIT BDA AND COMPLETE MISSION'
+        : this.pendingMissionFailure
+          ? 'FIRE — SUBMIT BDA'
+          : 'FIRE — ACCEPT DEBRIEF';
+    this.drawAttemptCharts(report);
+    this.debriefPanel.style.display = 'block';
+  }
+
+  practiceVehicleDefinition(definition, index) {
+    let resolved = { ...definition };
+    if (definition.variants?.length) {
+      resolved = { ...resolved, ...definition.variants[index % definition.variants.length] };
+    } else if (definition.positions?.length) {
+      resolved.pos = definition.positions[index % definition.positions.length];
+    }
+    if (resolved.pos) resolved.pos = [...resolved.pos];
+    if (resolved.route) resolved.route = resolved.route.map(point => [...point]);
+    return resolved;
+  }
+
+  serveNewTargetSet() {
+    if (!this.combatVehicleDefinitions.length) {
+      this.pendingMissionComplete = false;
+      this.pendingMissionFailure = false;
+      this.pendingRunReset = false;
+      this.egressRequired = false;
+      this.batteryCall30 = false;
+      this.batteryCall20 = false;
+      this.airframesLost = 0;
+      this.prepareNextAirframe();
+      return;
+    }
+    for (const signature of this.thermalSignatures) {
+      this.scene.remove(signature);
+      disposeObject(signature);
+    }
+    this.thermalSignatures.length = 0;
+    for (const vehicle of this.combatVehicles) {
+      this.scene.remove(vehicle.mesh);
+      vehicle.mesh.userData.dispose?.();
+    }
+    this.presentationIndex++;
+    this.combatVehicles = this.combatVehicleDefinitions.map(definition =>
+      createDroneAssaultVehicle(this.scene,
+        this.practiceVehicleDefinition(definition, this.presentationIndex)));
+    for (const vehicle of this.combatVehicles) {
+      const signature = thermalSignature(vehicle, true);
+      this.scene.add(signature);
+      this.thermalSignatures.push(signature);
+    }
+    this.airframesLost = 0;
+    this.bombs = this.bombsTotal;
+    this.lastBombImpact = null;
+    this.pendingMissionComplete = false;
+    this.pendingMissionFailure = false;
+    this.pendingRunReset = false;
+    this.egressRequired = false;
+    this.batteryCall30 = false;
+    this.batteryCall20 = false;
+    this.buildFpvMap(this.definition);
+    this.prepareNextAirframe();
+  }
+
+  advanceTrainingStage() {
+    this.complete = true;
+    this.debriefPanel.style.display = 'none';
+    this.onComplete?.();
+  }
+
+  radioCall(message, duration = 4600) {
+    if (!this.result) return;
+    this.result.textContent = message;
+    this.result.style.opacity = '1';
+    clearTimeout(this.resultTimer);
+    this.resultTimer = setTimeout(() => {
+      if (!this.complete) this.result.style.opacity = '0';
+    }, duration);
+  }
+
+  bomberRetask(killedLabels = []) {
+    if (this.mode !== 'bomber') return;
+    const remaining = this.combatVehicles.filter(vehicle =>
+      !vehicle.dead && !vehicle.decoy && !vehicle.protected && !vehicle.optional);
+    if (!remaining.length) {
+      if (this.training.requireReturn) {
+        this.egressRequired = true;
+        this.radioCall(`RANGE CONTROL — ALL REQUIRED EFFECTS CONFIRMED. RETURN TO LAUNCH NOW. FOLLOW HOME ARROW. BATTERY ${Math.round(this.battery)}%.`, 6500);
+      }
+      return;
+    }
+    const effect = killedLabels.length ? `${killedLabels.join(' + ')} DESTROYED. ` : '';
+    this.radioCall(`RANGE CONTROL — ${effect}RETASK ${remaining[0].label}. ${remaining.length} REQUIRED TARGET${remaining.length === 1 ? '' : 'S'} REMAIN · ${this.bombs} BOMBS · BATTERY ${Math.round(this.battery)}%. RTB AFTER FINAL EFFECT.`, 6500);
+  }
+
+  prepareNextAirframe() {
+    this.detonated = false;
+    this.pos.copy(this.launch);
+    this.pos.y += 1.7;
+    this.vel.set(0, 0, 0);
+    this.yaw = this.launchYaw;
+    this.pitch = -0.05;
+    this.roll = 0;
+    this.battery = 100;
+    this.signal = 1;
+    this.jamFactor = 1;
+    this.linkLowTimer = 0;
+    this.armTimer = 1.2;
+    this.camera.position.copy(this.pos);
+    this.camera.rotation.set(this.pitch, this.yaw, 0);
+    this.resetAttemptTelemetry();
+    this.debriefPanel.style.display = 'none';
+    for (const element of this.flightHudElements) element.style.display = '';
+    this.help.style.display = 'none';
+    if (this.canvas) this.canvas.style.filter = 'saturate(.62) contrast(1.14) brightness(.94)';
+    this.readyPanel.querySelector('.fpv-ready-title').textContent = `AIRFRAME ${this.airframesLost + 1}/${this.airframes} READY`;
+    this.readyPanel.style.display = 'block';
+    this.attemptState = FPV_ATTEMPT.READY;
+    this.attemptStateTime = 0;
+  }
+
+  updateAttemptState(dt, input) {
+    this.attemptStateTime += dt;
+    this.updateEffects(dt);
+    if (this.attemptState === FPV_ATTEMPT.IMPACT_HOLD) {
+      this.updateFpvOsd(dt);
+      if (this.attemptStateTime >= 2.35) this.startAttemptReplay();
+      return;
+    }
+    if (this.attemptState === FPV_ATTEMPT.REPLAY) {
+      this.updateAttemptReplay(dt);
+      return;
+    }
+    if (this.attemptState === FPV_ATTEMPT.DEBRIEF) {
+      if (this.attemptStateTime < 0.8 || !(input.firePressed || input.breachPressed)) return;
+      if (this.training.openRange) {
+        if (input.breachPressed) this.advanceTrainingStage();
+        else if (this.pendingMissionComplete || this.pendingMissionFailure || this.pendingRunReset) this.serveNewTargetSet();
+        else this.prepareNextAirframe();
+        return;
+      }
+      if (this.pendingMissionComplete) {
+        this.complete = true;
+        this.debriefPanel.style.display = 'none';
+        this.onComplete?.();
+      } else if (this.pendingMissionFailure) {
+        this.failedOut = true;
+        this.debriefPanel.style.display = 'none';
+        this.onFailed?.(this.review?.reason || 'ALL AIRFRAMES EXPENDED');
+      } else this.prepareNextAirframe();
+      return;
+    }
+    if (this.attemptState === FPV_ATTEMPT.READY
+      && this.attemptStateTime > 0.25 && (input.firePressed || input.breachPressed)) {
+      this.readyPanel.style.display = 'none';
+      this.help.style.display = '';
+      this.attemptState = FPV_ATTEMPT.FLYING;
+      this.attemptStateTime = 0;
+      this.result.textContent = `AIRFRAME ${this.airframesLost + 1}/${this.airframes} AIRBORNE`;
+      this.result.style.opacity = '1';
+      clearTimeout(this.resultTimer);
+      this.resultTimer = setTimeout(() => {
+        if (!this.complete) this.result.style.opacity = '0';
+      }, 1500);
+    }
+  }
+
   update(dt, input, solids) {
     if (!this.active) return;
+    if (this.isFpvFamily && this.attemptState !== FPV_ATTEMPT.FLYING) {
+      this.updateAttemptState(dt, input);
+      return;
+    }
     if (this.frozen) {
       // Expended or lost: the feed is dead. Keep the explosion animating under the snow.
       this.updateEffects(dt);
@@ -1194,6 +1935,7 @@ export class DroneController {
       }
     }
     this.flightTime += dt;
+    this.missionFlightTime += dt;
     this.updateThermalBurst(dt, input);
     // Jamming degrades the CONTROL link too, not just the picture: inside a bubble the
     // stick response goes mushy before it dies. Legacy modes fly with a clean link.
@@ -1207,13 +1949,13 @@ export class DroneController {
     this.forward.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
     this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const thrust = -input.move.y;
-    this.vel.addScaledVector(this.forward, thrust * this.accel * control * dt);
-    this.vel.addScaledVector(this.right, input.move.x * this.accel * 0.58 * control * dt);
-    if (input.ads) this.vel.y += 10 * control * dt;
-    if (input.crouch) this.vel.y -= 9 * dt;
+    this.vel.addScaledVector(this.forward, thrust * this.worldAccel * control * dt);
+    this.vel.addScaledVector(this.right, input.move.x * this.worldAccel * 0.58 * control * dt);
+    if (input.ads) this.vel.y += (this.isFpvFamily ? 10 / this.metersPerUnit : 10) * control * dt;
+    if (input.crouch) this.vel.y -= (this.isFpvFamily ? 9 / this.metersPerUnit : 9) * dt;
     const damping = Math.exp(-1.45 * dt);
     this.vel.multiplyScalar(damping);
-    if (this.vel.length() > this.maxSpeed) this.vel.setLength(this.maxSpeed);
+    if (this.vel.length() > this.worldMaxSpeed) this.vel.setLength(this.worldMaxSpeed);
 
     this.next.copy(this.pos).addScaledVector(this.vel, dt);
     this.move.copy(this.next).sub(this.pos);
@@ -1254,10 +1996,14 @@ export class DroneController {
     this.jamFactor = 1;
     const droneAgl = this.pos.y - terrainY;
     for (const jammer of this.jammers) {
+      if (!this.jammerLive(jammer)) continue;
       const reach = jammer.r * (0.55 + 0.45 * Math.min(1, Math.max(0, droneAgl) / 40));
       const d = Math.hypot(this.pos.x - jammer.x, this.pos.z - jammer.z);
       if (d < reach) {
-        let factor = Math.pow(Math.max(0, d / reach), 1.4);
+        const signalFloor = Math.max(0, Math.min(0.95, jammer.signalFloor ?? 0));
+        const falloff = Math.max(0.25, jammer.falloff ?? 1.4);
+        let factor = signalFloor
+          + (1 - signalFloor) * Math.pow(Math.max(0, d / reach), falloff);
         // Real terrain masking: if a ridge stands between the airframe and the jammer
         // mast, most of the jamming energy never arrives. Flying the gully IS the counter.
         if (droneTerrain && d > 24) {
@@ -1276,19 +2022,46 @@ export class DroneController {
       }
     }
     this.signal = base * this.jamFactor;
+    if (this.definition.videoDegrade) {
+      const degrade = this.definition.videoDegrade;
+      const cycle = Math.max(1, degrade.cycle ?? 24);
+      const phase = ((this.flightTime + (degrade.offset || 0)) % cycle) / cycle;
+      const wave = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
+      this.signal *= 1 - wave * Math.max(0, Math.min(0.85, degrade.strength ?? 0.48));
+    }
     this.battery = Math.max(0, this.battery
-      - dt * (this.batteryDrain + this.vel.length() / this.maxSpeed * this.batteryDrain * 0.6));
+      - dt * (this.batteryDrain + this.vel.length() / this.worldMaxSpeed * this.batteryDrain * 0.6));
+    if (this.mode === 'bomber' && this.training.requireReturn) {
+      const homeDistance = Math.round(this.pos.distanceTo(this.launch) * this.metersPerUnit);
+      if (this.battery <= 20 && !this.batteryCall20) {
+        this.batteryCall20 = true;
+        this.radioCall(`RANGE CONTROL — BATTERY ${Math.round(this.battery)}%. HOME ${homeDistance} M. RETURN NOW UNLESS THE FINAL EFFECT IS IMMEDIATE.`, 6000);
+      } else if (this.battery <= 30 && !this.batteryCall30) {
+        this.batteryCall30 = true;
+        this.radioCall(`RANGE CONTROL — BATTERY ${Math.round(this.battery)}%. HOME ${homeDistance} M. PROTECT THE RETURN RESERVE.`, 5200);
+      }
+    }
     if (this.isFpvFamily) {
       // Analog fails soft, but it still fails: hold a dead link too long and the aircraft
       // is gone. The timer is the pilot's chance to dive out of the bubble.
       if (this.signal <= 0.1) this.linkLowTimer += dt; else this.linkLowTimer = 0;
-      if (this.linkLowTimer > 1.7) { this.loseAirframe('LINK LOST IN THE BUBBLE'); return; }
+      const linkLossGrace = this.training.linkLossGrace ?? 1.7;
+      if (this.linkLowTimer > linkLossGrace) { this.loseAirframe('LINK LOST IN THE BUBBLE'); return; }
       if (this.battery <= 0) { this.loseAirframe('BATTERY FLAT'); return; }
     } else if (this.signal <= 0.02 || this.battery <= 0) this.resetAircraft();
 
     this.camera.position.copy(this.pos);
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.set(this.pitch, this.yaw, this.roll);
+
+    this.recordAttemptTelemetry(dt, solids);
+    if (this.isFpvFamily && this.training.allowAbort && input.breachPressed) {
+      this.beginAttemptReview('MISSION ABORTED — AIRFRAME RECOVERED', {
+        effect: 'ABORTED', impact: this.pos.clone(), expended: false, aborted: true,
+        missionComplete: !!this.training.abortCompletes,
+      });
+      return;
+    }
 
     this.incomingPressure = Math.max(0, this.incomingPressure - dt * 1.8);
     if (this.mode === 'strike' && !this.strikeCleanup) {
@@ -1478,18 +2251,32 @@ export class DroneController {
     }
     this.updateFpvOsd(dt);
     const live = this.combatVehicles.filter(vehicle => !vehicle.dead);
-    if (!live.length && this.combatVehicles.length && !this.complete) {
-      this.complete = true;
-      this.result.textContent = this.resultText;
-      this.result.style.opacity = '1';
-      this.completionTimer = setTimeout(() => this.onComplete?.(), 1400);
+    const requiredLive = live.filter(vehicle => !vehicle.decoy && !vehicle.protected && !vehicle.optional);
+    if (!requiredLive.length && this.combatVehicles.length && !this.complete) {
+      if (this.mode === 'bomber' && this.attemptState === FPV_ATTEMPT.FLYING) {
+        if (this.training.requireReturn) {
+          if (!this.egressRequired) this.bomberRetask();
+          const returnRadius = this.training.returnRadius ?? 14;
+          if (this.pos.distanceTo(this.launch) <= returnRadius) {
+            this.beginAttemptReview('AIRCRAFT RECOVERED — REQUIRED EFFECTS CONFIRMED', {
+              ...(this.lastBombImpact || {}),
+              effect: 'DESTROYED', expended: false, missionComplete: true,
+            });
+          }
+        } else {
+          this.beginAttemptReview('PAYLOAD EFFECTS CONFIRMED', {
+            ...(this.lastBombImpact || {}),
+            effect: 'DESTROYED', expended: false, missionComplete: true,
+          });
+        }
+      }
+      return;
     }
     if (this.mode === 'bomber' && this.bombs <= 0 && !this.munitions.length
-      && live.length && !this.complete && !this.failedOut) {
-      this.failedOut = true;
-      this.result.textContent = 'PAYLOAD EXPENDED — TARGETS INTACT';
-      this.result.style.opacity = '1';
-      setTimeout(() => this.onFailed?.('PAYLOAD EXPENDED'), 1400);
+      && requiredLive.length && !this.complete && !this.failedOut) {
+      this.beginAttemptReview('PAYLOAD EXPENDED — TARGETS INTACT', {
+        ...(this.lastBombImpact || {}), effect: 'NO EFFECT', expended: false, restartRun: true,
+      });
     }
   }
 
@@ -1498,15 +2285,37 @@ export class DroneController {
   // the charge goes into the slats — and only the open rear arc puts it down. That single
   // rule is the cope-cage lesson the mission exists to teach.
   fpvDetonate(position) {
-    if (this.detonated || this.frozen) return;
+    if (this.detonated || this.frozen || this.attemptState !== FPV_ATTEMPT.FLYING) return;
     this.detonated = true;
     this.createImpactEffect(position, this.airframesLost + 1);
     this.onCombatBlast?.(position.clone(), 8, 240);
     let note = 'AIRFRAME EXPENDED — NO EFFECT ON TARGET';
+    let effect = 'NO EFFECT';
+    let hitTarget = null;
+    let killedTarget = false;
+    let criticalFailure = false;
     for (const vehicle of this.combatVehicles) {
       if (vehicle.dead) continue;
       const distance = vehicle.pos.distanceTo(position);
       if (distance > 7) continue;
+      hitTarget = vehicle;
+      if (vehicle.protected || !vehicle.hostile) {
+        note = 'PROTECTED OBJECT STRUCK — IDENTIFICATION FAILURE';
+        effect = 'PROTECTED STRIKE';
+        criticalFailure = true;
+        break;
+      }
+      if (vehicle.requiresIdentification && !vehicle.identified) {
+        note = 'UNCONFIRMED TARGET STRUCK — NO CREDIT';
+        effect = 'UNCONFIRMED';
+        break;
+      }
+      if (vehicle.decoy) {
+        vehicle.damage(vehicle.maxHealth);
+        note = 'DECOY STRUCK — TARGET STILL ACTIVE';
+        effect = 'DECOY';
+        break;
+      }
       const rear = new THREE.Vector3(1, 0, 0).applyAxisAngle(UP_AXIS, vehicle.mesh.rotation.y);
       const toBlast = position.clone().sub(vehicle.pos);
       toBlast.y = 0;
@@ -1515,61 +2324,52 @@ export class DroneController {
       if (vehicle.cage && !rearHit) {
         vehicle.damage(55);
         note = 'CAGE DEFEATED THE CHARGE — TAKE THE REAR ARC';
+        effect = 'PROTECTION DEFEAT';
       } else {
         const killed = vehicle.damage(460);
+        killedTarget = killed;
         note = killed
           ? `${vehicle.label || 'TARGET'} DESTROYED`
           : 'TARGET HIT — STILL MOVING';
+        effect = killed ? 'DESTROYED' : 'EFFECTIVE';
         if (killed) this.onVehicleKilled?.(vehicle);
       }
+      break;
     }
-    this.loseAirframe(note);
+    if (killedTarget) {
+      for (const vehicle of this.combatVehicles) {
+        if (vehicle.dead || vehicle.reacted || !vehicle.reaction) continue;
+        vehicle.reacted = true;
+        if (vehicle.reaction.speedMultiplier) vehicle.speed *= vehicle.reaction.speedMultiplier;
+        if (vehicle.reaction.route?.length) {
+          vehicle.route = vehicle.reaction.route.map(point => ({
+            x: point[0], y: point.length > 2 ? point[1] : 0,
+            z: point.length > 2 ? point[2] : point[1],
+          }));
+          vehicle.routeIdx = 0;
+        }
+      }
+    }
+    this.loseAirframe(note, {
+      target: hitTarget, impact: position.clone(), effect, killed: killedTarget, criticalFailure,
+    });
   }
 
   // One airframe down, by expenditure or by loss. If the target list is finished, freeze on
   // the final crash frame under full static; if frames remain, the next quad comes up from
   // the launch point; if neither, the sortie has failed and the mission is told so.
-  loseAirframe(reason) {
-    if (this.frozen) return;
-    this.airframesLost++;
-    this.vel.set(0, 0, 0);
-    const liveTargets = this.combatVehicles.some(vehicle => !vehicle.dead);
-    if (!liveTargets && this.combatVehicles.length) {
-      this.frozen = true;
-      this.signal = 0;
-      if (!this.complete) {
-        this.complete = true;
-        this.result.textContent = this.resultText;
-        this.result.style.opacity = '1';
-        this.completionTimer = setTimeout(() => this.onComplete?.(), 1700);
-      }
-      return;
-    }
-    if (this.airframesLost >= this.airframes) {
-      this.frozen = true;
-      this.signal = 0;
-      if (!this.failedOut) {
-        this.failedOut = true;
-        this.result.textContent = `${reason} — ALL AIRFRAMES EXPENDED`;
-        this.result.style.opacity = '1';
-        setTimeout(() => this.onFailed?.(reason), 1500);
-      }
-      return;
-    }
-    this.detonated = false;
-    this.pos.copy(this.launch);
-    this.pos.y += 1.7;
-    this.yaw = this.launchYaw;
-    this.pitch = -0.05;
-    this.battery = 100;
-    this.linkLowTimer = 0;
-    this.armTimer = 1.2;
-    this.result.textContent = `${reason} — AIRFRAME ${this.airframesLost + 1}/${this.airframes} UP`;
-    this.result.style.opacity = '1';
-    clearTimeout(this.resultTimer);
-    this.resultTimer = setTimeout(() => {
-      if (!this.complete) this.result.style.opacity = '0';
-    }, 2600);
+  loseAirframe(reason, outcome = {}) {
+    if (this.frozen || this.attemptState !== FPV_ATTEMPT.FLYING) return;
+    this.beginAttemptReview(reason, {
+      effect: outcome.effect || (reason.includes('LINK') ? 'LINK LOSS'
+        : reason.includes('BATTERY') ? 'BATTERY LOSS' : 'NO EFFECT'),
+      impact: outcome.impact || this.pos.clone(),
+      target: outcome.target || null,
+      killed: !!outcome.killed,
+      expended: outcome.expended !== false,
+      missionComplete: outcome.missionComplete,
+      criticalFailure: !!outcome.criticalFailure,
+    });
   }
 
   dropBomb() {
@@ -1627,9 +2427,12 @@ export class DroneController {
     osd.batt.textContent = `${(cell * 6).toFixed(1)}V  ${cell.toFixed(2)}V/C\n${mah}MAH`;
     const lq = Math.round(signal * 100);
     const rssi = Math.round(-40 - (1 - signal) * 58);
+    const requiredTargets = this.combatVehicles.filter(vehicle =>
+      !vehicle.decoy && !vehicle.protected && !vehicle.optional);
+    const requiredLive = requiredTargets.filter(vehicle => !vehicle.dead).length;
     osd.link.textContent = `LQ ${lq}\nRSSI ${rssi}DBM`
       + (this.mode === 'bomber'
-        ? `\nBOMBS ${this.bombs}/${this.bombsTotal}\n${this.thermalEnabled ? 'THERM' : 'EO'}`
+        ? `\nBOMBS ${this.bombs}/${this.bombsTotal}  TGT ${requiredLive}/${requiredTargets.length}\n${this.thermalEnabled ? 'THERM' : 'EO'}`
         : '');
     const meters = this.pos.distanceTo(this.launch) * this.metersPerUnit;
     const yawHome = Math.atan2(-(this.launch.x - this.pos.x), -(this.launch.z - this.pos.z));
@@ -1643,7 +2446,8 @@ export class DroneController {
     const distText = meters >= 1000
       ? `DIST ${(meters / 1000).toFixed(1)}KM   HOME ${arrow}`
       : `DIST ${Math.round(meters)}M   HOME ${arrow}`;
-    osd.dist.textContent = `HDG ${String(hdg).padStart(3, '0')} ${cardinal}\n${distText}`;
+    const speedKmh = Math.round(this.vel.length() * this.metersPerUnit * 3.6);
+    osd.dist.textContent = `HDG ${String(hdg).padStart(3, '0')} ${cardinal}   SPD ${speedKmh}KM/H\n${distText}`;
     if (this.mapCtx) {
       const ctx = this.mapCtx;
       ctx.clearRect(0, 0, this.mapW, this.mapH);
@@ -1664,8 +2468,9 @@ export class DroneController {
       ctx.fill();
     }
     osd.warn.textContent = this.frozen ? ''
-      : this.linkLowTimer > 0.3 ? 'SIGNAL CRITICAL'
-        : signal < 0.3 ? 'JAMMING'
+      : this.egressRequired ? 'RTB — FOLLOW HOME ARROW'
+      : this.linkLowTimer > 0.3 ? 'SIGNAL CRITICAL — TURN OUT'
+        : signal < 0.3 ? 'JAMMING — BREAK LINE OF SIGHT'
           : this.battery < 9 ? 'LAND NOW'
             : this.battery < 22 ? 'LOW BATTERY' : '';
   }
@@ -2047,13 +2852,30 @@ export class DroneController {
     }
     if (this.isFpvFamily) {
       // A dropped bomb is a top attack: cages and aspect do not apply, blast falloff does.
+      let nearest = null;
+      let nearestDistance = Infinity;
+      let anyKilled = false;
+      const killedLabels = [];
       for (const vehicle of this.combatVehicles) {
         if (vehicle.dead) continue;
         const distance = vehicle.pos.distanceTo(position);
+        if (distance < nearestDistance) { nearest = vehicle; nearestDistance = distance; }
         if (distance > 9) continue;
+        if (vehicle.protected || !vehicle.hostile || vehicle.decoy) continue;
         const killed = vehicle.damage(360 * (1 - distance / 9));
-        if (killed) this.onVehicleKilled?.(vehicle);
+        if (killed) {
+          anyKilled = true;
+          killedLabels.push(vehicle.label || 'TARGET');
+          this.onVehicleKilled?.(vehicle);
+        }
       }
+      this.lastBombImpact = {
+        target: nearest,
+        impact: position.clone(),
+        effect: anyKilled ? 'DESTROYED' : nearestDistance <= 9 ? 'EFFECTIVE' : 'MISS',
+        killed: anyKilled,
+      };
+      if (anyKilled && this.mode === 'bomber') this.bomberRetask(killedLabels);
     }
     this.onCombatBlast?.(position.clone(), this.isFpvFamily ? 9 : 7, 185);
     this.createImpactEffect(position, this.shotsFired + this.grenadeRounds);

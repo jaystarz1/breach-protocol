@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Flight school end-to-end: DRONARIUM (11) and GRADUATION (12).
-
-Level 11: 4 statics, 3 movers + cage (frontal defeated, rear kills), bomber over the
-practice siding (tank hulk takes two bombs). Level 12: the same shape under jamming
-(bubble asserted to actually jam), ending on the rolling train. Lesson cards are skipped
-through the QA hook. Both levels must reach a won debrief.
-"""
+"""Compatibility entry point for the Levels 11–20 tactical drone curriculum QA."""
 import argparse
 import json
+import runpy
 import time
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -80,6 +76,10 @@ def wait_phase(page, idx):
 
 
 def main():
+    # The former three-level school has been replaced by the Levels 11–20 curriculum.
+    # Keep this established QA entry point as a compatibility alias for local/CI callers.
+    runpy.run_path(Path(__file__).with_name("qa-tactical-drone-training.py"), run_name="__main__")
+    return
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:4178/?renderer=desktop")
     args = parser.parse_args()

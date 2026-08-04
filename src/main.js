@@ -77,7 +77,7 @@ let world = null;
 let player = null;
 let weapons = null;
 let currentLevel = nextCampaignMission(S);
-const missionRuns = new Uint16Array(11);
+const missionRuns = new Uint16Array(LEVELS.length + 1);
 let levelLoadId = 0;
 let flashlight = null;
 let lastTime = performance.now();
@@ -1445,16 +1445,27 @@ function setObjective() {
       hud.feed('UAS SENSOR — IMAGE INTENSIFIER ACTIVE', '#8cecff');
     }
     const combatants = obj.mode === 'combat' ? spawnDroneCombatWave(obj) : [];
+    const combatVehicleDefinitions = ['fpv', 'bomber'].includes(obj.mode)
+      ? (obj.vehicles || []).map(definition => ({
+        ...definition,
+        metersPerUnit: obj.metersPerUnit ?? 1,
+        speedPhysical: obj.speedPhysical !== false,
+      }))
+      : [];
     const combatVehicles = obj.mode === 'combat'
       ? (world.droneAssault?.vehicles || [])
       : ['fpv', 'bomber'].includes(obj.mode)
-        ? (obj.vehicles || []).map(definition => createDroneAssaultVehicle(scene, definition))
+        ? combatVehicleDefinitions.map(definition => createDroneAssaultVehicle(scene, {
+          ...resolveActorVariant(definition, world.missionVariant),
+        }))
         : [];
     suspendGroundCombatForDrone(obj);
     const runtimeDefinition = ['fpv', 'bomber'].includes(obj.mode) ? {
       ...obj,
       minimap: obj.minimap || world.level.minimap,
       combatVehicles,
+      combatVehicleDefinitions,
+      presentationSeed: world.missionVariant,
       onCombatBlast(position) {
         sfx.explosion(position);
         world.combatHeat = Math.max(world.combatHeat, 5);
@@ -1464,6 +1475,12 @@ function setObjective() {
         world.stats.kills++;
         hud.feed(`${vehicle.label || 'VEHICLE'} DESTROYED +250`, '#ffd54f');
         if (vehicle.killMessage) hud.feed(vehicle.killMessage, '#8cecff');
+      },
+      onAttemptReviewed(report) {
+        const interceptBonus = report.firstPass ? 100 : 0;
+        const disciplineBonus = report.routeEfficiency <= 1.55 ? 50 : 0;
+        world.stats.score += report.score * 2 + interceptBonus + disciplineBonus;
+        if (report.firstPass) hud.feed('FIRST-PASS INTERCEPT +100', '#ffd54f');
       },
       onFailed(reason) {
         failMission(`${reason} — THE SORTIE IS OVER`);

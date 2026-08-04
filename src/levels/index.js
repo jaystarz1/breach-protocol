@@ -5,6 +5,7 @@ import { quality } from '../quality.js';
 import { streetShopLayout } from '../mission-variants.js';
 import { terrainSampler } from '../terrain.js';
 import { DEEP_FENCE_TERRAIN } from './terrain-deep-fence.js';
+import { DRONE_TRAINING_LEVELS } from './drone-training.js';
 import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
@@ -228,7 +229,7 @@ function shop(x, z, w, d, face = 's') {
 
 const GROUND = (w = 200, d = 200, color = C.street) => floorSlab(0, 0, w, d, 0, 1, color);
 
-export const LEVELS = [
+const LEGACY_LEVELS = [
   // ---------------------------------------------------------------- 1
   {
     id: 1, name: 'FORWARD COMMAND',
@@ -2864,3 +2865,9 @@ export const LEVELS = [
     ],
   },
 ];
+
+// Levels 1–10 retain the original ground campaign. The drone school is authored as a
+// separate ten-mission curriculum so its reusable ranges, telemetry standards and scenario
+// variations can evolve without turning this already-large ground-level catalogue into one
+// monolithic file.
+export const LEVELS = [...LEGACY_LEVELS.slice(0, 10), ...DRONE_TRAINING_LEVELS];

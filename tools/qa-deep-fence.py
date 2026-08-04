@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
-"""Level 14 (DEEP FENCE) end-to-end: the drone-warfare testbed.
-
-Exercises the real code paths of every new mechanic:
-- FPV kamikaze detonation on target proximity
-- Cope-cage aspect rule: a frontal hit is defeated, a rear-arc hit kills
-- Airframe expenditure and the next-airframe respawn
-- Phase chaining across three no-handoff drone sorties
-- Bomber gravity drops killing the fuel wagons
-- Mission win at the end of the third sortie
-"""
+"""Compatibility entry point for DEEP FENCE and the full tactical drone curriculum QA."""
 import argparse
 import json
+import runpy
 import time
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 
 def main():
+    # DEEP FENCE is now Level 20 and depends on the complete ten-mission curriculum.
+    # Delegate to the authoritative end-to-end drone-training QA while preserving this
+    # historical command name for existing developer workflows.
+    runpy.run_path(Path(__file__).with_name("qa-tactical-drone-training.py"), run_name="__main__")
+    return
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:4178/?renderer=desktop")
     args = parser.parse_args()
