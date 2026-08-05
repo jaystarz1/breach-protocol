@@ -25,7 +25,7 @@ def main():
         page.wait_for_function("() => !!window.BP", timeout=90000)
 
         def capture():
-            page.evaluate("() => BP.startLevel(2)")
+            page.evaluate("() => BP.startLevel(102)")
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             page.wait_for_timeout(250)
             return page.evaluate("""() => {

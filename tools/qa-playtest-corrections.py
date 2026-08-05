@@ -24,7 +24,7 @@ def main():
         page.goto(args.url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_function("() => !!window.BP", timeout=90000)
 
-        page.evaluate("() => BP.startLevel(2)")
+        page.evaluate("() => BP.startLevel(102)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         correction = page.evaluate("""async () => {
           const heldA = new KeyboardEvent('keydown', {
@@ -125,7 +125,7 @@ def main():
         page.wait_for_timeout(100)
         page.screenshot(path=str(output / "armed-drone-consequence.png"))
 
-        page.evaluate("() => BP.startLevel(3)")
+        page.evaluate("() => BP.startLevel(103)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         doors = page.evaluate("""() => ({
           count: BP.world.doors.doors.length,
@@ -144,7 +144,7 @@ def main():
         page.wait_for_timeout(100)
         page.screenshot(path=str(output / "exterior-door.png"))
 
-        page.evaluate("() => BP.startLevel(6)")
+        page.evaluate("() => BP.startLevel(106)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         head = page.evaluate("""async () => {
           const { animateRig, coverPoseRig } = await import('./src/levelgen.js');
@@ -175,7 +175,7 @@ def main():
         sniper = page.evaluate("""() => {
           const previous = window.__bpVisualProps;
           window.__bpVisualProps = [];
-          BP.LEVELS[5].geo();
+          BP.LEGACY_LEVELS[5].geo();
           const facades = window.__bpVisualProps.filter(prop =>
             prop.kind === 'facade' && [611, 612, 613].includes(prop.seed));
           const result = {
@@ -237,7 +237,7 @@ def main():
         }""")
         sniper["postProcess"] = page.evaluate("() => BP.performance.postProcess")
 
-        page.evaluate("() => BP.startLevel(10)")
+        page.evaluate("() => BP.startLevel(110)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         corpse = page.evaluate("""async () => {
           const THREE = await import('./lib/three.module.js');

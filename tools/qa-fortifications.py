@@ -16,9 +16,9 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
 
     views = {
-        2: {"eye": [0, 1, -44], "target": [0, 0.7, -50], "file": "street-line.png"},
-        5: {"eye": [-20, 2.5, 21], "target": [-26, 0.6, 28], "file": "market-line.png"},
-        10: {"eye": [6, 1, 39], "target": [13, 0.6, 34], "file": "finale-line.png"},
+        102: {"eye": [0, 1, -44], "target": [0, 0.7, -50], "file": "street-line.png"},
+        105: {"eye": [-20, 2.5, 21], "target": [-26, 0.6, 28], "file": "market-line.png"},
+        110: {"eye": [6, 1, 39], "target": [13, 0.6, 34], "file": "finale-line.png"},
     }
 
     with sync_playwright() as p:
@@ -89,18 +89,18 @@ def main():
 
         assert not errors
         expected = {
-            "2": {
+            "102": {
                 "frontline-barricade-hesco-fill": 5,
                 "frontline-barricade-hesco-cages": 5,
                 "frontline-anti-vehicle-hedgehogs": 3,
             },
-            "5": {
+            "105": {
                 "frontline-market-hesco-fill": 5,
                 "frontline-market-hesco-cages": 5,
                 "frontline-ambient-crater-rims": 4,
                 "frontline-ambient-rubble-fines": 144,
             },
-            "10": {
+            "110": {
                 "frontline-fallback-hesco-fill": 4,
                 "frontline-fallback-hesco-cages": 4,
                 "frontline-fallback-hedgehogs": 2,
@@ -116,7 +116,7 @@ def main():
             assert all(parts[name]["instanced"] for name in names)
             assert results[level]["calls"] < 450
             assert results[level]["triangles"] < 1_500_000
-        fallback = results["10"]["parts"]["frontline-fallback-sandbags"]
+        fallback = results["110"]["parts"]["frontline-fallback-sandbags"]
         assert fallback["authoredSacks"]
         assert fallback["vertices"] > 450
         assert fallback["instanceColors"] == fallback["count"]

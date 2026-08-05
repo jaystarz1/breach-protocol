@@ -279,7 +279,7 @@ def main():
                 kind,
             )
 
-        start(2)
+        start(102)
         captures = {}
         action_contacts = {}
         for kind in ("enemy", "friendly"):
@@ -353,7 +353,7 @@ def main():
                         action_contacts[action_name] = contact_row
                         page.screenshot(path=str(output / f"action-{action_name}.png"))
 
-        start(5)
+        start(105)
         for kind in ("civilian", "concealed"):
             captures[kind] = stage(kind)
             page.wait_for_timeout(80)

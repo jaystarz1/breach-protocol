@@ -92,7 +92,7 @@ def main():
             page.evaluate("() => { BP.input.ads = false; BP.input.breath = false; }")
 
         page.evaluate("""() => {
-          BP.startLevel(4);
+          BP.startLevel(104);
           BP.weapons.select('m4');
           BP.weapons.state.m4.mag = 12;
           BP.weapons.reload();
@@ -113,7 +113,7 @@ def main():
         captures.append("m4-reload.png")
 
         def sniper_shot(offset):
-            page.evaluate("() => BP.startLevel(6)")
+            page.evaluate("() => BP.startLevel(106)")
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             return page.evaluate(
                 """(offset) => {

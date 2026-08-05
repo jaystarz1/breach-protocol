@@ -60,12 +60,12 @@ def main():
 
         debrief_chain = page.evaluate("""async () => {
           const { campaignDebrief } = await import('./src/campaign.js');
-          return [1, 4, 7, 10].map(id => ({ id, ...campaignDebrief(id, true) }));
+          return [1, 2, 3, 4].map(id => ({ id, ...campaignDebrief(id, true) }));
         }""")
 
-        page.evaluate("() => BP.startLevel(10)")
+        page.evaluate("() => BP.startLevel(110)")
         page.wait_for_function(
-            "() => BP.mode === 'playing' && BP.campaign.currentMission === 10",
+            "() => BP.mode === 'playing' && BP.campaign.currentMission === 110",
             timeout=90000,
         )
         page.wait_for_timeout(350)
@@ -180,15 +180,15 @@ def main():
         print(json.dumps(result, indent=2))
 
         assert "MISSION 04" in briefing["number"], briefing
-        assert briefing["progress"].startswith("3/20"), briefing
+        assert briefing["progress"].startswith("3/14"), briefing
         assert "ANTON MOROZOV" in briefing["dossier"], briefing
-        assert "vehicle" in briefing["target"].lower(), briefing
-        assert "relocation order" in briefing["evidence"].lower(), briefing
+        assert "forward-command" in briefing["target"].lower(), briefing
+        assert "physically present" in briefing["evidence"].lower(), briefing
         assert all(item["result"] and item["nextLead"] for item in debrief_chain)
         assert len({item["result"] for item in debrief_chain}) == len(debrief_chain)
         assert debrief_dom["heading"] == "INTELLIGENCE RECOVERED", debrief_dom
         assert "annex is secure" in debrief_dom["result"].lower(), debrief_dom
-        assert "LAUNCH CORRIDOR" in debrief_dom["lead"], debrief_dom
+        assert "THE STREET" in debrief_dom["lead"], debrief_dom
         assert debrief_dom["nextVisible"], debrief_dom
         assert bastion["count"] == 1, bastion
         assert bastion["hvt"] and bastion["flee"], bastion

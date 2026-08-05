@@ -2,14 +2,15 @@
 // systems along authored waypoint paths and reports per-level completability.
 // Usage from console/eval:  QA.run(1, 10, {difficulty: 1, god: true})
 import { input } from './input.js';
-import { hasLOS, raySphere } from './physics.js';
+import { hasLOS, raySphere, groundHeight } from './physics.js';
 import { findPath } from './navgrid.js';
 import { streetShopLayout } from './mission-variants.js';
 
-// Waypoints per level: [x, z] or [x, z, y]. The bot walks them in order,
+// Waypoints per SOURCE level: [x, z] or [x, z, y]. The bot walks them in order,
 // fights anything it sees along the way, auto-breaches doors, then relies on
-// the objective system to finish the mission.
-const PATHS = {
+// the objective system to finish the mission. The merged acts compose these
+// segment paths with the same offsets acts.js uses, plus seam waypoints.
+const SEGMENT_PATHS = {
   1: [[0, 14], [7, 11], [0, 9], [0, 3], [7, -1], [7, -3], [0, -5], [0, -9], [7, -13], [9, -15], [0, -17], [0, -18]],
   2: [[0, 30], [0, 22], [8, 20], [11, 20], [8, 20], [0, 12], [-4, 2], [8, -4.5], [11, -5], [8, -4.5], [0, -14], [-6, -25], [-11, -25], [-6, -25], [0, -34], [0, -44], [0, -51]],
   3: [[0, 10], [-7, 4], [-7, 1], [-10, -7], [0, -7], [10, -7],
@@ -50,6 +51,61 @@ function streetSweepPath(variant) {
   return path;
 }
 
+// Translate a segment path by an act offset. Three-element waypoints carry a y check.
+const T = (path, dx, dz, dy = 0) => path.map(p =>
+  p.length > 2 ? [p[0] + dx, p[1] + dz, p[2] + dy] : [p[0] + dx, p[1] + dz]);
+
+// Act routes: segment paths at their acts.js offsets, joined by seam waypoints.
+function actPath(level, variant) {
+  if (level === 2) {
+    const s3 = SEGMENT_PATHS[3];
+    const descent = [...s3].reverse().filter(p => p.length > 2);
+    return [
+      ...streetSweepPath(variant),
+      [0, -56], [0, -68], [0, -79],
+      ...T(s3, 0, -95),
+      ...T(descent, 0, -95),
+      [16, -100], [16, -112], [0, -120], [0, -127], [0, -133], [0, -140],
+      ...T(SEGMENT_PATHS[4], 0, -190),
+    ];
+  }
+  if (level === 3) {
+    const climb = [
+      [14, 100], [13, 78], [9.5, 78, 0],
+      [0, 78, 3], [8.9, 78, 6], [0, 78, 9], [8.9, 78, 12],
+      [0, 78, 15], [8.9, 78, 18], [0, 78, 21], [8.9, 78, 24],
+      [4, 74, 24], [0, 68, 24], [-4, 61.5, 24],
+    ];
+    const descend = [
+      [8.9, 78, 24], [0, 78, 21], [8.9, 78, 18], [0, 78, 15], [8.9, 78, 12],
+      [0, 78, 9], [8.9, 78, 6], [0, 78, 3], [9.5, 78, 0], [14, 90],
+    ];
+    return [
+      ...T(SEGMENT_PATHS[5], 0, 200),
+      [0, 162], [0, 152],
+      ...climb,
+      ...descend,
+      [0, 40], [0, -10], [-15, -45], [-30, -70], [-35, -77], [20, -60], [0, -100],
+      [0, -130], [0, -155], [0, -170],
+      ...T([...SEGMENT_PATHS[7]].reverse(), 0, -200),
+      [0, -186],
+    ];
+  }
+  if (level === 4) {
+    return [
+      ...SEGMENT_PATHS[8],
+      [3, -4], [3, 2], [0, 8], [0, 17], [0, 26], [-8, 32], [-14, 38], [-14, 42],
+      ...T(SEGMENT_PATHS[9], -14, -2, -6),
+      [-14, -62, -6], [-14, -68, -3], [-14, -74, 0], [-14, -77], [-14, -86], [-14, -94],
+      ...T(SEGMENT_PATHS[10], -14, -140),
+    ];
+  }
+  // 100-series QA boots run a legacy source level standalone on its original path.
+  const source = level >= 100 ? level - 100 : level;
+  if (source === 2) return streetSweepPath(variant);
+  return SEGMENT_PATHS[source] || [];
+}
+
 export const RESULTS = [];
 window.QA_RESULTS = RESULTS;
 
@@ -62,7 +118,7 @@ function activeObjective(world) {
 
 export function stop() { if (timer) clearInterval(timer); timer = null; input.move.x = 0; input.move.y = 0; input.fire = false; }
 
-export function run(from = 1, to = 10, opts = {}) {
+export function run(from = 1, to = 4, opts = {}) {
   stop();
   const god = opts.god !== false;
   if (opts.difficulty !== undefined) BP.setDifficulty(opts.difficulty);
@@ -70,6 +126,7 @@ export function run(from = 1, to = 10, opts = {}) {
   let wpIdx = 0;
   let levelStart = performance.now();
   let lastPos = null, stuckSince = 0, jiggleUntil = 0, jiggleDir = 1, bestWd = null;
+  let wpYMismatch = 0;
   let dynPath = null, dynIdx = 0, dynTimer = 0, dynStuck = 0, dynLast = null;
   let lastObjKey = '', objSince = 0;
   let notes = [];
@@ -79,7 +136,7 @@ export function run(from = 1, to = 10, opts = {}) {
   function beginLevel() {
     BP.startLevel(level);
     wpIdx = 0; levelStart = performance.now();
-    lastPos = null; stuckSince = 0; jiggleUntil = 0; bestWd = null;
+    lastPos = null; stuckSince = 0; jiggleUntil = 0; bestWd = null; wpYMismatch = 0;
     dynPath = null; dynIdx = 0; dynTimer = 0; dynStuck = 0; dynLast = null;
     lastObjKey = ''; objSince = performance.now();
     hpMin = 1; hpSum = 0; hpSamples = 0;
@@ -122,7 +179,11 @@ export function run(from = 1, to = 10, opts = {}) {
     }
     if (BP.mode !== 'playing') return;
 
-    if (god) { p.health = p.maxHealth; if (w.sniperTeam) w.sniperTeam.health = w.sniperTeam.maxHealth; }
+    if (god) {
+      // A flat refill still loses to a one-shot landing between ticks (the counter-sniper).
+      p.health = Math.max(p.maxHealth, 2000);
+      if (w.sniperTeam) w.sniperTeam.health = w.sniperTeam.maxHealth;
+    }
     else {
       // track the worst moment of the level for the balance report
       hpMin = Math.min(hpMin, p.health / p.maxHealth);
@@ -133,7 +194,7 @@ export function run(from = 1, to = 10, opts = {}) {
     // OP Alpha now searches two joined three-storey wings and returns for six hostages.
     // Unlike a timed challenge, the mission itself has no clock; the QA ceiling must reflect
     // the authored route length instead of declaring a healthy larger level broken at 240s.
-    const cap = w.level.sniper ? 300 : level === 3 ? 520 : 240;
+    const cap = w.level.qaTimeCap ?? (w.level.sniper || w.sniperActive ? 300 : level >= 100 ? 520 : 240);
     if ((performance.now() - levelStart) / 1000 > cap) {
       notes.push(`TIMEOUT obj=${w.objectiveIdx} pos=${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)} live=${w.enemies.filter(e => !e.dead && !e.surrendered).map(e => `(${e.pos.x.toFixed(0)},${e.pos.y.toFixed(0)},${e.pos.z.toFixed(0)})`).join('')}`);
       report('FAIL(timeout)');
@@ -194,10 +255,10 @@ export function run(from = 1, to = 10, opts = {}) {
       const dy = (target.pos.y + 1.0) - eye.y;
       p.yaw = Math.atan2(-dx, -dz);
       p.pitch = Math.atan2(dy, Math.hypot(dx, dz));
-      input.ads = w.level.sniper ? true : tDist > 30;
-      input.breath = !!w.level.sniper;
+      input.ads = w.sniperActive ? true : tDist > 30;
+      input.breath = !!w.sniperActive;
       // crouch to shoot at range like a person would; enemy accuracy drops for it
-      input.crouch = !god && !w.level.sniper && tDist > 9;
+      input.crouch = !god && !w.sniperActive && tDist > 9;
       if (weap.ammo.mag <= 0) input.reloadPressed = true;
       else if (weap.spec.auto) input.fire = true;
       else { fireTick++; if (fireTick % 12 === 0) { input.fire = true; input.firePressed = true; } }
@@ -221,13 +282,18 @@ export function run(from = 1, to = 10, opts = {}) {
     }
     civJam = 0;
 
-    if (w.level.lockPlayer) return; // sniper: nothing to walk
+    if (p.locked) return; // locked phase (sniper post): nothing to walk
 
     // --- dynamic goals: run down an HVT, or go free a hostage ---
     // A hostage masking the only shot outranks the objective's own goal: walking up frees
     // them (rescue is proximity-based), unmasks the target, and the fight resumes.
     let dyn = civRiskHostage ? civRiskHostage.pos : null;
-    if (dyn) { /* rescue-before-fight */ } else if (obj && obj.type === 'target') {
+    if (dyn) { /* rescue-before-fight */ } else if (obj && obj.type === 'reach' && obj.zone) {
+      // Navigate to reach zones by pathfinding. The merged acts climb and descend between
+      // phases, so a linear waypoint index cannot represent the route; findPath can, and
+      // the no-route guard below falls back to the authored waypoints when it fails.
+      dyn = { x: obj.zone[0], y: obj.zone[3] ?? p.pos.y, z: obj.zone[1] };
+    } else if (obj && obj.type === 'target') {
       const hvt = w.enemies.find(e => e.hvt && !e.dead);
       if (hvt) dyn = hvt.pos;
     } else if (obj && obj.type === 'rescue') {
@@ -256,9 +322,21 @@ export function run(from = 1, to = 10, opts = {}) {
     if (dyn) {
       if (!dynPath || dynTimer <= 0 || dynIdx >= dynPath.length) {
         dynTimer = 1.0;
-        dynPath = findPath(w.nav, p.pos.x, p.pos.y, p.pos.z, dyn.x, dyn.y, dyn.z) || [{ x: dyn.x, y: dyn.y, z: dyn.z }];
-        dynIdx = 0;
+        const direct = Math.hypot(dyn.x - p.pos.x, dyn.z - p.pos.z);
+        const found = findPath(w.nav, p.pos.x, p.pos.y, p.pos.z, dyn.x, dyn.y, dyn.z);
+        const wpLeft = wpIdx < actPath(level, w.missionVariant).length;
+        if (!found && wpLeft
+            && (direct > 25 || Math.abs((dyn.y ?? 0) - p.pos.y) > 2.5)) {
+          // No route from here (wrong floor, next act segment): keep walking the authored
+          // route toward it instead of grinding a straight line into a parapet.
+          dyn = null;
+          dynPath = null;
+        } else {
+          dynPath = found || [{ x: dyn.x, y: dyn.y, z: dyn.z }];
+          dynIdx = 0;
+        }
       }
+      if (dyn) {
       dynTimer -= 0.1;
       const wp2 = dynPath[Math.min(dynIdx, dynPath.length - 1)];
       const d2 = Math.hypot(wp2.x - p.pos.x, wp2.z - p.pos.z);
@@ -287,17 +365,42 @@ export function run(from = 1, to = 10, opts = {}) {
       } else dynStuck = Math.max(0, dynStuck - 0.05);
       dynLast = { x: p.pos.x, z: p.pos.z };
       return;
+      }
     }
-    dynPath = null;
+    if (!dyn) dynPath = null;
 
     // --- navigate waypoints ---
-    const path = level === 2 ? streetSweepPath(w.missionVariant) : PATHS[level] || [];
+    const path = actPath(level, w.missionVariant);
+    // Dyn goals and QA nudges move the bot without touching the waypoint index. Snap the
+    // index forward whenever the bot has physically overtaken the path, or the walker will
+    // march (and unstick-teleport) BACKWARD toward stale waypoints.
+    const wpCost = entry => Math.hypot(entry[0] - p.pos.x, entry[1] - p.pos.z)
+      + (entry[2] !== undefined ? Math.abs(entry[2] - p.pos.y) * 2 : 0);
+    while (wpIdx + 1 < path.length && wpCost(path[wpIdx + 1]) + 2 < wpCost(path[wpIdx])) {
+      wpIdx++; stuckSince = 0; bestWd = null;
+    }
+    // Far off the authored line (a dyn detour or a QA nudge moved the bot): re-enter the
+    // path at the closest remaining waypoint instead of marching back to a stale one.
+    if (wpIdx < path.length && wpCost(path[wpIdx]) > 40) {
+      let best = wpIdx, bestCost = Infinity;
+      for (let i = wpIdx; i < path.length; i++) {
+        const cost = wpCost(path[i]);
+        if (cost < bestCost) { bestCost = cost; best = i; }
+      }
+      if (best !== wpIdx) { wpIdx = best; stuckSince = 0; bestWd = null; }
+    }
     if (wpIdx >= path.length) return; // path done; objectives (reach zone) should have fired
     const wp = path[wpIdx];
     const wdx = wp[0] - p.pos.x, wdz = wp[1] - p.pos.z;
     const wd = Math.hypot(wdx, wdz);
     const yOk = wp[2] === undefined || Math.abs(p.pos.y - wp[2]) < 2;
-    if (wd < 1.2 && yOk) { wpIdx++; stuckSince = 0; bestWd = null; return; }
+    if (wd < 1.2 && yOk) { wpIdx++; stuckSince = 0; bestWd = null; wpYMismatch = 0; return; }
+    // Standing on the waypoint's x/z but on another storey: the objectives moved the bot off
+    // the authored floor (a drone phase, a dyn chase). The stale waypoint is done — skip it.
+    if (wd < 1.2 && !yOk) {
+      wpYMismatch += 0.1;
+      if (wpYMismatch > 2.5) { wpIdx++; wpYMismatch = 0; stuckSince = 0; bestWd = null; return; }
+    } else wpYMismatch = Math.max(0, wpYMismatch - 0.05);
 
     p.yaw = Math.atan2(-wdx, -wdz);
     p.pitch = 0;
@@ -320,8 +423,12 @@ export function run(from = 1, to = 10, opts = {}) {
       }
       if (stuckSince > 12) {
         notes.push(`STUCK wp${wpIdx}(${wp[0]},${wp[1]}${wp[2] !== undefined ? ',' + wp[2] : ''}) at ${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)}`);
-        // teleport past the blockage so the rest of the level still gets tested
-        p.pos.set(wp[0], (wp[2] ?? p.pos.y) + 0.1, wp[1]);
+        // Teleport past the blockage so the rest of the level still gets tested — but only
+        // onto real floor. A waypoint with no y inherits the bot's current storey, and on a
+        // multi-storey merged act that can be a coordinate hanging over void.
+        const floorY = groundHeight(
+          w.solids, wp[0], wp[1], 0.3, (wp[2] ?? p.pos.y) + 1.6);
+        if (floorY > -Infinity) p.pos.set(wp[0], floorY + 0.1, wp[1]);
         wpIdx++; stuckSince = 0; bestWd = null;
       }
     }

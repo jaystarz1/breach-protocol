@@ -64,12 +64,12 @@ def main():
             return result
 
         levels = {
-            "2": capture(2, "street-skyline.png"),
-            "5": capture(5, "market-skyline.png"),
-            "10": capture(10, "finale-skyline.png"),
+            "2": capture(102, "street-skyline.png"),
+            "5": capture(105, "market-skyline.png"),
+            "10": capture(110, "finale-skyline.png"),
         }
         first_market = levels["5"]["stats"]
-        repeat_market = capture(5)["stats"]
+        repeat_market = capture(105)["stats"]
 
         result = {
             "levels": levels,

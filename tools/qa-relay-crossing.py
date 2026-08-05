@@ -26,7 +26,7 @@ def main():
         )
         page.goto(args.url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_function("() => !!window.BP", timeout=90000)
-        page.evaluate("() => BP.startLevel(6)")
+        page.evaluate("() => BP.startLevel(106)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(350)
         page.evaluate("""() => {

@@ -23,7 +23,7 @@ def main():
         page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
         page.goto(args.url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_function("() => !!window.BP", timeout=90000)
-        page.evaluate("() => BP.startLevel(7)")
+        page.evaluate("() => BP.startLevel(107)")
         page.wait_for_function(
             "() => BP.mode === 'playing' && BP.world.drone?.active",
             timeout=90000,

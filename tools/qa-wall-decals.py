@@ -46,11 +46,11 @@ def main():
 
         levels = {
             "1": capture(1, "command-post.png"),
-            "4": capture(4, "alley.png"),
-            "10": capture(10),
+            "4": capture(104, "alley.png"),
+            "10": capture(110),
         }
         first = levels["4"]["stats"]
-        repeat = capture(4)["stats"]
+        repeat = capture(104)["stats"]
         result = {
             "levels": levels,
             "alleyRepeatStable": first == repeat,

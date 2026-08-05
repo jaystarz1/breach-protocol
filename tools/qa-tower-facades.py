@@ -53,8 +53,8 @@ def main():
               };
             }""")
 
-        levels = {str(level): signature(level) for level in [3, 7, 10]}
-        page.evaluate("() => BP.startLevel(3)")
+        levels = {str(level): signature(level) for level in [103, 107, 110]}
+        page.evaluate("() => BP.startLevel(103)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(220)
         repeat = page.evaluate("""() => {
@@ -71,7 +71,7 @@ def main():
 
         result = {
             "levels": levels,
-            "level3RepeatStable": levels["3"]["counts"] == repeat,
+            "level3RepeatStable": levels["103"]["counts"] == repeat,
             "errors": errors[:8],
             "screenshots": ["tower-entry.png"],
         }
@@ -79,7 +79,7 @@ def main():
 
         assert not errors
         assert result["level3RepeatStable"]
-        minimum_windows = {"3": 35, "7": 55, "10": 28}
+        minimum_windows = {"103": 35, "107": 55, "110": 28}
         assert all(
             levels[level]["windows"] >= minimum
             for level, minimum in minimum_windows.items()
@@ -87,11 +87,11 @@ def main():
         assert all(row["sills"] == row["windows"] for row in levels.values())
         assert all(row["broken"] > 0 and row["boarded"] > 0 for row in levels.values())
         assert all(row["downpipes"] >= 8 for row in levels.values())
-        assert levels["3"]["counts"].get("facade-balcony-slabs", 0) == 0
-        assert levels["7"]["counts"].get("facade-balcony-slabs", 0) > 0
-        assert levels["3"]["authoredDoors"] == 6
-        assert levels["7"]["authoredDoors"] == 2
-        assert levels["10"]["authoredDoors"] == 2
+        assert levels["103"]["counts"].get("facade-balcony-slabs", 0) == 0
+        assert levels["107"]["counts"].get("facade-balcony-slabs", 0) > 0
+        assert levels["103"]["authoredDoors"] == 6
+        assert levels["107"]["authoredDoors"] == 2
+        assert levels["110"]["authoredDoors"] == 2
         browser.close()
 
 

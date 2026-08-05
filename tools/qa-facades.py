@@ -97,7 +97,7 @@ def main():
               };
             }""")
 
-        page.evaluate("() => BP.startLevel(2)")
+        page.evaluate("() => BP.startLevel(102)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(250)
         first = signature()
@@ -110,12 +110,12 @@ def main():
         page.wait_for_timeout(180)
         page.screenshot(path=str(output / "facade-shell-oblique.png"))
 
-        page.evaluate("() => BP.startLevel(2)")
+        page.evaluate("() => BP.startLevel(102)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(250)
         second = signature()
 
-        page.evaluate("() => BP.startLevel(3)")
+        page.evaluate("() => BP.startLevel(103)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(250)
         tower = signature()

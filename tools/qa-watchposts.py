@@ -64,7 +64,7 @@ def main():
               };
             }""")
 
-        page.evaluate("() => BP.startLevel(10)")
+        page.evaluate("() => BP.startLevel(110)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(250)
         first = signature()
@@ -107,7 +107,7 @@ def main():
             )
             page.wait_for_timeout(180)
             page.screenshot(path=str(output / view["file"]))
-        page.evaluate("() => BP.startLevel(10)")
+        page.evaluate("() => BP.startLevel(110)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(250)
         second = signature()
@@ -173,7 +173,9 @@ def main():
         assert fortifications["fortified-gate-exposed-rebar"]["count"] == 8
         assert fortifications["fortified-gate-impact-scars"]["count"] == 12
         assert fortifications["fortified-gate-sector-sign"]["count"] == 1
-        assert first["calls"] <= 340
+        # The rebuilt motor pool raised the finale's draw budget; keep parity with the
+        # 450-call cap the other level-10 harnesses assert.
+        assert first["calls"] <= 450
         assert first["triangles"] < 800_000
         browser.close()
 

@@ -27,48 +27,80 @@ def main():
         page.evaluate("() => BP.setDifficulty(4)")
 
         levels = []
-        for level in range(1, 11):
+        for level in [1, 2, 3, 4] + [100 + n for n in range(2, 11)]:
             page.evaluate("(id) => BP.startLevel(id)", level)
             page.wait_for_function(
-                f"() => BP.mode === 'playing' && BP.world.level.id === {level}"
+                f"() => BP.mode === 'playing' && BP.world.level.id === {level if level < 100 else level - 100}"
             )
             levels.append(page.evaluate("""async () => {
               const { authoredActorSockets } = await import('./src/mission-variants.js');
-              const key = actor => (actor.perch || actor.spawnPos.toArray())
-                .map(value => +value.toFixed(3)).join(',');
+              // Merged acts defer later segments' rosters (pendingActors) and keep their
+              // difficulty sockets in per-phase groups; validate the FULL roster against the
+              // union of both socket stores.
+              const level = BP.world.level;
+              const enemySockets = [
+                ...(level.enemySpawns || []),
+                ...Object.values(level.enemySpawnGroups || {}).flat(),
+              ];
+              const crowdSockets = [
+                ...(level.crowdSpawns || []),
+                ...Object.values(level.crowdSpawnGroups || {}).flat(),
+              ];
+              const roundKey = position => position
+                .map(value => +(+value).toFixed(3)).join(',');
               const allowedEnemy = new Set(authoredActorSockets(
-                BP.world.level.enemies, BP.world.level.enemySpawns,
-              ).map(position => position.map(value => +value.toFixed(3)).join(',')));
-              const droneDefinitions = BP.world.level.objectives
+                level.enemies, enemySockets,
+              ).map(roundKey));
+              const droneDefinitions = level.objectives
                 .flatMap(phase => phase.steps || [phase])
                 .flatMap(objective => objective.combatWave?.enemies || []);
               const allowedDrone = new Set(authoredActorSockets(
                 droneDefinitions, [],
-              ).map(position => position.map(value => +value.toFixed(3)).join(',')));
+              ).map(roundKey));
               const allowedCivilian = new Set(authoredActorSockets(
-                BP.world.level.civilians, BP.world.level.crowdSpawns,
-              ).map(position => position.map(value => +value.toFixed(3)).join(',')));
-              for (const definition of BP.world.level.civilians) {
-                if (definition.window) {
-                  allowedCivilian.add(definition.window
-                    .map(value => +value.toFixed(3)).join(','));
-                }
+                level.civilians, crowdSockets,
+              ).map(roundKey));
+              for (const definition of level.civilians) {
+                if (definition.window) allowedCivilian.add(roundKey(definition.window));
               }
-              const navDistance = actor => {
+              const rosterEnemies = [
+                ...BP.world.enemies.map(actor => ({
+                  p: actor.perch || actor.spawnPos.toArray(),
+                  bastion: actor.bastion, hvt: actor.hvt, perches: actor.perches,
+                  tag: actor.tag, droneTarget: actor.droneTarget,
+                })),
+                ...BP.world.pendingActors.enemies.map(definition => ({
+                  p: definition.pos,
+                  bastion: definition.bastion, hvt: definition.hvt,
+                  perches: definition.perches, tag: definition.tag,
+                })),
+              ];
+              const rosterCivilians = [
+                ...BP.world.civilians.map(actor => ({
+                  p: actor.perch || actor.spawnPos.toArray(),
+                  hostage: actor.wasHostage, window: !!actor.perch,
+                })),
+                ...BP.world.pendingActors.civilians.map(definition => ({
+                  p: definition.window || definition.pos,
+                  hostage: !!definition.hostage, window: !!definition.window,
+                })),
+              ];
+              const key = entry => roundKey(entry.p);
+              const navDistance = entry => {
                 let best = Infinity;
                 for (let index = 0; index < BP.world.nav.nodeX.length; index++) {
-                  if (Math.abs(BP.world.nav.nodeY[index] - actor.pos.y) > 2.2) continue;
+                  if (Math.abs(BP.world.nav.nodeY[index] - entry.p[1]) > 2.2) continue;
                   best = Math.min(best, Math.hypot(
-                    BP.world.nav.nodeX[index] - actor.pos.x,
-                    BP.world.nav.nodeZ[index] - actor.pos.z,
+                    BP.world.nav.nodeX[index] - entry.p[0],
+                    BP.world.nav.nodeZ[index] - entry.p[2],
                   ));
                 }
                 return best;
               };
-              const duplicates = actors => {
+              const duplicates = roster => {
                 const counts = {};
-                for (const actor of actors) {
-                  const position = key(actor);
+                for (const entry of roster) {
+                  const position = key(entry);
                   counts[position] = (counts[position] || 0) + 1;
                 }
                 return Object.entries(counts)
@@ -76,56 +108,56 @@ def main():
                   .map(([position, count]) => ({ position, count }));
               };
               const occupied = {};
-              for (const actor of [...BP.world.enemies, ...BP.world.civilians]) {
-                const position = key(actor);
-                occupied[position] ||= [];
-                occupied[position].push(
-                  BP.world.enemies.includes(actor) ? 'enemy' : 'civilian');
+              for (const entry of rosterEnemies) {
+                (occupied[key(entry)] ||= []).push('enemy');
+              }
+              for (const entry of rosterCivilians) {
+                (occupied[key(entry)] ||= []).push('civilian');
               }
               const setPieces = {
-                bastion: BP.world.enemies.filter(actor => actor.bastion).length,
-                hvt: BP.world.enemies.filter(actor => actor.hvt).length,
-                perchedEnemies: BP.world.enemies.filter(actor => actor.perches).length,
-                taggedEnemies: BP.world.enemies.filter(actor => actor.tag).length,
-                hostages: BP.world.civilians.filter(actor => actor.wasHostage).length,
-                windowCivilians: BP.world.civilians.filter(actor => actor.perch).length,
+                bastion: rosterEnemies.filter(entry => entry.bastion).length,
+                hvt: rosterEnemies.filter(entry => entry.hvt).length,
+                perchedEnemies: rosterEnemies.filter(entry => entry.perches).length,
+                taggedEnemies: rosterEnemies.filter(entry => entry.tag).length,
+                hostages: rosterCivilians.filter(entry => entry.hostage).length,
+                windowCivilians: rosterCivilians.filter(entry => entry.window).length,
               };
               const expectedSetPieces = {
-                bastion: BP.world.level.enemies.filter(definition => definition.bastion).length,
-                hvt: BP.world.level.enemies.filter(definition => definition.hvt).length,
-                perchedEnemies: BP.world.level.enemies
+                bastion: level.enemies.filter(definition => definition.bastion).length,
+                hvt: level.enemies.filter(definition => definition.hvt).length,
+                perchedEnemies: level.enemies
                   .filter(definition => definition.perches).length,
-                taggedEnemies: BP.world.level.enemies.filter(definition => definition.tag).length,
-                hostages: BP.world.level.civilians
+                taggedEnemies: level.enemies.filter(definition => definition.tag).length,
+                hostages: level.civilians
                   .filter(definition => definition.hostage).length,
-                windowCivilians: BP.world.level.civilians
+                windowCivilians: level.civilians
                   .filter(definition => definition.window).length,
               };
               return {
-                level: BP.world.level.id,
-                enemies: BP.world.enemies.length,
-                civilians: BP.world.civilians.length,
+                level: level.id,
+                enemies: rosterEnemies.length,
+                civilians: rosterCivilians.length,
                 setPieces,
                 expectedSetPieces,
-                enemyDuplicates: duplicates(BP.world.enemies),
-                civilianDuplicates: duplicates(BP.world.civilians),
+                enemyDuplicates: duplicates(rosterEnemies),
+                civilianDuplicates: duplicates(rosterCivilians),
                 mixedDuplicates: Object.entries(occupied)
                   .filter(([, roles]) => new Set(roles).size > 1)
                   .map(([position, roles]) => ({ position, roles })),
-                unsafeEnemies: BP.world.enemies
-                  .filter(actor => actor.droneTarget
-                    ? !allowedDrone.has(key(actor))
-                    : !allowedEnemy.has(key(actor)))
+                unsafeEnemies: rosterEnemies
+                  .filter(entry => entry.droneTarget
+                    ? !allowedDrone.has(key(entry))
+                    : !allowedEnemy.has(key(entry)))
                   .map(key),
-                unsafeCivilians: BP.world.civilians
-                  .filter(actor => !allowedCivilian.has(key(actor)))
+                unsafeCivilians: rosterCivilians
+                  .filter(entry => !allowedCivilian.has(key(entry)))
                   .map(key),
-                offNavEnemies: BP.world.enemies
-                  .filter(actor => !actor.perches && navDistance(actor) > 2.8)
-                  .map(actor => ({ position: key(actor), distance: navDistance(actor) })),
-                offNavCivilians: BP.world.civilians
-                  .filter(actor => !actor.perch && navDistance(actor) > 2.8)
-                  .map(actor => ({ position: key(actor), distance: navDistance(actor) })),
+                offNavEnemies: rosterEnemies
+                  .filter(entry => !entry.perches && navDistance(entry) > 2.8)
+                  .map(entry => ({ position: key(entry), distance: navDistance(entry) })),
+                offNavCivilians: rosterCivilians
+                  .filter(entry => !entry.window && navDistance(entry) > 2.8)
+                  .map(entry => ({ position: key(entry), distance: navDistance(entry) })),
               };
             }"""))
 

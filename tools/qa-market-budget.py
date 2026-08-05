@@ -20,7 +20,7 @@ def main():
         page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
         page.goto(args.url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_function("() => !!window.BP", timeout=90000)
-        page.evaluate("() => BP.startLevel(5)")
+        page.evaluate("() => BP.startLevel(105)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(220)
 

@@ -43,7 +43,7 @@ def main():
                 object => object.isPointLight).length,
             })""")
 
-        start(8)
+        start(108)
         page.screenshot(path=str(output / "records-entry.png"))
         page.evaluate("""() => {
           BP.player.pos.set(0, 0, 8);
@@ -54,7 +54,7 @@ def main():
         page.screenshot(path=str(output / "records-floor.png"))
         records = stats()
 
-        start(9)
+        start(109)
         page.screenshot(path=str(output / "metro-entry.png"))
         page.evaluate("""() => {
           BP.player.pos.set(12, 0, 18);

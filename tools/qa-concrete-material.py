@@ -25,7 +25,7 @@ def main():
         page.wait_for_function("() => !!window.BP", timeout=90000)
 
         levels = {}
-        concrete_levels = [1, 3, 4, 6, 7, 9, 10]
+        concrete_levels = [1, 103, 104, 106, 107, 109, 110]
         for level in concrete_levels:
             page.evaluate("(id) => BP.startLevel(id)", level)
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)

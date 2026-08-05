@@ -6,6 +6,7 @@ import { streetShopLayout } from '../mission-variants.js';
 import { terrainSampler } from '../terrain.js';
 import { DEEP_FENCE_TERRAIN } from './terrain-deep-fence.js';
 import { DRONE_TRAINING_LEVELS } from './drone-training.js';
+import { buildActs } from './acts.js';
 import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
   lamp, trafficLight, dumpster, hydrant, bench, barrier, roadLine, crosswalk, awning, shopSign,
@@ -2866,8 +2867,14 @@ const LEGACY_LEVELS = [
   },
 ];
 
-// Levels 1–10 retain the original ground campaign. The drone school is authored as a
-// separate ten-mission curriculum so its reusable ranges, telemetry standards and scenario
-// variations can evolve without turning this already-large ground-level catalogue into one
-// monolithic file.
-export const LEVELS = [...LEGACY_LEVELS.slice(0, 10), ...DRONE_TRAINING_LEVELS];
+// The shooter campaign ships as FORWARD COMMAND plus three merged acts (ids 2/3/4) built
+// from legacy levels 2-10 by acts.js — the legacy definitions above remain the authoring
+// source for every act segment and are exported for that purpose. The drone school keeps
+// its own ten-mission curriculum (ids 11-20); mission ids are stable but not contiguous,
+// so all runtime lookups go by id, never by array index.
+export { LEGACY_LEVELS };
+export const LEVELS = [
+  LEGACY_LEVELS[0],
+  ...buildActs(LEGACY_LEVELS),
+  ...DRONE_TRAINING_LEVELS,
+];

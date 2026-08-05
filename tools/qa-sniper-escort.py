@@ -20,7 +20,7 @@ def main():
         page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
         page.goto(args.url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_function("() => !!window.BP", timeout=90000)
-        page.evaluate("() => BP.startLevel(6)")
+        page.evaluate("() => BP.startLevel(106)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.evaluate("({live, wait}) => { window.__bpLiveEscort = live; window.__bpLiveEscortWait = wait; }", {"live": args.live, "wait": args.wait})
         result = page.evaluate("""async () => {
@@ -102,7 +102,7 @@ def main():
         failure_page = browser.new_page(viewport={"width": 1600, "height": 1000})
         failure_page.goto(args.url, wait_until="domcontentloaded", timeout=90000)
         failure_page.wait_for_function("() => !!window.BP", timeout=90000)
-        failure_page.evaluate("() => BP.startLevel(6)")
+        failure_page.evaluate("() => BP.startLevel(106)")
         failure_page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         failure_page.evaluate("() => { for (const ally of BP.world.allies) ally.damage(999999, BP.world); }")
         failure_page.wait_for_function("() => BP.world.over === true && BP.world.won === false", timeout=10000)

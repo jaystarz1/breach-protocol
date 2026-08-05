@@ -846,6 +846,14 @@ export function mirrorLightsXSince(cursor, centreX) {
     pendingLights[i].pos[0] = centreX * 2 - pendingLights[i].pos[0];
   }
 }
+// Merged act missions rebase each source level's geometry by a constant offset. The lights
+// a segment registered while building have to move with it.
+export function offsetLightsSince(cursor, { dx = 0, dy = 0, dz = 0 }) {
+  for (let i = Math.max(0, cursor | 0); i < pendingLights.length; i++) {
+    const p = pendingLights[i].pos;
+    p[0] += dx; p[1] += dy; p[2] += dz;
+  }
+}
 
 // Flush-mounted ceiling panel. y is the CEILING height, not the fixture height.
 export function ceilingLight(x, y, z, opts = {}) {

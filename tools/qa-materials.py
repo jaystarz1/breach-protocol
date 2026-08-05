@@ -11,7 +11,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:4178/?renderer=desktop")
     parser.add_argument("--output", default="/private/tmp/bp-materials")
-    parser.add_argument("--levels", default="1,4,9,10")
+    parser.add_argument("--levels", default="1,104,109,110")
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)

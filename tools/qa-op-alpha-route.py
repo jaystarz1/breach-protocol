@@ -28,7 +28,7 @@ def main():
         page.goto(args.url, wait_until="domcontentloaded")
         page.wait_for_function("() => !!window.BP && !!window.QA")
         started = time.monotonic()
-        page.evaluate("() => QA.run(3, 3, { difficulty: 0, god: true })")
+        page.evaluate("() => QA.run(103, 103, { difficulty: 0, god: true })")
         page.wait_for_function("() => BP.world?.level?.id === 3 && BP.player")
         # Exercise the real input/collision route faster than a human playthrough. Combat,
         # breach, stairs, hostage proximity and objective code remain unchanged.

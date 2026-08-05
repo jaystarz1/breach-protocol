@@ -24,7 +24,7 @@ def main():
         page.goto(args.url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_function("() => !!window.BP", timeout=90000)
 
-        page.evaluate("() => BP.startLevel(2)")
+        page.evaluate("() => BP.startLevel(102)")
         page.wait_for_function(
             "() => BP.mode === 'playing' && BP.world.level.id === 2",
             timeout=90000,
@@ -216,10 +216,10 @@ def main():
         level2_after = page.evaluate("""() => ({
           objective: BP.objective.text,
           stackRestored: BP.world.allies.every(actor => actor.mesh.visible),
-          assaultDead: BP.world.droneAssault.actors.every(actor => actor.dead),
+          assaultDead: (BP.world.droneAssault || BP.world.lastDroneAssault).actors.every(actor => actor.dead),
         })""")
 
-        page.evaluate("() => BP.startLevel(7)")
+        page.evaluate("() => BP.startLevel(107)")
         page.wait_for_function(
             "() => BP.mode === 'playing' && BP.world.level.id === 7"
             " && BP.world.drone?.mode === 'combat'",
@@ -253,8 +253,8 @@ def main():
         )
         level7_after = page.evaluate("""() => ({
           objective: BP.objective.text,
-          assaultDead: BP.world.droneAssault.actors.every(actor => actor.dead),
-          survivors: BP.world.droneAssault.actors.filter(actor => !actor.dead).map(actor => ({
+          assaultDead: (BP.world.droneAssault || BP.world.lastDroneAssault).actors.every(actor => actor.dead),
+          survivors: (BP.world.droneAssault || BP.world.lastDroneAssault).actors.filter(actor => !actor.dead).map(actor => ({
             droneTarget: actor.droneTarget,
             hold: actor.hold,
             state: actor.state,

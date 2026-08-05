@@ -126,7 +126,7 @@ def main():
         results = {}
 
         if not args.strike_only:
-            page.evaluate("() => BP.startLevel(2)")
+            page.evaluate("() => BP.startLevel(102)")
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             page.evaluate("""() => {
               for (const r of BP.world.reinfs || []) r.sent = r.max;
@@ -144,7 +144,7 @@ def main():
             }""")
             results["level2"] = finish_drone(page, 1, expected_step=1, mode="combat")
 
-            page.evaluate("() => BP.startLevel(3)")
+            page.evaluate("() => BP.startLevel(103)")
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             page.evaluate("""() => {
               for (const r of BP.world.reinfs || []) r.sent = r.max;
@@ -171,7 +171,7 @@ def main():
             }""")
             results["level3"] = finish_drone(page, 2, expected_step=2, mode="combat")
 
-        page.evaluate("() => BP.startLevel(7)")
+        page.evaluate("() => BP.startLevel(107)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         page.wait_for_timeout(500)
         page.evaluate("""() => {

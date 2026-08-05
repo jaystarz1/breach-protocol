@@ -30,15 +30,15 @@ def main():
 
         rows = []
         for _ in range(4):
-            page.evaluate("() => BP.startLevel(5)")
+            page.evaluate("() => BP.startLevel(105)")
             page.wait_for_function(
                 "() => BP.mode === 'playing' && BP.world.level.id === 5",
                 timeout=90000,
             )
             page.wait_for_timeout(120)
             rows.append(page.evaluate("""async () => {
-              const { LEVELS } = await import('./src/levels/index.js');
-              const level = LEVELS.find(candidate => candidate.id === 5);
+              const { LEGACY_LEVELS } = await import('./src/levels/index.js');
+              const level = LEGACY_LEVELS.find(candidate => candidate.id === 5);
               const allowed = new Set();
               const add = position => {
                 if (!position) return;

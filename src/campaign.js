@@ -16,101 +16,53 @@ export const CAMPAIGN = {
   },
 };
 
-// One degraded frontline district, ten connected operations. Ground actions exist to establish
-// and preserve the observation/relay network that lets a smaller Ukrainian force use drones
-// and precision against a numerically larger assault formation.
+// One degraded frontline district. The ground war is four connected operations — the
+// kill-house shakedown plus three long merged acts — followed by the ten-mission drone
+// school. Mission ids are stable but not contiguous (acts kept 2-4, the school kept 11-20),
+// so every entry carries its id and all lookups go by id.
 export const CAMPAIGN_MISSIONS = [
   {
+    id: 1,
     node: 'FORWARD COMMAND',
     sitrep: 'Vektor Group has entered a frontline town being abandoned faster than it can be evacuated. Russian assault elements are probing the eastern blocks.',
     purpose: 'Clear the damaged municipal annex and establish a protected command post and drone workshop.',
     target: 'Morozov is coordinating the probing attacks from outside the district.',
     intel: 'A live contact reports that BASTION supplied the 37th with Vektor launch-corridor maps.',
     result: 'The annex is secure. A transmitted map identifies the main-street battery route as the next attack.',
-    nextLead: 'LAUNCH CORRIDOR — clear the street before OP Alpha loses resupply.',
+    nextLead: 'THE STREET — clear the launch corridor before OP Alpha loses resupply.',
   },
   {
-    node: 'LAUNCH CORRIDOR',
-    sitrep: 'The main street is the only covered route for batteries, warheads and recovered aircraft. Russian scouts and assault infantry have occupied the storefronts.',
-    purpose: 'Clear the corridor, preserve the civilians still trapped there and establish Observation Post Alpha at the southern barricade.',
+    id: 2,
+    node: 'THE STREET',
+    sitrep: 'The main street is the only covered battery and warhead corridor, the apartment block above OP Alpha overlooks it, and a direction-finding team is withdrawing through the alleys beyond. Russian assault infantry hold the whole run.',
+    purpose: 'Clear the corridor and open the southern barricade, retake the OP Alpha block and arm its rooftop drone, then run down the signals officer before BASTION\u2019s routing log crosses the assault line.',
     target: 'Direction-finding traffic associated with Morozov has been detected beyond the street.',
     intel: 'Captured frequency notes show a direction-finding cell listening for Vektor drone-control traffic.',
-    result: 'The corridor and OP Alpha are active. The sortie locates an assault team inside the overlooking apartment block.',
-    nextLead: 'OP ALPHA — recover the observers before the eastern picture goes dark.',
+    result: 'The corridor, OP Alpha and the direction-finding log are all in Vektor\u2019s hands. BASTION abandons his vehicle before the cordon closes.',
+    nextLead: 'THE DISTRICT \u2014 the recovered call signs are active inside the aid crowd.',
   },
   {
-    node: 'OP ALPHA',
-    sitrep: 'An apartment block overlooks the eastern approaches, but assault troops hold its floors and residents are being used to prevent supporting fire.',
-    purpose: 'Retake the building, recover the residents and arm the rooftop drone against the next reinforcement wave.',
-    target: 'Morozov has begun moving electronic-warfare assets toward the district.',
-    intel: 'The trapped observers recorded a 37th signals convoy moving under BASTION’s personal routing code.',
-    result: 'OP Alpha is transmitting. Its armed rooftop drone breaks the next reinforcement wave before it can enter the block.',
-    nextLead: 'DIRECTION FINDER — intercept the routing log before it crosses the assault line.',
-  },
-  {
-    node: 'DIRECTION FINDER',
-    sitrep: 'A Russian reconnaissance and electronic-warfare team has located part of Vektor’s control network and is withdrawing through alleys and a parking structure.',
-    purpose: 'Maintain contact and stop the direction-finding team before it reaches the assault line.',
-    target: 'Morozov’s vehicle was observed with the withdrawing team but separated during contact.',
-    intel: 'The signals officer carries BASTION’s relocation order and the call signs assigned to his infiltrators.',
-    result: 'The direction-finding log is recovered, but BASTION abandons his vehicle before Vektor closes the cordon.',
-    nextLead: 'MARKET INFILTRATION — the recovered call signs are active inside the aid crowd.',
-  },
-  {
-    node: 'MARKET INFILTRATION',
-    sitrep: 'Scouts disguised among civilians are marking launch sites before the next assault wave. The market remains crowded with people who could not evacuate.',
-    purpose: 'Identify weapons only when presented, neutralize the infiltrators and keep the crowd alive.',
-    target: 'Recovered radios carry Morozov’s next assault timetable.',
-    intel: 'Three civilian cover identities match the call signs recovered from the direction-finding team.',
-    result: 'The infiltrator cell is broken. Its radios expose a counter-sniper operation against Vektor’s relay crossing.',
-    nextLead: 'RELAY CROSSING — keep the engineers alive and find the hidden sniper.',
-  },
-  {
-    node: 'RELAY CROSSING',
-    sitrep: 'A black-clad assault and engineering element must cross an exposed plaza to install a relay serving every drone team in the district.',
-    purpose: 'Protect the engineers, read every occupied window and defeat the counter-sniper covering the crossing.',
+    id: 3,
+    node: 'THE DISTRICT',
+    sitrep: 'Scouts disguised as civilians are marking launch sites in the aid market, a counter-sniper operation is set against the relay crossing beyond its south gate, and an assault platoon is forming against the OP Bravo tower.',
+    purpose: 'Break the infiltrator cell without touching the crowd, climb the overwatch post and cover Vektor\u2019s relay crossing, then move on OP Bravo: break the assault with the street-level drone and retake the tower.',
     target: 'Morozov has assigned a dedicated sniper to collapse the relay operation.',
-    intel: 'BASTION’s timetable pairs the sniper with assault observers inside the district high-rise.',
-    result: 'The relay is online and the technicians are recovered. Directional telemetry fixes the observer network at OP Bravo.',
-    nextLead: 'OP BRAVO — strike the support group, then retake the tower.',
+    intel: 'Recovered radios pair the sniper with assault observers inside the district high-rise.',
+    result: 'The market cell is broken, the relay is online and OP Bravo is reopened. Its spectrum recorder captures a coordinated jamming burst.',
+    nextLead: 'UNDERGROUND \u2014 seize the records office before the spectrum archive is erased.',
   },
   {
-    node: 'OP BRAVO',
-    sitrep: 'Russian troops have seized the district high-rise and can observe the command post, launch corridor and relay simultaneously.',
-    purpose: 'Insert on the roof, fight down through the occupied floors and reclaim the long-range antenna position.',
-    target: 'Morozov’s forward staff evacuated as the insertion aircraft crossed the district.',
-    intel: 'OP Bravo has line of sight to an IFV, artillery unit and EW relay forming north of the tower.',
-    result: 'The support group is destroyed and OP Bravo is reopened. Its spectrum recorder captures a coordinated jamming burst.',
-    nextLead: 'ELECTRONIC ATTACK — seize the records office before the spectrum archive is erased.',
-  },
-  {
-    node: 'ELECTRONIC ATTACK',
-    sitrep: 'Power and telemetry have failed during a coordinated jamming attack. Without the records-office servers, Vektor cannot distribute drone video or target grids.',
-    purpose: 'Own the darkness, clear the building and restore the server room before the assault begins.',
-    target: 'Morozov is directing the jamming attack while relocating underground.',
-    intel: 'The captured burst uses BASTION’s liaison-era authentication sequence and terminates below the records office.',
-    result: 'The jammer and archive are secured. Tunnel telemetry reveals a rear infiltration route beneath both observation posts.',
-    nextLead: 'REAR INFILTRATION — close the underground route and recover the detained engineers.',
-  },
-  {
-    node: 'REAR INFILTRATION',
-    sitrep: 'Russian infantry are using metro and utility tunnels to bypass the observation posts. Civilians sheltering underground are trapped between the teams.',
-    purpose: 'Recover the civilians and close the route threatening the drone crews from the rear.',
-    target: 'Intercepted tunnel traffic places Morozov in a hardened forward-command site.',
-    intel: 'A detained engineer identifies BASTION’s bunker ventilation signature and the compound used by his forward staff.',
-    result: 'The rear route is closed. Recovered control equipment confirms BASTION is directing the main assault from the bunker.',
-    nextLead: 'HOLD THE DISTRICT — break the assault, breach the bunker and end BASTION’s command.',
-  },
-  {
-    node: 'HOLD THE DISTRICT',
-    sitrep: 'The main assault has begun: infantry, armour, artillery observation and electronic warfare are converging on the observation network.',
-    purpose: 'Use every surviving position and drone capability, breach the forward-command bunker and break the assault before Vektor is overrun.',
-    target: 'Morozov is confirmed inside the bunker with no prepared evacuation route.',
+    id: 4,
+    node: 'UNDERGROUND',
+    sitrep: 'A coordinated jamming attack has killed the district grid. BASTION\u2019s EW team holds the blacked-out records office, infantry are moving through the metro behind the observation posts, and the main assault is massing on the forward compound above.',
+    purpose: 'Own the darkness through the records office and the metro, seal the rear route, then surface inside the forward compound as the grid comes back: break the assault, destroy the battery and end BASTION\u2019s command in the bunker.',
+    target: 'Morozov is confirmed in the hardened forward-command site with no prepared evacuation route.',
     intel: 'OP Alpha, OP Bravo and the captured relay agree: Anton Morozov is physically present in the forward bunker.',
     result: 'BASTION is neutralized, the forward command collapses and the assault loses its coordinated air picture.',
-    nextLead: 'DRONARIUM — certify on the strike drones before the deep-fence sorties begin.',
+    nextLead: 'DRONARIUM \u2014 certify on the strike drones before the deep-fence sorties begin.',
   },
   {
+    id: 11,
     node: 'DRONARIUM',
     sitrep: 'The district holds, and Vektor is standing up a long-range strike cell. Training begins on a clean range with live flight from the first minute.',
     purpose: 'Learn basic handling, the essential OSD and battery discipline, then repeat the profile without instructor prompts.',
@@ -120,6 +72,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'MOVING RANGE — ten intercept problems, one meeting point at a time.',
   },
   {
+    id: 12,
     node: 'MOVING RANGE',
     sitrep: 'The straight range is running ten target profiles at different speeds, directions and approach geometries.',
     purpose: 'Practice crossing, approaching, receding, turning and concealed targets until first-pass interception replaces tail chasing.',
@@ -129,6 +82,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'HEAVY HANDS — gravity, drift and a bomber that must come home.',
   },
   {
+    id: 13,
     node: 'HEAVY HANDS',
     sitrep: 'The HERON heavy bomber is on the pad with a finite rack and moving rolling stock on the range line.',
     purpose: 'Learn hover and moving releases, account for inherited drift and achieve the required effects without emptying the aircraft.',
@@ -138,6 +92,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'BAD PICTURE — keep flying when the camera stops being kind.',
   },
   {
+    id: 14,
     node: 'BAD PICTURE',
     sitrep: 'Camera quality on the outer range is cycling between readable analog video and heavy breakup while the control channel remains partly usable.',
     purpose: 'Maintain orientation, preserve control and complete terminal attacks through degraded video.',
@@ -147,6 +102,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'THE BUBBLE — one jammer, one landscape and no perfectly accurate circle.',
   },
   {
+    id: 15,
     node: 'THE BUBBLE',
     sitrep: 'A captured jammer is operating from the range and its observed coverage differs from the planning estimate.',
     purpose: 'Use terrain masking, suppress a physical EW source and penetrate an estimated jammer area.',
@@ -156,6 +112,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'NAP OF THE EARTH — make the terrain carry the link.',
   },
   {
+    id: 16,
     node: 'NAP OF THE EARTH',
     sitrep: 'Gullies, windbreak lanes and a sunken road form the only reliable corridors through the next range sector.',
     purpose: 'Fly below the masking line while managing speed, timber, wires and blind bends.',
@@ -165,6 +122,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'THE HUNT — the reported coordinate is no longer the target.',
   },
   {
+    id: 17,
     node: 'THE HUNT',
     sitrep: 'Stale reports place a hostile vehicle among decoys, abandoned equipment and protected traffic.',
     purpose: 'Search likely routes and hides, positively identify the correct vehicle and refuse invalid strikes.',
@@ -174,6 +132,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'BROKEN PLAN — the route closes after launch.',
   },
   {
+    id: 18,
     node: 'BROKEN PLAN',
     sitrep: 'Intermittent EW can close the primary corridor after the aircraft is committed.',
     purpose: 'Use an alternate route, retask or submit a valid no-go decision before battery makes the choice.',
@@ -183,6 +142,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'GRADUATION — a convoy that reacts after the first impact.',
   },
   {
+    id: 19,
     node: 'GRADUATION',
     sitrep: 'A command-and-EW convoy is running the final range route with a heavy-payload follow-up prepared.',
     purpose: 'Prioritize critical targets, adapt to dispersal and achieve the commander’s effect within the airframe and payload allocation.',
@@ -192,6 +152,7 @@ export const CAMPAIGN_MISSIONS = [
     nextLead: 'DEEP FENCE — run the full mission beyond the training range.',
   },
   {
+    id: 20,
     node: 'DEEP FENCE',
     sitrep: 'The 37th’s patrol armour, kolkhoz screen and fuel siding remain intact beyond the fields under an uncertain EW picture.',
     purpose: 'Plan, search, identify, strike, assess and report across three operational sorties.',
@@ -203,7 +164,7 @@ export const CAMPAIGN_MISSIONS = [
 ];
 
 export function campaignMission(id) {
-  return CAMPAIGN_MISSIONS[id - 1] || CAMPAIGN_MISSIONS[0];
+  return CAMPAIGN_MISSIONS.find(m => m.id === id) || CAMPAIGN_MISSIONS[0];
 }
 
 export function briefingText(id, tacticalBrief) {
@@ -230,10 +191,10 @@ export function campaignDebrief(id, won = true) {
 
 export function nextCampaignMission(saveState) {
   const completed = saveState?.best || {};
-  for (let id = 1; id <= CAMPAIGN_MISSIONS.length; id++) {
-    if (!completed[id]) return id;
+  for (const mission of CAMPAIGN_MISSIONS) {
+    if (!completed[mission.id]) return mission.id;
   }
-  return CAMPAIGN_MISSIONS.length;
+  return CAMPAIGN_MISSIONS[CAMPAIGN_MISSIONS.length - 1].id;
 }
 
 export function campaignSnapshot(currentMission, saveState) {

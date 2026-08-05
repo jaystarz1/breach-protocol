@@ -27,7 +27,7 @@ def main():
         )
         page.goto(args.url, wait_until="domcontentloaded")
         page.wait_for_function("() => !!window.BP")
-        page.evaluate("() => BP.startLevel(10)")
+        page.evaluate("() => BP.startLevel(110)")
         page.wait_for_function("() => BP.mode === 'playing'")
 
         contract = page.evaluate("""() => {
@@ -84,8 +84,14 @@ def main():
               socketsBehindRows: BP.world.reinf.at.every(socket =>
                 Math.abs(socket[0]) >= 28 || socket[2] >= 28 || socket[2] <= -38),
             },
-            burningWrecks: BP.scene.children.filter(
-              child => child.name.startsWith('compound-burning-wreck-')).length,
+            burningWrecks: (() => {
+              // Mission art now nests under a per-segment group; count recursively.
+              let count = 0;
+              BP.scene.traverse(child => {
+                if (child.name.startsWith('compound-burning-wreck-')) count++;
+              });
+              return count;
+            })(),
             render: {
               calls: BP.performance.render.calls,
               triangles: BP.performance.render.triangles,

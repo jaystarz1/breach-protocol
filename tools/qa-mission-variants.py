@@ -11,7 +11,7 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:4178/?renderer=desktop")
     parser.add_argument(
         "--levels",
-        default="1,2,3,4,5,7,8,9,10",
+        default="1,102,103,104,105,107,108,109,110",
         help="Comma-separated mission ids (default: every authored-variant mission)",
     )
     args = parser.parse_args()

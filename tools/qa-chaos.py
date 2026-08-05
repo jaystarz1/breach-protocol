@@ -38,11 +38,11 @@ def main():
                 })"""
             )
 
-        page.evaluate("() => BP.startLevel(5)")
+        page.evaluate("() => BP.startLevel(105)")
         page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
         signatures = [market_signature()]
         for _ in range(3):
-            page.evaluate("() => BP.startLevel(5)")
+            page.evaluate("() => BP.startLevel(105)")
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
             page.wait_for_timeout(80)
             signatures.append(market_signature())

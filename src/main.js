@@ -7,7 +7,7 @@ import { Civilian } from './civilians.js';
 import { DoorSystem } from './breach.js';
 import { buildStaticGeometry } from './levelgen.js';
 import { makeBox, raycastSolids, raySphere, rayVerticalCapsule, groundHeight, hasLOS } from './physics.js';
-import { LEVELS } from './levels/index.js';
+import { LEVELS, LEGACY_LEVELS } from './levels/index.js';
 import { buildNavGrid } from './navgrid.js';
 import { DIFFICULTIES } from './difficulty.js';
 import { hud } from './hud.js';
@@ -77,7 +77,24 @@ let world = null;
 let player = null;
 let weapons = null;
 let currentLevel = nextCampaignMission(S);
-const missionRuns = new Uint16Array(LEVELS.length + 1);
+// Mission ids are stable but no longer contiguous (the merged acts kept ids 2-4 while the
+// drone school kept 11-20), so every lookup goes through the id, never the array index.
+// The 100-series is a QA-only registry: startLevel(10X) boots legacy source level X
+// standalone, so the focused per-system QA harnesses keep their coverage of content that
+// now ships inside the merged acts. Not reachable from the campaign UI.
+const levelById = id => (id >= 100
+  ? LEGACY_LEVELS[id - 101]
+  : LEVELS.find(l => l.id === id));
+const levelAfter = id => {
+  const index = LEVELS.findIndex(l => l.id === id);
+  return index >= 0 ? LEVELS[index + 1] || null : null;
+};
+// Keyed by mission id (including the 100-series QA registry) so retries rotate their
+// authored mission variant everywhere.
+const missionRuns = {};
+// Death in a merged act restarts at the current segment checkpoint, not the act start.
+// Set right before a startLevel that should resume; consumed (and cleared) by startLevel.
+let resumePhase = 0;
 let levelLoadId = 0;
 let flashlight = null;
 let lastTime = performance.now();
@@ -102,11 +119,11 @@ function buildDiffRow() {
 function buildLevelList() {
   const list = $('level-list');
   list.innerHTML = '';
-  LEVELS.forEach(L => {
+  LEVELS.forEach((L, index) => {
     const btn = document.createElement('button');
     btn.className = 'menu-btn';
     const best = S.best[L.id];
-    btn.innerHTML = `${String(L.id).padStart(2, '0')} — ${L.name}` +
+    btn.innerHTML = `${String(index + 1).padStart(2, '0')} — ${L.name}` +
       `<span class="sub">${best ? `BEST: ${best.grade} · ${best.score}${best.difficulty ? ' · ' + best.difficulty : ''}` : 'NOT COMPLETED'}${L.sniper ? ' · SNIPER' : ''}</span>`;
     btn.onclick = () => showBrief(L.id);
     list.appendChild(btn);
@@ -115,16 +132,18 @@ function buildLevelList() {
 
 function showBrief(id) {
   currentLevel = id;
-  const L = LEVELS[id - 1];
+  resumePhase = 0;   // launching from the menu is always a fresh start
+  const L = levelById(id);
   const mission = campaignMission(id);
-  $('brief-num').textContent = `MISSION ${String(id).padStart(2, '0')} · ${DIFFICULTIES[S.difficulty].name}`;
+  const missionNumber = LEVELS.findIndex(l => l.id === id) + 1;
+  $('brief-num').textContent = `MISSION ${String(missionNumber).padStart(2, '0')} · ${DIFFICULTIES[S.difficulty].name}`;
   $('brief-title').textContent = L.name;
   $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/${LEVELS.length} NODES SECURED`;
   $('brief-target-status').textContent = mission.target;
   $('brief-evidence').textContent = `CURRENT INTELLIGENCE — ${mission.intel}`;
   const phasePlan = (L.objectives || []).map((phaseDef, index) =>
     `${index + 1}. ${phaseDef.text || phaseDef.id || 'AUTHORED PHASE'}`).join('\n');
-  $('brief-text').textContent = `${briefingText(id, L.brief)}\n\nTHREE-PHASE PLAN\n${phasePlan}`;
+  $('brief-text').textContent = `${briefingText(id, L.brief)}\n\nOPERATION PLAN\n${phasePlan}`;
   hud.screen('brief');
 }
 
@@ -139,13 +158,17 @@ $('settings-back').onclick = () => hud.screen('menu');
 $('brief-back').onclick = () => { buildDiffRow(); buildLevelList(); hud.screen('levels'); };
 $('brief-go').onclick = () => { audioUnlock(); startLevel(currentLevel); };
 $('pause-resume').onclick = () => { mode = 'playing'; hud.screen(null); };
-$('pause-restart').onclick = () => startLevel(currentLevel);
-$('pause-skip').onclick = () => startLevel(currentLevel < 10 ? currentLevel + 1 : 1);
+$('pause-restart').onclick = () => {
+  resumePhase = currentCheckpointPhase();
+  startLevel(currentLevel);
+};
+$('pause-skip').onclick = () => startLevel(levelAfter(currentLevel)?.id ?? LEVELS[0].id);
 $('pause-quit').onclick = () => toMenu();
 $('debrief-retry').onclick = () => startLevel(currentLevel);
 $('debrief-menu').onclick = () => toMenu();
 $('debrief-next').onclick = () => {
-  if (world && world.won && currentLevel < 10) startLevel(currentLevel + 1);
+  const next = levelAfter(currentLevel);
+  if (world && world.won && next) startLevel(next.id);
   else toMenu();
 };
 
@@ -255,7 +278,7 @@ function setNvg(on) {
 // sun cut — but the NVG ambient left alone, so the goggles are the answer and the player has
 // to reach for them. Also drops the emissive pass (lit window panes, exit signs) to black,
 // because a "blacked out" building with its light fittings still glowing is not blacked out.
-function killPower() {
+function killPower(quiet = false) {
   if (!nvgRig || world.blackedOut) return;
   world.blackedOut = true;
   const r = nvgRig;
@@ -282,15 +305,68 @@ function killPower() {
   r.fillI = 0;
   setNvg(nvgOn);   // re-derive every light from the now-dead base state
   if (world.litMesh) world.litMesh.visible = false;
-  sfx.explosion(player.pos);
-  hud.flashWhite(0.5);
-  world.blind = Math.max(world.blind, 0.6);
-  hud.noShoot('POWER CUT');
-  hud.feed('LIGHTS ARE OUT — GOGGLES ON (N)', '#9dffc4');
+  if (!quiet) {
+    sfx.explosion(player.pos);
+    hud.flashWhite(0.5);
+    world.blind = Math.max(world.blind, 0.6);
+    hud.noShoot('POWER CUT');
+    hud.feed('LIGHTS ARE OUT — GOGGLES ON (N)', '#9dffc4');
+  }
   // Blind men fight worse. They also cannot see you at range any more, which is the point of
   // owning the dark: the goggles are an advantage, not just a different colour palette.
-  for (const e of world.enemies) e.range = Math.min(e.range, 12);
+  // Authored ranges are remembered so restorePower() can hand them back at a dark-to-light
+  // seam in a merged act.
+  for (const e of world.enemies) {
+    if (e.range > 12) e._preDarkRange = e.range;
+    e.range = Math.min(e.range, 12);
+  }
   world.darkRange = 12;
+}
+
+// The counterpart to killPower(): a merged act that goes dark in one segment surfaces into
+// a lit one. Everything killPower/darkStart crushed comes back to the authored values that
+// were stashed when the rig was built, the environment map returns, and live enemies get
+// their authored engagement ranges back.
+function restorePower() {
+  if (!nvgRig) return;
+  const r = nvgRig;
+  const authored = r.authored;
+  if (!authored || (!r.dark && !world.blackedOut)) return;
+  world.blackedOut = false;
+  r.dark = false;
+  r.ambBaseI = authored.ambBaseI;
+  r.hemiI = authored.hemiI;
+  r.sunI = authored.sunI;
+  r.fillI = authored.fillI;
+  if (r.savedEnv) { r.envStash = r.savedEnv; r.savedEnv = null; }
+  if (r.fixtures) {
+    for (const f of r.fixtures) {
+      f.userData.baseIntensity = f.userData.authoredIntensity ?? f.userData.baseIntensity;
+    }
+  }
+  for (const material of scene.userData.blackoutMaterials || []) {
+    if (material?.userData?.blackoutIntensity !== undefined) {
+      material.emissiveIntensity = material.userData.blackoutIntensity;
+      material.needsUpdate = true;
+    }
+  }
+  if (world.litMesh) world.litMesh.visible = true;
+  world.darkRange = undefined;
+  for (const e of world.enemies) {
+    if (e._preDarkRange) { e.range = e._preDarkRange; e._preDarkRange = null; }
+  }
+  setNvg(false);
+  startAmbient(world.level.segments ? 'urban' : (world.level.ambientKind || 'urban'));
+  sfx.objective();
+  hud.flashWhite(0.3);
+  hud.feed('POWER RESTORED — DISTRICT GRID BACK ONLINE', '#9dffc4');
+}
+
+// Objective devices declare their world consequence by name; the same table serves live
+// use and checkpoint-resume replay.
+function applyDeviceEffect(effect) {
+  if (effect === 'emergencyPower') emergencyPower();
+  else if (effect === 'restorePower') restorePower();
 }
 
 // Emergency power. The counterpart to killPower(): a breaker device brings up a handful of
@@ -344,9 +420,15 @@ function startLevel(id) {
   }
   const loadId = ++levelLoadId;
   currentLevel = id;
-  const L = LEVELS[id - 1];
+  const L = levelById(id);
   const diff = DIFFICULTIES[S.difficulty];
+  missionRuns[id] = (missionRuns[id] ?? 0);
   const missionVariant = missionRuns[id]++ % 3;
+  // Checkpoint resume: only meaningful for a merged act that authored the requested phase.
+  const resume = L.checkpoints?.some(c => c.phase === resumePhase) ? resumePhase : 0;
+  resumePhase = 0;
+  const checkpoint = resume ? L.checkpoints.find(c => c.phase === resume) : null;
+  const spawnPoint = checkpoint?.start || L.start;
 
   scene = new THREE.Scene();
   // built before the lights because the sun's shadow frustum is fitted to these bounds
@@ -366,7 +448,7 @@ function startLevel(id) {
   // Derived from the level's own footprint rather than authored per level: every outdoor
   // level gets a sky, a ground plane that reaches the horizon, and a city ringing the play
   // area inside its fog. Interiors (blackout, underground) see none of it and skip the cost.
-  const indoor = !!L.nvg || L.id === 9;
+  const indoor = L.indoor ?? (!!L.nvg || L.id === 9);
   const bounds = levelBounds(geo);
   skyMesh = null;
   // Real-DEM heightfield: the visible land plus the height sampler that every airborne
@@ -478,6 +560,11 @@ function startLevel(id) {
              // nvg levels are dark from the first frame; blackout levels turn dark at killPower()
              dark: !!L.nvg,
              fixtures: null };
+  // restorePower() rebuilds from these when a merged act comes back into the light.
+  nvgRig.authored = {
+    ambBaseI: nvgRig.ambBaseI, hemiI: nvgRig.hemiI,
+    sunI: nvgRig.sunI, fillI: nvgRig.fillI,
+  };
   setNvg(!!L.nvg);
 
   // Interior fixtures. Every one of these is a per-fragment loop iteration on the big merged
@@ -491,6 +578,7 @@ function startLevel(id) {
     const pl = new THREE.PointLight(l.color, l.intensity * (L.nvg ? 0.35 : 1), l.distance, 2);
     pl.position.set(l.pos[0], l.pos[1], l.pos[2]);
     pl.userData.baseIntensity = l.intensity;   // setNvg re-derives from this on every toggle
+    pl.userData.authoredIntensity = l.intensity;   // restorePower rebuilds from this
     scene.add(pl);
     fixtures.push(pl);          // kept so a level can cut the power later
   }
@@ -512,17 +600,47 @@ function startLevel(id) {
     solids.push(device.blockerSolid);
   }
   addVisualProps(scene, visualProps);
-  addInteriorMissionArt(scene, L.id);
-  if (!indoor) addFrontlineAmbientArt(scene, L.id, bounds);
-  addFrontlineMissionArt(scene, L.id);
+  // Mission and ambient art passes are keyed by SOURCE level id. A merged act runs each
+  // source pass into a group translated by that segment's offset, so every hand-placed
+  // set piece lands where its level moved to. Legacy single levels are the one-segment case.
+  const artSegments = L.segments || [{ id: L.id, dx: 0, dy: 0, dz: 0, indoor, bounds }];
+  for (const seg of artSegments) {
+    const segGroup = new THREE.Group();
+    segGroup.name = `mission-art-segment-${seg.id}`;
+    segGroup.position.set(seg.dx, seg.dy || 0, seg.dz);
+    scene.add(segGroup);
+    // The art passes only ever add children and stamp shared userData; a translated proxy
+    // keeps them coordinate-blind.
+    const segScene = {
+      add: (...objects) => segGroup.add(...objects),
+      remove: (...objects) => segGroup.remove(...objects),
+      userData: scene.userData,
+    };
+    // Collision the art contributes (storefront interiors) must move with the group.
+    const segSolids = {
+      push: (...boxes) => {
+        for (const b of boxes) {
+          b.min.x += seg.dx; b.max.x += seg.dx;
+          b.min.y += seg.dy || 0; b.max.y += seg.dy || 0;
+          b.min.z += seg.dz; b.max.z += seg.dz;
+          solids.push(b);
+        }
+      },
+    };
+    addInteriorMissionArt(segScene, seg.id);
+    if (!indoor && !seg.indoor) {
+      addFrontlineAmbientArt(segScene, seg.id, seg.bounds || bounds);
+    }
+    addFrontlineMissionArt(segScene, seg.id);
+    if (seg.id === 2) {
+      addStreetSweepArt(segScene, segSolids, missionVariant);
+      addFrontlineStreetArt(segScene);
+    }
+  }
   // Mission art owns the gate leaf animation. Resolve it after the art pass so an authored
   // device remains data-driven and the generic objective UI does not need a level special case.
   for (const device of objectiveDevices) {
     if (device.visualId) device.visual = scene.getObjectByName(device.visualId) || null;
-  }
-  if (L.id === 2) {
-    addStreetSweepArt(scene, solids, missionVariant);
-    addFrontlineStreetArt(scene);
   }
 
   // Emergency beacons. These cannot ride in the merged static mesh — that whole design is one
@@ -554,7 +672,7 @@ function startLevel(id) {
 
   camera.clear(); // drop previous level's view-model, flash light, etc.
   player = new Player(camera);
-  player.spawn(...L.start, diff);
+  player.spawn(...spawnPoint, diff);
   player.locked = !!L.lockPlayer;
   scene.add(camera);
   camera.fov = 70;
@@ -589,7 +707,8 @@ function startLevel(id) {
     combatHeat: 0, slowmo: 0, blind: 0,
     droneHandoff: null,
     hostageCommand: 'follow',
-    objectiveIdx: 0, objectiveStepIdx: 0, objectiveDevices,
+    objectiveIdx: resume, objectiveStepIdx: 0, objectiveDevices,
+    sniperActive: !!L.sniper,
     won: false, over: false,
     stats: {
       kills: 0, surrenders: 0, detaineesSecured: 0, detaineeKills: 0,
@@ -721,14 +840,20 @@ function startLevel(id) {
   const encounterRandom = seededRandom(
     L.id * 920009 + missionVariant * 9209 + diff.id * 277);
   const mul = diff.enemyCountMul;
+  const notScalable = definition =>
+    definition.bastion || definition.hvt || definition.perches || definition.teamOnly
+    || definition.targetPlayer || definition.tag || definition.vehicleExit;
   if (mul < 1) {
+    // The runner/BASTION carry target objectives; the low-difficulty cut may not delete
+    // them. Everything else keeps the original seeded removal order.
     const keep = Math.max(1, Math.round(defs.length * mul));
-    while (defs.length > keep) {
-      defs.splice(Math.floor(encounterRandom() * defs.length), 1);
+    let guard = defs.length * 4;
+    while (defs.length > keep && guard-- > 0) {
+      const index = Math.floor(encounterRandom() * defs.length);
+      if (defs[index].hvt || defs[index].bastion) continue;
+      defs.splice(index, 1);
     }
   } else if (mul > 1) {
-    const extra = Math.round(defs.length * (mul - 1));
-    const baseDefs = [...defs];
     const occupied = new Set(defs.map(definition =>
       definition.pos.map(value => Number(value).toFixed(3)).join(',')));
     for (const civilian of L.civilians.map(definition =>
@@ -736,47 +861,60 @@ function startLevel(id) {
       const position = civilian.window || civilian.pos;
       occupied.add(position.map(value => Number(value).toFixed(3)).join(','));
     }
-    const scalable = baseDefs.filter(definition =>
-      !definition.bastion
-      && !definition.hvt
-      && !definition.perches
-      && !definition.teamOnly
-      && !definition.targetPlayer
-      && !definition.tag
-      && !definition.vehicleExit);
-    const scalableDefinitions = L.enemies.filter(definition =>
-      !definition.bastion
-      && !definition.hvt
-      && !definition.perches
-      && !definition.teamOnly
-      && !definition.targetPlayer
-      && !definition.tag
-      && !definition.vehicleExit);
-    const sockets = authoredActorSockets(scalableDefinitions, L.enemySpawns)
-      .filter(position => !occupied.has(
-        position.map(value => value.toFixed(3)).join(',')));
-    for (let i = 0; i < extra; i++) {
-      // Use only unoccupied authored sockets on the same floor as an ordinary scalable actor.
-      // This prevents Elite from creating two bodies in one doorway or duplicating BASTION,
-      // a scripted HVT, a window sniper, or an objective-tagged guard.
-      const candidates = sockets.filter(position =>
-        !occupied.has(position.map(value => value.toFixed(3)).join(','))
-        && scalable.some(definition => Math.abs(definition.pos[1] - position[1]) < 0.25));
-      const socket = candidates.length
-        ? candidates[Math.floor(encounterRandom() * candidates.length)] : null;
-      const templates = socket
-        ? scalable.filter(definition => Math.abs(definition.pos[1] - socket[1]) < 0.25)
-        : scalable;
-      const src = templates[Math.floor(encounterRandom() * templates.length)] || baseDefs[0];
-      const pos = socket || src.pos;
-      occupied.add(pos.map(value => Number(value).toFixed(3)).join(','));
-      defs.push({ ...src, pos: [...pos] });
+    // Scaling runs per spawnPhase group so a merged act never places an extra body from one
+    // segment at a socket that belongs to another (which would strand a phase-zero actor
+    // alone in an unspawned district). Legacy levels are the single-group case.
+    const groups = new Map();
+    for (const definition of defs) {
+      const key = definition.spawnPhase ?? 0;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(definition);
+    }
+    for (const [key, groupDefs] of groups) {
+      const extra = Math.round(groupDefs.length * (mul - 1));
+      if (!extra) continue;
+      const scalable = groupDefs.filter(definition => !notScalable(definition));
+      if (!scalable.length) continue;
+      const scalableDefinitions = L.enemies.filter(definition =>
+        !notScalable(definition) && (definition.spawnPhase ?? 0) === key);
+      const groupSockets = L.enemySpawnGroups
+        ? L.enemySpawnGroups[key] : (key === 0 ? L.enemySpawns : undefined);
+      const sockets = authoredActorSockets(scalableDefinitions, groupSockets)
+        .filter(position => !occupied.has(
+          position.map(value => value.toFixed(3)).join(',')));
+      for (let i = 0; i < extra; i++) {
+        // Use only unoccupied authored sockets on the same floor as an ordinary scalable
+        // actor. This prevents Elite from creating two bodies in one doorway or duplicating
+        // BASTION, a scripted HVT, a window sniper, or an objective-tagged guard.
+        const candidates = sockets.filter(position =>
+          !occupied.has(position.map(value => value.toFixed(3)).join(','))
+          && scalable.some(definition => Math.abs(definition.pos[1] - position[1]) < 0.25));
+        const socket = candidates.length
+          ? candidates[Math.floor(encounterRandom() * candidates.length)] : null;
+        const templates = socket
+          ? scalable.filter(definition => Math.abs(definition.pos[1] - socket[1]) < 0.25)
+          : scalable;
+        const src = templates[Math.floor(encounterRandom() * templates.length)] || groupDefs[0];
+        const pos = socket || src.pos;
+        occupied.add(pos.map(value => Number(value).toFixed(3)).join(','));
+        defs.push({ ...src, pos: [...pos] });
+      }
     }
   }
-  world.enemies = defs.map((d, index) => new Enemy(scene, {
-    ...d,
-    _seed: L.id * 200003 + missionVariant * 2017 + index * 193,
-  }, diff));
+  // Actors from later act segments defer their spawn to that segment's first phase; actors
+  // from segments already behind a resume checkpoint never existed this run.
+  world.pendingActors = { enemies: [], civilians: [], ctTeam: null };
+  world.enemies = [];
+  defs.forEach((d, index) => {
+    const definition = {
+      ...d,
+      _seed: L.id * 200003 + missionVariant * 2017 + index * 193,
+    };
+    const sp = definition.spawnPhase ?? 0;
+    if (sp < resume) return;
+    if (sp <= resume) world.enemies.push(new Enemy(scene, definition, diff));
+    else world.pendingActors.enemies.push(definition);
+  });
 
   // Reinforcements. The clock is the pressure: dawdle and more men arrive, so a fast clean
   // sweep is rewarded with a smaller fight. The cap is HARD and scales with difficulty — an
@@ -809,46 +947,66 @@ function startLevel(id) {
   // either one stacks bodies in the same firing bay or restraint location.
   const free = cdefs.filter(c => !c.hostage && !c.window);
   if (cmul > 1 && free.length) {
-    const extra = Math.round(free.length * (cmul - 1));
     const occupied = new Set(cdefs.filter(definition => !definition.window)
       .map(definition =>
         definition.pos.map(value => Number(value).toFixed(3)).join(',')));
-    const crowdSockets = authoredActorSockets(
-      L.civilians.filter(definition => !definition.hostage && !definition.window),
-      L.crowdSpawns,
-    ).filter(position => !occupied.has(
-      position.map(value => value.toFixed(3)).join(',')));
-    const crowdOffset = crowdSockets.length
-      ? Math.floor(encounterRandom() * crowdSockets.length) : 0;
-    for (let i = 0; i < extra; i++) {
-      const src = free[Math.floor(encounterRandom() * free.length)];
-      // Difficulty may increase crowd density, but it may not invent a coordinate. Consume
-      // each validated socket once before falling back to a known-safe occupied coordinate;
-      // the QA gate makes that fallback visible so levels can author enough capacity.
-      const safe = crowdSockets.length
-        ? crowdSockets[(crowdOffset + i) % crowdSockets.length]
-        : src.pos;
-      occupied.add(safe.map(value => Number(value).toFixed(3)).join(','));
-      cdefs.push({
-        ...src,
-        pos: [...safe],
-      });
+    // Per spawnPhase group, for the same reason as the enemy scaler above.
+    const groups = new Map();
+    for (const definition of free) {
+      const key = definition.spawnPhase ?? 0;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(definition);
+    }
+    for (const [key, groupFree] of groups) {
+      const extra = Math.round(groupFree.length * (cmul - 1));
+      if (!extra) continue;
+      const groupSockets = L.crowdSpawnGroups
+        ? L.crowdSpawnGroups[key] : (key === 0 ? L.crowdSpawns : undefined);
+      const crowdSockets = authoredActorSockets(
+        L.civilians.filter(definition => !definition.hostage && !definition.window
+          && (definition.spawnPhase ?? 0) === key),
+        groupSockets,
+      ).filter(position => !occupied.has(
+        position.map(value => value.toFixed(3)).join(',')));
+      const crowdOffset = crowdSockets.length
+        ? Math.floor(encounterRandom() * crowdSockets.length) : 0;
+      for (let i = 0; i < extra; i++) {
+        const src = groupFree[Math.floor(encounterRandom() * groupFree.length)];
+        // Difficulty may increase crowd density, but it may not invent a coordinate. Consume
+        // each validated socket once before falling back to a known-safe occupied coordinate;
+        // the QA gate makes that fallback visible so levels can author enough capacity.
+        const safe = crowdSockets.length
+          ? crowdSockets[(crowdOffset + i) % crowdSockets.length]
+          : src.pos;
+        occupied.add(safe.map(value => Number(value).toFixed(3)).join(','));
+        cdefs.push({
+          ...src,
+          pos: [...safe],
+        });
+      }
     }
   } else if (cmul < 1) {
     let drop = Math.round(free.length * (1 - cmul));
     cdefs = cdefs.filter(c => c.hostage || c.window || (drop-- <= 0));
   }
-  world.civilians = cdefs.map((d, index) => new Civilian(scene, {
-    ...d,
-    _seed: L.id * 100003 + missionVariant * 1009 + index * 97,
-  }));
+  world.civilians = [];
+  cdefs.forEach((d, index) => {
+    const definition = {
+      ...d,
+      _seed: L.id * 100003 + missionVariant * 1009 + index * 97,
+    };
+    const sp = definition.spawnPhase ?? 0;
+    if (sp < resume) return;
+    if (sp <= resume) world.civilians.push(new Civilian(scene, definition));
+    else world.pendingActors.civilians.push(definition);
+  });
 
   // Squad. Not on the sniper mission: the player is a single man locked to a parapet and the
   // team he is covering is already down at the fountain — a stick standing on the roof with
   // him would contradict the entire premise of the level.
   if (L.squad && !L.lockPlayer) {
     world.allies = spawnSquad(
-      scene, L.squad, L.start, solids,
+      scene, L.squad, spawnPoint, solids,
       L.id * 400009 + missionVariant * 4001,
     );
     hud.feed(`${world.allies.length} FRIENDLIES ON YOU`, '#8fd0ff');
@@ -858,15 +1016,42 @@ function startLevel(id) {
   // standing at a fountain. They advance a route toward the hostages while the player covers
   // them, which is what makes the mission a shoot / no-shoot problem rather than target
   // practice — every silhouette crossing the scope has to be identified before it is engaged.
-  if (L.ctTeam) {
-    world.allies = spawnRouteTeam(
+  // In a merged act the element stages later (ctTeamPhase) via the deferred-actor path.
+  if (L.ctTeam && (L.ctTeamPhase === undefined || L.ctTeamPhase <= resume)) {
+    world.allies.push(...spawnRouteTeam(
       scene, L.ctTeam.count, L.ctTeam.at, L.ctTeam.route, solids, L.ctTeam.health,
       L.id * 600011 + missionVariant * 6007,
-    );
+    ));
     world.ctMission = true;
-    input.ads = true;
+    input.ads = !!L.lockPlayer;
+  } else if (L.ctTeam) {
+    world.pendingActors.ctTeam = { phase: L.ctTeamPhase };
+    input.ads = false;
   } else {
     input.ads = false;
+  }
+
+  // Merged-act dark start: the district grid is already down on the first frame. Same code
+  // path as a scripted blackout, minus the theatrics.
+  if (L.darkStart) killPower(true);
+  // Resuming past a checkpoint: everything the skipped segments accomplished is replayed —
+  // their devices are used (gates open, effects applied) and their clocks stay silent.
+  if (resume) {
+    for (const device of world.objectiveDevices) {
+      if ((device.phase ?? Infinity) >= resume || device.used) continue;
+      device.used = true;
+      device.root.userData.used = true;
+      if (device.blockerSolid) {
+        const blockerIndex = world.solids.indexOf(device.blockerSolid);
+        if (blockerIndex >= 0) world.solids.splice(blockerIndex, 1);
+        device.opened = true;
+        device.visual?.userData?.openGate?.();
+      }
+      applyDeviceEffect(device.effect);
+    }
+    for (const r of world.reinfs || []) {
+      if (r.stopPhase !== undefined && r.stopPhase <= resume) r.sent = r.max;
+    }
   }
 
   // Alternating red/blue with a double-blink on each side: the rhythm is what makes it read
@@ -1275,12 +1460,63 @@ function useObjectiveDevice(device, obj) {
   sfx.objective();
   // A device may carry a world effect beyond its own panel. Declared in the level definition
   // so the objective text and the consequence are authored side by side.
-  if (device.effect === 'emergencyPower') emergencyPower();
+  applyDeviceEffect(device.effect);
   return true;
 }
 
+// Deferred segment actors: a merged act's later segments spawn their roster when their
+// first phase begins, so earlier fights never leak forward and the runner/HVT clocks only
+// start once the player is actually at that segment's doorstep.
+function spawnDeferredActors() {
+  const pending = world?.pendingActors;
+  if (!pending) return;
+  const idx = world.objectiveIdx;
+  const capRange = enemy => {
+    if (world.darkRange && enemy.range > world.darkRange) {
+      enemy._preDarkRange = enemy.range;
+      enemy.range = world.darkRange;
+    }
+  };
+  for (let i = pending.enemies.length - 1; i >= 0; i--) {
+    if ((pending.enemies[i].spawnPhase ?? 0) > idx) continue;
+    const definition = pending.enemies.splice(i, 1)[0];
+    const enemy = new Enemy(scene, definition, world.diff);
+    capRange(enemy);
+    world.enemies.push(enemy);
+  }
+  for (let i = pending.civilians.length - 1; i >= 0; i--) {
+    if ((pending.civilians[i].spawnPhase ?? 0) > idx) continue;
+    const definition = pending.civilians.splice(i, 1)[0];
+    world.civilians.push(new Civilian(scene, definition));
+  }
+  if (pending.ctTeam && pending.ctTeam.phase <= idx) {
+    const L = world.level;
+    world.allies.push(...spawnRouteTeam(
+      scene, L.ctTeam.count, L.ctTeam.at, L.ctTeam.route, world.solids, L.ctTeam.health,
+      L.id * 600011 + world.missionVariant * 6007,
+    ));
+    world.ctMission = true;
+    pending.ctTeam = null;
+    hud.feed('VEKTOR ASSAULT ELEMENT STAGED — COVER THE CROSSING', '#8fd0ff');
+  }
+}
+
+// lockPlayer/sniper may be scoped to a phase in a merged act instead of the whole mission.
+// A drone objective that completed with unlockPlayer keeps the operator free for the rest
+// of that phase (world.phaseUnlocked), which the next phase change resets.
+function phaseLocked() {
+  if (world.phaseUnlocked) return false;
+  const ph = currentPhase();
+  return ph?.lockPlayer ?? !!world.level.lockPlayer;
+}
+
 function setObjective() {
+  spawnDeferredActors();
+  const activePhase = currentPhase();
+  world.sniperActive = activePhase?.sniper ?? !!world.level.sniper;
+  hud.breathBtn(!!world.sniperActive);
   const obj = activeObjective();
+  if (!world.drone && obj?.type !== 'drone') player.locked = phaseLocked();
   setObjectiveText(obj ? obj.text : 'MISSION COMPLETE');
   world.objectiveState = null;
   world.objStuckTime = 0;
@@ -1296,7 +1532,7 @@ function setObjective() {
     world.drone = null;
     if (world.droneSensorNvg) { world.droneSensorNvg = false; setNvg(false); }
     restoreGroundCombatAfterDrone();
-    player.locked = !!world.level.lockPlayer;
+    player.locked = phaseLocked();
   }
   // Hostiles are identified by sight, behavior and weapon presentation—not supernatural UI.
   // Rescue markers remain a navigation aid, but are depth-tested and LOS-gated below.
@@ -1595,7 +1831,11 @@ function blackoutTrigger() {
 // ground responses, defend phases) own their own pressure; a generic wave landing in the
 // middle of one reads as a spawn bug, not a threat.
 function stopReinforcements() {
-  for (const r of world.reinfs || []) r.sent = r.max;
+  // Only the clocks currently in play. A merged act's later segments own their own waves,
+  // which a set piece in an earlier segment has no business silencing.
+  for (const r of world.reinfs || []) {
+    if ((r.startPhase ?? 0) <= world.objectiveIdx) r.sent = r.max;
+  }
 }
 
 // Timed reinforcements. Generic clocks are refused on the LAST objective so the mission
@@ -1611,6 +1851,8 @@ function reinforcements(dt) {
   for (const r of world.reinfs) {
     if (r.sent >= r.max) continue;
     if (r.startPhase !== undefined && world.objectiveIdx < r.startPhase) continue;
+    // A merged act scopes each segment's clocks to its own phases.
+    if (r.stopPhase !== undefined && world.objectiveIdx >= r.stopPhase) continue;
     if (last && r.startPhase === undefined) continue;
     if (!r.armed) {
       // Zone-armed wave (a rigged room). Arms once, then runs on its own short clock.
@@ -1874,7 +2116,7 @@ function onPlayerShot(spread) {
 
   // aim assist: bend toward nearest live enemy within cone
   const assist = world.diff.aimAssist;
-  if (assist > 0 && !world.level.sniper) {
+  if (assist > 0 && !world.sniperActive) {
     let bestAng = assist, bestDir = null;
     for (const e of world.enemies) {
       if (e.dead || e.surrendered) continue;
@@ -1944,10 +2186,10 @@ function onPlayerShot(spread) {
   // every shot leaves a visible trace and an audible terminus
   const end = new THREE.Vector3(o.x + dir.x * hitDist, o.y + dir.y * hitDist, o.z + dir.z * hitDist);
   const muzzle = new THREE.Vector3(o.x + dir.x * 0.6, o.y + dir.y * 0.6 - 0.12, o.z + dir.z * 0.6);
-  tracer(muzzle, end, 0xfff0c0, world.level.sniper ? 4 : 11, world.level.sniper ? 0.85 : 0.5);
+  tracer(muzzle, end, 0xfff0c0, world.sniperActive ? 4 : 11, world.sniperActive ? 0.85 : 0.5);
   world.registerFriendlyFire(
     muzzle, end, hitEnemy,
-    world.level.sniper ? 180 : weapons.spec.range > 70 ? 72 : 44,
+    world.sniperActive ? 180 : weapons.spec.range > 70 ? 72 : 44,
   );
 
   if (hitEnemy) {
@@ -2280,6 +2522,12 @@ function checkObjectives(dt = 0) {
     done = targets.length > 0 && targets.every(enemy => enemy.identified);
   } else if (obj.type === 'escort') {
     const team = world.allies.filter(ally => ally.route);
+    // The element IS the mission; losing every man on it ends the op even when a separate
+    // squad is still standing next to the player.
+    if (team.length && team.every(ally => ally.dead)) {
+      failMission('ASSAULT TEAM LOST');
+      return;
+    }
     if (obj.destination && team.length) {
       const radius = obj.destination[2] ?? 5;
       const arrived = team.filter(ally => !ally.dead &&
@@ -2310,6 +2558,11 @@ function checkObjectives(dt = 0) {
         };
       }
       if (world.drone.mode === 'combat') integrateDroneSurvivors();
+      // The assault-wave bookkeeping must not survive the sortie: a later drone phase in a
+      // merged act spawns its own wave, which the stale guard would otherwise swallow.
+      // Kept one step for post-sortie inspection (QA reads the finished wave's roster).
+      world.lastDroneAssault = world.droneAssault;
+      world.droneAssault = null;
       // A drone handoff is a phase transition, not a silent camera reset. Level 6 starts as a
       // locked sniper post, but the ground-clear / rescue work belongs to the operator on foot.
       // Tell the player exactly what changed while restoring movement for the next objective.
@@ -2319,7 +2572,8 @@ function checkObjectives(dt = 0) {
       world.drone = null;
       if (world.droneSensorNvg) { world.droneSensorNvg = false; setNvg(false); }
       restoreGroundCombatAfterDrone();
-      player.locked = obj.unlockPlayer ? false : !!world.level.lockPlayer;
+      if (obj.unlockPlayer) world.phaseUnlocked = true;
+      player.locked = phaseLocked();
     }
     const steps = phaseSteps(currentPhase());
     if ((world.objectiveStepIdx ?? 0) + 1 < steps.length) {
@@ -2327,6 +2581,7 @@ function checkObjectives(dt = 0) {
     } else {
       world.objectiveIdx++;
       world.objectiveStepIdx = 0;
+      world.phaseUnlocked = false;
     }
     sfx.objective();
     if (world.objectiveIdx >= world.level.objectives.length) winMission();
@@ -2343,21 +2598,39 @@ function grade(score, civKills, accuracy) {
   return 'D';
 }
 
+// The checkpoint the current position of the act has earned: the highest authored
+// checkpoint at or below the active phase. Zero for legacy single levels.
+function currentCheckpointPhase() {
+  const checkpointList = world?.level?.checkpoints;
+  if (!checkpointList) return 0;
+  let phaseIndex = 0;
+  for (const c of checkpointList) {
+    if ((world.objectiveIdx ?? 0) >= c.phase) phaseIndex = c.phase;
+  }
+  return phaseIndex;
+}
+
 function winMission() {
   if (world.over) return;
   world.over = true; world.won = true;
+  resumePhase = 0;
   const t = (performance.now() - world.stats.startTime) / 1000;
   const acc = world.stats.shotsFired ? world.stats.shotsHit / world.stats.shotsFired : 0;
   const timeBonus = Math.max(0, Math.round(600 - t * 2));
   world.stats.score += timeBonus + Math.round(acc * 300);
   const g = grade(world.stats.score, world.stats.civKills, acc);
-  save.recordResult(currentLevel, Math.max(0, world.stats.score), g, DIFFICULTIES[S.difficulty].name);
+  // 100-series QA boots never write campaign progress.
+  if (currentLevel < 100) {
+    save.recordResult(currentLevel, Math.max(0, world.stats.score), g, DIFFICULTIES[S.difficulty].name);
+  }
   showDebrief(true, g, t, acc, timeBonus);
 }
 
 function failMission(reason) {
   if (world.over) return;
   world.over = true; world.won = false;
+  // Death in a merged act retries from the current segment, not the whole act.
+  resumePhase = currentCheckpointPhase();
   sfx.fail();
   const t = (performance.now() - world.stats.startTime) / 1000;
   const acc = world.stats.shotsFired ? world.stats.shotsHit / world.stats.shotsFired : 0;
@@ -2403,7 +2676,7 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     $('debrief-intel-head').textContent = intel.heading;
     $('debrief-intel-result').textContent = intel.result;
     $('debrief-intel-lead').textContent = `NEXT LEAD — ${intel.nextLead}`;
-    $('debrief-next').style.display = won && currentLevel < LEVELS.length ? 'block' : 'none';
+    $('debrief-next').style.display = won && levelAfter(currentLevel) ? 'block' : 'none';
     hud.screen('debrief');
   }, won ? 800 : 1200);
 }
@@ -2501,7 +2774,7 @@ function frame() {
   camera.updateProjectionMatrix();
   // Scope sway is camera motion and therefore ballistic motion. There is no separate hidden
   // sway in onPlayerShot. Holding breath removes both picture and shot movement.
-  if (world.level.sniper && scoped && !input.breath) {
+  if (world.sniperActive && scoped && !input.breath) {
     camera.rotation.y += Math.sin(swayPhase * 1.7) * weapons.spec.sway;
     camera.rotation.x += Math.cos(swayPhase * 1.3) * weapons.spec.sway;
   }
@@ -2553,7 +2826,7 @@ function frame() {
   }
 
   // grenade landing preview: simulate the same ballistics the throw will use
-  if ((weapons.grenades > 0 || weapons.flashes > 0) && !world.level.lockPlayer) {
+  if ((weapons.grenades > 0 || weapons.flashes > 0) && !player.locked) {
     if (!world.nadeRing) {
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(0.28, 0.42, 18),
@@ -2729,7 +3002,11 @@ function frame() {
   if (awaitingSecurity) scoreLine += ` · SURRENDERED: ${awaitingSecurity}`;
   if (detained) scoreLine += ` · DETAINED: ${detained}`;
   scoreLine += ` · SCORE: ${Math.max(0, world.stats.score)}`;
-  if (world.ctMission) scoreLine += ` · TEAM: ${world.allies.filter(a => !a.dead).length}/${world.allies.length}`;
+  if (world.ctMission) {
+    // Count the route element only — the player's own squad is not Vektor's crossing team.
+    const routeTeam = world.allies.filter(a => a.route);
+    scoreLine += ` · TEAM: ${routeTeam.filter(a => !a.dead).length}/${routeTeam.length}`;
+  }
   hud.score(scoreLine);
   if (world.allies.length) {
     hud.squad(world.allies.map(a => a.dead
@@ -2766,7 +3043,12 @@ window.BP = {
   get mode() { return mode; },
   get rendererMode() { return renderPipeline.mode; },
   get performance() { return renderPipeline.performanceSnapshot(); },
-  startLevel, LEVELS, S, input,
+  startLevel, LEVELS, LEGACY_LEVELS, S, input,
+  // Boot an act at one of its authored checkpoints — the same path a death-retry takes.
+  startLevelAt(id, phaseIndex) {
+    resumePhase = phaseIndex;
+    startLevel(id);
+  },
   setNvg,
   // Real-path device activation for focused browser QA: the F interaction is gated behind
   // pointer lock, which headless runs never hold. Same code path, same side effects.
