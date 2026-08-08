@@ -109,19 +109,14 @@ export function createRenderPipeline(canvas, settings) {
           float opticEdge = 1.0;
           float breakup = 0.0;
           if (fpvActive > 0.5) {
-            // Centre-crop the output to a 4:3 FPV sensor. Wide displays retain black goggle
-            // borders instead of stretching the camera image to a cinematic aspect ratio.
-            float halfWidth = min(0.5, resolution.y * (4.0 / 3.0) / resolution.x * 0.5);
-            vec2 lens = vec2((vUv.x - 0.5) / halfWidth, (vUv.y - 0.5) / 0.5);
-            if (abs(lens.x) > 1.0 || abs(lens.y) > 1.0) {
-              gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-              return;
-            }
-            float radius2 = dot(lens, lens);
-            float barrel = mix(0.105, 0.035, fpvStabilized);
-            lens *= 1.0 + barrel * radius2;
-            sampleUv = vec2(0.5 + lens.x * halfWidth, 0.5 + lens.y * 0.5);
-            opticEdge = 1.0 - smoothstep(0.48, 1.22, radius2);
+            // Fill the display like a goggle optic. Curved lens distortion and peripheral
+            // falloff replace rectangular 4:3 pillarboxing, which reads as edited footage.
+            vec2 lens = (vUv - 0.5) * 2.0;
+            float radius2 = dot(lens * vec2(0.78, 1.0), lens * vec2(0.78, 1.0));
+            float barrel = mix(0.16, 0.05, fpvStabilized);
+            lens *= 1.0 - barrel * radius2;
+            sampleUv = 0.5 + lens * 0.5;
+            opticEdge = 1.0 - smoothstep(0.42, 1.18, radius2);
             breakup = pow(1.0 - clamp(fpvSignal, 0.0, 1.0), 1.7);
             float band = floor(lens.y * 42.0 + fpvTime * 1.7);
             float tear = step(0.76, hash(vec2(band, floor(fpvTime * 12.0))));

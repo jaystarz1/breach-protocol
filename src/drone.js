@@ -1019,13 +1019,13 @@ export class DroneController {
         <div class="fpv-link"></div>
         <div class="fpv-fiber"></div>
         <div class="fpv-warn"></div>
-        <div class="fpv-map-panel">
-          <div class="fpv-map-label">MISSION NAV-AID // AO + SEARCH // NOT LIVE TRACK</div>
-          <canvas class="fpv-map"></canvas>
-        </div>
         <div class="fpv-help">SIM CONTROL // ${this.mode === 'bomber'
     ? 'WASD FLIGHT · MOUSE GIMBAL · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP · N THERMAL'
     : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · CONTACT TO STRIKE'}</div>
+      </div>
+      <div class="fpv-map-panel">
+        <div class="fpv-map-label">EXTERNAL SIM NAV-AID // AO + SEARCH // NOT CAMERA</div>
+        <canvas class="fpv-map"></canvas>
       </div>
       <div class="fpv-lesson">
         <div class="fpv-lesson-title"></div>
@@ -1068,22 +1068,22 @@ export class DroneController {
     });
     const style = document.createElement('style');
     style.textContent = `
-      .fpv-optic{position:absolute;left:50%;top:50%;width:min(100vw,133.333vh);height:min(100vh,75vw);transform:translate(-50%,-50%);overflow:hidden;box-shadow:0 0 0 100vmax #000;isolation:isolate}
+      .fpv-optic{position:absolute;inset:0;overflow:hidden;isolation:isolate}
       .fpv-noise{position:absolute;inset:0;width:100%;height:100%;opacity:0;mix-blend-mode:screen}
       .fpv-tear{position:absolute;left:0;right:0;height:0;background:rgba(235,240,235,.5);opacity:0;filter:blur(1px)}
       .fpv-tear-secondary{mix-blend-mode:difference}
       .fpv-scanlines{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.07) 0,rgba(0,0,0,.07) 1px,transparent 1px,transparent 3px);opacity:.45}
-      .fpv-lens{position:absolute;inset:-1px;z-index:3;border-radius:3.5% / 4.5%;box-shadow:inset 0 0 6vmin 1.8vmin rgba(0,0,0,.78);background:radial-gradient(ellipse at center,transparent 58%,rgba(0,0,0,.12) 76%,rgba(0,0,0,.7) 100%)}
+      .fpv-lens{position:absolute;inset:-1px;z-index:3;border-radius:11% / 18%;box-shadow:inset 0 0 8vmin 2.4vmin rgba(0,0,0,.84);background:radial-gradient(ellipse 78% 72% at center,transparent 50%,rgba(0,0,0,.11) 72%,rgba(0,0,0,.72) 100%)}
       .fpv-cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);font-size:18px;font-weight:400}
       .fpv-name{position:absolute;left:6%;top:5%}
       .fpv-mode{position:absolute;left:6%;top:calc(5% + 22px);font-size:12px;color:#cfd8cf}
-      .fpv-timer{position:absolute;right:6%;top:5%}
+      .fpv-timer{position:absolute;right:22%;top:5%}
       .fpv-dist{position:absolute;left:50%;top:5%;transform:translateX(-50%);text-align:center;white-space:pre}
       .fpv-batt{position:absolute;left:6%;bottom:7%;white-space:pre;font-size:17px}
       .fpv-link{position:absolute;right:6%;bottom:7%;text-align:right;white-space:pre}
       .fpv-fiber{position:absolute;left:6%;bottom:calc(7% + 49px);color:#9fe9ff;font-size:11px;white-space:pre}
       .fpv-warn{position:absolute;left:50%;top:63%;transform:translateX(-50%);color:#ffd8b0;font-size:18px;letter-spacing:3px;animation:fpvblink 0.6s steps(2) infinite}
-      .fpv-map-panel{position:absolute;right:5.5%;bottom:calc(7% + 82px);padding:5px 5px 4px;border:1px solid rgba(233,239,233,.45);background:rgba(6,8,6,.78);text-shadow:none}
+      .fpv-map-panel{position:absolute;z-index:7;right:1.5%;top:2%;padding:5px 5px 4px;border:1px solid rgba(233,239,233,.58);background:rgba(4,6,5,.94);box-shadow:0 8px 30px rgba(0,0,0,.72);text-shadow:none}
       .fpv-map-label{padding:0 1px 4px;color:#dbe5db;font-size:8px;font-weight:700;letter-spacing:.55px;white-space:nowrap}
       .fpv-map{display:block;background:rgba(6,8,6,.68);image-rendering:pixelated}
       .fpv-lesson{position:absolute;left:50%;top:34%;transform:translateX(-50%);max-width:520px;padding:16px 20px;border:1px solid rgba(255,213,79,.75);background:rgba(8,10,8,.92);display:none}

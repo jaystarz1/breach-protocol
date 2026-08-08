@@ -158,8 +158,8 @@ def main():
         assert catalogue[1]["droneSteps"] == 10, catalogue
         assert catalogue[5]["controlLinks"] == ["fiber", "radio"], catalogue[5]
 
-        # The operator view is a 4:3 camera, while the map is an explicit simulation aid:
-        # it carries assigned-area/search intelligence and never claims a live target track.
+        # The operator view fills the display as a curved optic. The map is deliberately a
+        # sibling rather than a child of that optic: an external simulation aid, not video.
         page.evaluate("() => BP.startLevel(11)")
         page.wait_for_function("() => BP.mode === 'playing' && BP.world?.drone")
         operator_view = page.evaluate("""() => {
@@ -169,16 +169,21 @@ def main():
           d.updateAttemptState(.1, { firePressed: true });
           d.updateFpvOsd(0);
           const optic = document.querySelector('.fpv-optic').getBoundingClientRect();
+          const mapPanel = document.querySelector('.fpv-map-panel');
           const navLabel = document.querySelector('.fpv-map-label')?.textContent || '';
           return {
-            ratio: optic.width / optic.height,
+            optic: [optic.width, optic.height],
+            viewport: [innerWidth, innerHeight],
+            externalMap: mapPanel?.parentElement === d.overlay,
+            mapTop: getComputedStyle(mapPanel).top,
             navLabel,
             searchMarked: !!d.mapStatic,
             feed: d.feedVisualState(),
           };
         }""")
-        assert abs(operator_view["ratio"] - 4 / 3) < .01, operator_view
-        assert "NAV-AID" in operator_view["navLabel"] and "NOT LIVE TRACK" in operator_view["navLabel"], operator_view
+        assert operator_view["optic"] == operator_view["viewport"], operator_view
+        assert operator_view["externalMap"] and operator_view["mapTop"] != "auto", operator_view
+        assert "NAV-AID" in operator_view["navLabel"] and "NOT CAMERA" in operator_view["navLabel"], operator_view
         assert operator_view["searchMarked"] and operator_view["feed"]["active"], operator_view
         if args.output:
             page.screenshot(path=args.output / "operator-day.png")
