@@ -64,7 +64,7 @@ export const CAMPAIGN_MISSIONS = [
   {
     id: 11,
     node: 'DRONARIUM',
-    sitrep: 'The district holds, and Vektor is standing up a long-range strike cell. Training begins on a clean range with live flight from the first minute.',
+    sitrep: 'The district holds, and Vektor is standing up a long-range strike cell. Daylight training begins on a clean range with live flight from the first minute.',
     purpose: 'Learn basic handling, the essential OSD and battery discipline, then repeat the profile without instructor prompts.',
     target: 'No enemy contact. The only thing that can kill you out here is your own flying.',
     intel: 'Instructor KAVUN runs the range. Each airframe is reviewed before the next one launches.',

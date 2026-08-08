@@ -53,8 +53,9 @@ export const P = {
 
 // ---------- sky ----------
 // Equirectangular canvas: top row is the zenith, middle row the horizon. Painted rather
-// than shaded because a MeshBasicMaterial dome costs one draw call and no shader compile,
-// and every level here is night or dusk so there is no sun disc to get physically right.
+// than shaded because a MeshBasicMaterial dome costs one draw call and no shader compile.
+// `timeOfDay` is mission-authored: day gets a warm sun and blue atmospheric gradient;
+// night gets the moon, stars and cold cloud light used by the original campaign.
 const SKY_W = 1024, SKY_H = 512;
 
 function skyCanvas(skyHex, fogHex, seed, opts = {}) {
@@ -65,27 +66,34 @@ function skyCanvas(skyHex, fogHex, seed, opts = {}) {
   const sky = new THREE.Color(skyHex);
   const horizon = new THREE.Color(fogHex);
   const hex = col => `#${col.getHexString()}`;
+  const daylight = opts.timeOfDay === 'day';
 
   // vertical gradient: darker overhead, hazier at the horizon where the air is thickest
-  const zenith = sky.clone().multiplyScalar(0.42);
-  const upper = sky.clone().multiplyScalar(0.85);
+  const zenith = daylight
+    ? sky.clone().lerp(new THREE.Color(0x296fae), 0.38)
+    : sky.clone().multiplyScalar(0.42);
+  const upper = daylight
+    ? sky.clone().lerp(new THREE.Color(0x87bce0), 0.24)
+    : sky.clone().multiplyScalar(0.85);
   // Restrained: this canvas is also the IBL source, so an over-bright horizon band does not
   // just look wrong, it floods every surface in the level with ambient and blows out concrete.
-  const haze = horizon.clone().lerp(new THREE.Color(0xffffff), 0.06).multiplyScalar(1.15);
+  const haze = daylight
+    ? horizon.clone().lerp(new THREE.Color(0xfff4dc), 0.24)
+    : horizon.clone().lerp(new THREE.Color(0xffffff), 0.06).multiplyScalar(1.15);
   const g = x.createLinearGradient(0, 0, 0, SKY_H);
   g.addColorStop(0.00, hex(zenith));
   g.addColorStop(0.30, hex(upper));
   g.addColorStop(0.47, hex(haze));
   g.addColorStop(0.50, hex(haze));
-  g.addColorStop(0.52, hex(horizon.clone().multiplyScalar(0.8)));
-  g.addColorStop(1.00, hex(horizon.clone().multiplyScalar(0.45)));
+  g.addColorStop(0.52, hex(daylight ? horizon : horizon.clone().multiplyScalar(0.8)));
+  g.addColorStop(1.00, hex(horizon.clone().multiplyScalar(daylight ? 0.62 : 0.45)));
   x.fillStyle = g;
   x.fillRect(0, 0, SKY_W, SKY_H);
 
   const HORIZON_Y = SKY_H * 0.5;
 
   // stars, thinning toward the horizon haze
-  if (opts.stars !== false) {
+  if (!daylight && opts.stars !== false) {
     for (let i = 0; i < 700; i++) {
       const sy = R() * HORIZON_Y * 0.92;
       const fade = 1 - sy / (HORIZON_Y * 0.92);
@@ -97,27 +105,28 @@ function skyCanvas(skyHex, fogHex, seed, opts = {}) {
     x.globalAlpha = 1;
   }
 
-  // The moon: the levels are lit by a single directional light from +X/+Y/+Z, so put the
-  // source roughly where that light comes from or the sky contradicts the shading.
+  // The visible source agrees with the single directional light at +X/+Y/+Z. Day and night
+  // share a bearing, but deliberately not a colour temperature or apparent size.
   const mx = SKY_W * 0.16, my = HORIZON_Y * 0.34;
   const glow = x.createRadialGradient(mx, my, 0, mx, my, 150);
-  glow.addColorStop(0, 'rgba(224,236,255,0.55)');
-  glow.addColorStop(0.25, 'rgba(190,212,246,0.16)');
-  glow.addColorStop(1, 'rgba(190,212,246,0)');
+  glow.addColorStop(0, daylight ? 'rgba(255,242,196,0.8)' : 'rgba(224,236,255,0.55)');
+  glow.addColorStop(0.25, daylight ? 'rgba(255,225,156,0.22)' : 'rgba(190,212,246,0.16)');
+  glow.addColorStop(1, daylight ? 'rgba(255,225,156,0)' : 'rgba(190,212,246,0)');
   x.fillStyle = glow;
   x.beginPath(); x.arc(mx, my, 150, 0, 7); x.fill();
-  x.fillStyle = 'rgba(240,246,255,0.92)';
-  x.beginPath(); x.arc(mx, my, 13, 0, 7); x.fill();
+  x.fillStyle = daylight ? 'rgba(255,246,210,0.98)' : 'rgba(240,246,255,0.92)';
+  x.beginPath(); x.arc(mx, my, daylight ? 18 : 13, 0, 7); x.fill();
 
-  // Cloud banks, lit from the moon side. Counts are low ON PURPOSE: alpha accumulates where
+  // Cloud banks, lit from the visible-source side. Counts are low ON PURPOSE: alpha accumulates where
   // ellipses overlap, and 22 bands of 7 blobs saturated the entire upper sky to near-white.
   for (let band = 0; band < 11; band++) {
     const cy = HORIZON_Y * (0.2 + R() * 0.62);
     const cx = R() * SKY_W;
     const cw = 110 + R() * 260, ch = 10 + R() * 24;
     const lit = 1 - Math.min(1, Math.abs(cx - mx) / (SKY_W * 0.5));
-    const tone = sky.clone().lerp(new THREE.Color(0xdfe8ff), 0.12 + lit * 0.3);
-    x.globalAlpha = 0.05 + R() * 0.07;
+    const tone = sky.clone().lerp(new THREE.Color(daylight ? 0xffffff : 0xdfe8ff),
+      (daylight ? 0.48 : 0.12) + lit * (daylight ? 0.22 : 0.3));
+    x.globalAlpha = (daylight ? 0.09 : 0.05) + R() * (daylight ? 0.1 : 0.07);
     x.fillStyle = hex(tone);
     for (let p = 0; p < 4; p++) {
       x.beginPath();
@@ -194,7 +203,7 @@ const skyCache = new Map();
 // only has to beat the nearest real geometry, not the level size. 460 keeps it inside the
 // 500 far plane with room for the ground plate to fade out under it.
 export function skyDome(skyHex, fogHex, seed, opts = {}) {
-  const key = `${skyHex}|${fogHex}|${seed}|${opts.rural ? 'r' : 'c'}`;
+  const key = `${skyHex}|${fogHex}|${seed}|${opts.rural ? 'r' : 'c'}|${opts.timeOfDay || 'night'}`;
   let canvas = skyCache.get(key);
   if (!canvas) { canvas = skyCanvas(skyHex, fogHex, seed, opts); skyCache.set(key, canvas); }
 
@@ -209,6 +218,7 @@ export function skyDome(skyHex, fogHex, seed, opts = {}) {
   mesh.renderOrder = -1;
   mesh.frustumCulled = false;
   mesh.userData.skyCanvas = canvas;
+  mesh.userData.timeOfDay = opts.timeOfDay || 'night';
   return mesh;
 }
 

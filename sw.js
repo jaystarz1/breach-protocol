@@ -1,11 +1,12 @@
-const CACHE = 'breach-protocol-v161-three-acts';
+const CACHE = 'breach-protocol-v162-day-mission';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
   'src/main.js', 'src/input.js', 'src/player.js', 'src/weapons.js', 'src/enemies.js',
   'src/civilians.js', 'src/breach.js', 'src/hud.js', 'src/audio.js', 'src/physics.js',
   'src/levelgen.js', 'src/difficulty.js', 'src/save.js', 'src/levels/index.js',
-  'src/levels/acts.js', 'src/navgrid.js',
+  'src/levels/acts.js', 'src/levels/drone-training.js', 'src/levels/terrain-deep-fence.js',
+  'src/navgrid.js', 'src/terrain.js', 'src/trees.js', 'src/hamlet.js',
   'src/mission-variants.js',
   'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js', 'src/street-sweep-art.js',
   'src/visual-kit.js', 'src/character-assets.js', 'src/interior-mission-art.js',

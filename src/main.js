@@ -126,8 +126,9 @@ function buildLevelList() {
     const btn = document.createElement('button');
     btn.className = 'menu-btn';
     const best = S.best[L.id];
+    const timeOfDay = (L.timeOfDay || 'night').toUpperCase();
     btn.innerHTML = `${String(index + 1).padStart(2, '0')} — ${L.name}` +
-      `<span class="sub">${best ? `BEST: ${best.grade} · ${best.score}${best.difficulty ? ' · ' + best.difficulty : ''}` : 'NOT COMPLETED'}${L.sniper ? ' · SNIPER' : ''}</span>`;
+      `<span class="sub">${timeOfDay} · ${best ? `BEST: ${best.grade} · ${best.score}${best.difficulty ? ' · ' + best.difficulty : ''}` : 'NOT COMPLETED'}${L.sniper ? ' · SNIPER' : ''}</span>`;
     btn.onclick = () => showBrief(L.id);
     list.appendChild(btn);
   });
@@ -139,7 +140,7 @@ function showBrief(id) {
   const L = levelById(id);
   const mission = campaignMission(id);
   const missionNumber = LEVELS.findIndex(l => l.id === id) + 1;
-  $('brief-num').textContent = `MISSION ${String(missionNumber).padStart(2, '0')} · ${DIFFICULTIES[S.difficulty].name}`;
+  $('brief-num').textContent = `MISSION ${String(missionNumber).padStart(2, '0')} · ${(L.timeOfDay || 'night').toUpperCase()} · ${DIFFICULTIES[S.difficulty].name}`;
   $('brief-title').textContent = L.name;
   $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/${LEVELS.length} NODES SECURED`;
   $('brief-target-status').textContent = mission.target;
@@ -452,6 +453,7 @@ function startLevel(id) {
   const spawnPoint = checkpoint?.start || L.start;
 
   scene = new THREE.Scene();
+  scene.userData.timeOfDay = L.timeOfDay || 'night';
   // built before the lights because the sun's shadow frustum is fitted to these bounds
   takeLights();   // drop anything a stray L.geo() call left behind
   // Levels register flashing lights by pushing onto this while building their geometry.
@@ -502,7 +504,9 @@ function startLevel(id) {
   setDroneFoliage(L.treePlan && L.terrainDef
     ? treeFoliageColliders(L.terrainDef, L.treePlan, L.id) : []);
   if (!indoor) {
-    skyMesh = skyDome(L.sky, L.fog[0], L.id * 7919, { rural: L.backdrop === 'rural' });
+    skyMesh = skyDome(L.sky, L.fog[0], L.id * 7919, {
+      rural: L.backdrop === 'rural', timeOfDay: L.timeOfDay || 'night',
+    });
     scene.add(skyMesh);
     // Rural levels need a plate that actually reaches their fog; the default 2400m square
     // was sized for city maps and ends short of a 2250m fog far over a kilometre-wide plain.
@@ -527,7 +531,8 @@ function startLevel(id) {
   // bounce, which is why the ambient light below can be dialled back once this is on.
   if (quality.pbr) {
     scene.environment = skyMesh
-      ? environmentFrom(renderer, skyMesh.userData.skyCanvas, `sky${L.id}`)
+      ? environmentFrom(renderer, skyMesh.userData.skyCanvas,
+        `sky${L.id}-${L.timeOfDay || 'night'}`)
       : environment(renderer, L.sky, L.fog[0]);
   }
   // The per-level ambient/sun values were authored against MeshLambertMaterial. Standard
@@ -545,13 +550,14 @@ function startLevel(id) {
   // exactly one pair visible at a time. Building both up front is what makes the goggles a
   // free toggle instead of a level rebuild — and the green ambient is boosted because gain is
   // the entire point of the device: goggles must show you MORE than your naked eye did.
-  const ambBase = new THREE.AmbientLight(0xbfd4e6, L.ambient * AMB);
+  const daylight = L.timeOfDay === 'day';
+  const ambBase = new THREE.AmbientLight(daylight ? 0xdce9f2 : 0xbfd4e6, L.ambient * AMB);
   const nvgAmb = new THREE.AmbientLight(0x8dffb4, L.ambient * AMB * (L.nvg ? 1 : 1.5));
   const nvgHemi = new THREE.HemisphereLight(0xa8ffc8, 0x0e2416, 0.9);
   scene.add(ambBase, nvgAmb, nvgHemi);
   let sunLight = null, fillLight = null;
   if (L.sun > 0) {
-    const sun = new THREE.DirectionalLight(0xdfe8ff, L.sun * KEY);
+    const sun = new THREE.DirectionalLight(daylight ? 0xffedcc : 0xdfe8ff, L.sun * KEY);
     sun.position.set(30, 60, 20);
     if (quality.shadows) {
       sun.castShadow = true;
@@ -576,12 +582,15 @@ function startLevel(id) {
     scene.add(sun);
     sunLight = sun;
     // fill from the opposite side so faces away from the sun still separate
-    const fill = new THREE.DirectionalLight(0xa8c0d8, L.sun * 0.35 * AMB);
+    const fill = new THREE.DirectionalLight(daylight ? 0xb8d7ed : 0xa8c0d8, L.sun * 0.35 * AMB);
     fill.position.set(-25, 30, -35);
     scene.add(fill);
     fillLight = fill;
   }
-  const hemi = new THREE.HemisphereLight(0x9db4c8, 0x2a323a, (L.flashlight ? 0.15 : 0.65) * AMB);
+  const hemi = new THREE.HemisphereLight(
+    daylight ? 0xb9dcf2 : 0x9db4c8,
+    daylight ? 0x5f6440 : 0x2a323a,
+    (L.flashlight ? 0.15 : 0.65) * AMB);
   scene.add(hemi);
   nvgRig = { ambBase, nvgAmb, nvgHemi, hemi, sun: sunLight, fill: fillLight,
              sunI: sunLight ? sunLight.intensity : 0, fillI: fillLight ? fillLight.intensity : 0,

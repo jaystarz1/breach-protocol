@@ -297,6 +297,7 @@ function droneLevel(id, name, brief, objectives, options = {}) {
     roadPaint,
     weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
     lockPlayer: true, cameraFar: 3000,
+    timeOfDay: options.timeOfDay || 'night',
     sky: options.sky ?? 0x2b2733,
     fog: options.fog || [options.sky ?? 0x35303c, 500, 2600],
     ambient: options.ambient ?? 0.8, sun: options.sun ?? 0.85,
@@ -375,7 +376,7 @@ const movingRangeObjectives = interceptRuns.map((run, index) => phase(
 
 export const DRONE_TRAINING_LEVELS = [
   droneLevel(11, 'DRONARIUM',
-    'First feed: take control immediately, learn the essential on-screen flight display and place four live training strikes on static hulls. Handling first; everything else waits.',
+    'Day range. Take control immediately, learn the essential on-screen flight display and place four live training strikes on static hulls. Handling first; everything else waits.',
     [
       phase('first-feed', 'COACHED HANDLING AND FLIGHT DISPLAY', [fpv({
         text: 'FLY THE FEED — TWO STATIC HULLS, CONTROLS AND FLIGHT DISPLAY.',
@@ -400,7 +401,11 @@ export const DRONE_TRAINING_LEVELS = [
         startMessage: 'KAVUN — SAME AIRFRAME, NO NEW LESSON. SHOW ME CONTROL AND BATTERY DISCIPLINE.',
         result: 'DRONARIUM HANDLING CERTIFIED',
       })]),
-    ], { curriculum: ['basic handling', 'OSD and battery'] }),
+    ], {
+      curriculum: ['basic handling', 'OSD and battery'],
+      timeOfDay: 'day',
+      sky: 0x78a9d2, fog: [0xb8c5bd, 650, 2800], ambient: 0.72, sun: 1.35,
+    }),
 
   droneLevel(12, 'MOVING RANGE',
     'Ten live intercept repetitions: opposite crossings, approaching and receding traffic, flank cuts, speed, turns, concealment and one randomized final check.',

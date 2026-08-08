@@ -128,6 +128,7 @@ def main():
 
         catalogue = page.evaluate("""() => BP.LEVELS.filter(level => level.id >= 11 && level.id <= 20).map(level => ({
           id: level.id, name: level.name, curriculum: level.curriculum,
+          timeOfDay: level.timeOfDay,
           targetDuration: level.targetDuration,
           concepts: level.curriculum.length,
           objectives: level.objectives.length,
@@ -142,6 +143,8 @@ def main():
         }))""")
         assert [entry["name"] for entry in catalogue] == EXPECTED, catalogue
         assert [entry["id"] for entry in catalogue] == list(range(11, 21)), catalogue
+        assert catalogue[0]["timeOfDay"] == "day", catalogue
+        assert all(entry["timeOfDay"] == "night" for entry in catalogue[1:]), catalogue
         assert all(entry["concepts"] <= 2 for entry in catalogue), catalogue
         assert all(entry["targetDuration"] == [600, 720] for entry in catalogue), catalogue
         assert all(not entry["oldDrain"] and entry["timedBattery"] for entry in catalogue), catalogue
