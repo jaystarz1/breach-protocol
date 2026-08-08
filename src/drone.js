@@ -1014,11 +1014,13 @@ export class DroneController {
         <div class="fpv-airframe" aria-hidden="true">
           <div class="fpv-arm fpv-arm-left"></div>
           <div class="fpv-arm fpv-arm-right"></div>
-          <div class="fpv-prop fpv-prop-left"></div>
-          <div class="fpv-prop fpv-prop-right"></div>
+          <div class="fpv-prop fpv-prop-left"><div class="fpv-spinner"><i></i><i></i><i></i></div></div>
+          <div class="fpv-prop fpv-prop-right"><div class="fpv-spinner"><i></i><i></i><i></i></div></div>
           <svg class="fpv-whiskers" viewBox="0 0 100 100" preserveAspectRatio="none">
-            <path d="M43 103 C44 84 49 66 57 43" />
-            <path d="M57 103 C56 83 51 64 43 45" />
+            <path d="M25 105 L25 94 L73 34 L75 34 L75 105" />
+            <path d="M27 105 L27 95 L74 37 L77 37 L77 105" />
+            <path d="M75 105 L75 94 L27 34 L25 34 L25 105" />
+            <path d="M73 105 L73 95 L26 37 L23 37 L23 105" />
           </svg>
         </div>` : ''}
         <div class="fpv-cross">+</div>
@@ -1089,12 +1091,18 @@ export class DroneController {
       .fpv-arm{position:absolute;bottom:-2.5%;width:25%;height:3.2%;border-radius:999px;background:linear-gradient(0deg,#080908,#262825 47%,#080908);box-shadow:0 2px 8px rgba(0,0,0,.8)}
       .fpv-arm-left{left:-2%;transform:rotate(-17deg);transform-origin:left center}
       .fpv-arm-right{right:-2%;transform:rotate(17deg);transform-origin:right center}
-      .fpv-prop{position:absolute;bottom:-7%;width:34%;height:25%;border:5px solid rgba(195,202,190,.15);border-bottom-color:rgba(195,202,190,.035);border-radius:50%;filter:blur(2px);mix-blend-mode:screen;animation:fpvprop .075s steps(2) infinite}
-      .fpv-prop::after{content:'';position:absolute;inset:9% 3%;border:2px solid rgba(220,226,214,.09);border-radius:50%}
-      .fpv-prop-left{left:-7%;transform:rotate(-7deg)}
-      .fpv-prop-right{right:-7%;transform:rotate(7deg);animation-delay:-.037s}
-      .fpv-whiskers{position:absolute;left:31%;bottom:-2%;width:38%;height:55%;overflow:visible;filter:drop-shadow(1px 1px 1px #000)}
-      .fpv-whiskers path{fill:none;stroke:rgba(191,176,143,.82);stroke-width:1.1;vector-effect:non-scaling-stroke}
+      .fpv-prop{position:absolute;bottom:-13%;width:32%;aspect-ratio:1;mix-blend-mode:screen;filter:blur(.7px);transform:scaleY(.43)}
+      .fpv-prop-left{left:-8%}
+      .fpv-prop-right{right:-8%}
+      .fpv-spinner{position:absolute;inset:0;animation:fpvspin .085s linear infinite}
+      .fpv-prop-right .fpv-spinner{animation-direction:reverse;animation-delay:-.042s}
+      .fpv-spinner::after{content:'';position:absolute;left:47.5%;top:47.5%;width:5%;height:5%;border-radius:50%;background:rgba(210,216,207,.3);box-shadow:0 0 5px rgba(210,216,207,.24)}
+      .fpv-spinner i{position:absolute;left:50%;top:49%;width:48%;height:2.4%;transform-origin:left center;border-radius:100% 20% 20% 100%;background:linear-gradient(90deg,rgba(225,230,220,.24),rgba(208,214,204,.11) 60%,transparent);box-shadow:0 0 7px rgba(215,222,210,.15)}
+      .fpv-spinner i:nth-child(1){transform:rotate(0deg)}
+      .fpv-spinner i:nth-child(2){transform:rotate(120deg)}
+      .fpv-spinner i:nth-child(3){transform:rotate(240deg)}
+      .fpv-whiskers{position:absolute;left:32%;bottom:-3%;width:36%;height:58%;overflow:visible;filter:drop-shadow(1px 1px 1px #000)}
+      .fpv-whiskers path{fill:none;stroke:rgba(191,176,143,.76);stroke-width:.72;stroke-linejoin:round;vector-effect:non-scaling-stroke}
       .fpv-cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);font-size:18px;font-weight:400}
       .fpv-name{position:absolute;left:6%;top:5%}
       .fpv-mode{position:absolute;left:6%;top:calc(5% + 22px);font-size:12px;color:#cfd8cf}
@@ -1130,7 +1138,7 @@ export class DroneController {
       .fpv-review-key{margin-top:13px;color:#ffd54f;font-size:11px;letter-spacing:2px;animation:fpvblink 1s steps(2) infinite}
       @media(max-width:850px){.fpv-debrief-panel{inset:2%;overflow:auto}.fpv-debrief-grid{grid-template-columns:1fr 1fr}.fpv-aar-metrics{grid-column:1/-1}.fpv-coaching{grid-template-columns:1fr}.fpv-review-title{font-size:17px}}
       @keyframes fpvblink{50%{opacity:0.15}}
-      @keyframes fpvprop{50%{opacity:.48;filter:blur(2.8px)}}
+      @keyframes fpvspin{to{transform:rotate(360deg)}}
     `;
     this.overlay.appendChild(style);
     document.body.appendChild(this.overlay);
