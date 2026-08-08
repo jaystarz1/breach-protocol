@@ -2799,7 +2799,9 @@ function frame() {
   // The first-person rig renders as an overlay pass from its own scene (see weapons.js).
   const viewmodel = weapons ? { scene: weapons.viewScene, rig: weapons.viewRoot } : null;
   if (mode !== 'playing' || !world) {
-    if (scene) renderPipeline.render(scene, camera, { adaptive: false, viewmodel });
+    if (scene) renderPipeline.render(scene, camera, {
+      adaptive: false, viewmodel, fpv: world?.drone?.feedVisualState?.(),
+    });
     clearEdges();
     return;
   }
@@ -2829,7 +2831,9 @@ function frame() {
     if (world.drone.mode === 'combat') updateDroneCombatWave(dt);
     world.drone.update(dt, input, world.solids);
     checkObjectives();
-    renderPipeline.render(scene, camera, { adaptive: true, viewmodel });
+    renderPipeline.render(scene, camera, {
+      adaptive: true, viewmodel, fpv: world.drone?.feedVisualState?.(),
+    });
     clearEdges();
     return;
   }

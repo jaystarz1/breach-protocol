@@ -996,17 +996,28 @@ export class DroneController {
   buildFpvOverlay(definition) {
     this.overlay = document.createElement('div');
     this.overlay.innerHTML = `
-      <canvas class="fpv-noise"></canvas>
-      <div class="fpv-tear"></div>
-      <div class="fpv-cross">+</div>
-      <div class="fpv-name">${this.craftName}</div>
-      <div class="fpv-mode">${this.mode === 'bomber' ? 'ANGLE // PAYLOAD' : 'ACRO // ARMED'}</div>
-      <div class="fpv-timer">00:00</div>
-      <div class="fpv-dist"></div>
-      <div class="fpv-batt"></div>
-      <div class="fpv-link"></div>
-      <div class="fpv-warn"></div>
-      <canvas class="fpv-map"></canvas>
+      <div class="fpv-optic">
+        <canvas class="fpv-noise"></canvas>
+        <div class="fpv-tear"></div>
+        <div class="fpv-tear fpv-tear-secondary"></div>
+        <div class="fpv-scanlines"></div>
+        <div class="fpv-lens"></div>
+        <div class="fpv-cross">+</div>
+        <div class="fpv-name">${this.craftName}</div>
+        <div class="fpv-mode">${this.mode === 'bomber' ? 'ANGLE // PAYLOAD' : 'ACRO // ARMED'}</div>
+        <div class="fpv-timer">00:00</div>
+        <div class="fpv-dist"></div>
+        <div class="fpv-batt"></div>
+        <div class="fpv-link"></div>
+        <div class="fpv-warn"></div>
+        <div class="fpv-map-panel">
+          <div class="fpv-map-label">MISSION NAV-AID // AO + SEARCH // NOT LIVE TRACK</div>
+          <canvas class="fpv-map"></canvas>
+        </div>
+        <div class="fpv-help">SIM CONTROL // ${this.mode === 'bomber'
+    ? 'WASD FLIGHT · MOUSE GIMBAL · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP · N THERMAL'
+    : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · CONTACT TO STRIKE'}</div>
+      </div>
       <div class="fpv-lesson">
         <div class="fpv-lesson-title"></div>
         <div class="fpv-lesson-body"></div>
@@ -1038,9 +1049,6 @@ export class DroneController {
         <div class="fpv-review-key">FIRE — LAUNCH WHEN READY</div>
       </div>
       <div class="drone-result fpv-result"></div>
-      <div class="fpv-help">${this.mode === 'bomber'
-    ? 'WASD HORIZONTAL FLIGHT · ARROWS/MOUSE GIMBAL · HOLD RMB/Z CLIMB · HOLD CTRL/C DESCEND · RELEASE FOR ALT HOLD · FIRE/G DROP BOMB · N THERMAL'
-    : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · FLY INTO THE TARGET'}</div>
     `;
     Object.assign(this.overlay.style, {
       position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: 40,
@@ -1051,9 +1059,13 @@ export class DroneController {
     });
     const style = document.createElement('style');
     style.textContent = `
+      .fpv-optic{position:absolute;left:50%;top:50%;width:min(100vw,133.333vh);height:min(100vh,75vw);transform:translate(-50%,-50%);overflow:hidden;box-shadow:0 0 0 100vmax #000;isolation:isolate}
       .fpv-noise{position:absolute;inset:0;width:100%;height:100%;opacity:0;mix-blend-mode:screen}
       .fpv-tear{position:absolute;left:0;right:0;height:0;background:rgba(235,240,235,.5);opacity:0;filter:blur(1px)}
-      .fpv-cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);font-size:22px;font-weight:400}
+      .fpv-tear-secondary{mix-blend-mode:difference}
+      .fpv-scanlines{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.07) 0,rgba(0,0,0,.07) 1px,transparent 1px,transparent 3px);opacity:.45}
+      .fpv-lens{position:absolute;inset:-1px;z-index:3;border-radius:3.5% / 4.5%;box-shadow:inset 0 0 6vmin 1.8vmin rgba(0,0,0,.78);background:radial-gradient(ellipse at center,transparent 58%,rgba(0,0,0,.12) 76%,rgba(0,0,0,.7) 100%)}
+      .fpv-cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);font-size:18px;font-weight:400}
       .fpv-name{position:absolute;left:6%;top:5%}
       .fpv-mode{position:absolute;left:6%;top:calc(5% + 22px);font-size:12px;color:#cfd8cf}
       .fpv-timer{position:absolute;right:6%;top:5%}
@@ -1061,12 +1073,14 @@ export class DroneController {
       .fpv-batt{position:absolute;left:6%;bottom:7%;white-space:pre;font-size:17px}
       .fpv-link{position:absolute;right:6%;bottom:7%;text-align:right;white-space:pre}
       .fpv-warn{position:absolute;left:50%;top:63%;transform:translateX(-50%);color:#ffd8b0;font-size:18px;letter-spacing:3px;animation:fpvblink 0.6s steps(2) infinite}
-      .fpv-map{position:absolute;right:6%;bottom:calc(7% + 92px);border:1px solid rgba(233,239,233,.4);background:rgba(6,8,6,.68);image-rendering:pixelated}
+      .fpv-map-panel{position:absolute;right:5.5%;bottom:calc(7% + 82px);padding:5px 5px 4px;border:1px solid rgba(233,239,233,.45);background:rgba(6,8,6,.78);text-shadow:none}
+      .fpv-map-label{padding:0 1px 4px;color:#dbe5db;font-size:8px;font-weight:700;letter-spacing:.55px;white-space:nowrap}
+      .fpv-map{display:block;background:rgba(6,8,6,.68);image-rendering:pixelated}
       .fpv-lesson{position:absolute;left:50%;top:34%;transform:translateX(-50%);max-width:520px;padding:16px 20px;border:1px solid rgba(255,213,79,.75);background:rgba(8,10,8,.92);display:none}
       .fpv-lesson-title{color:#ffd54f;letter-spacing:2px;margin-bottom:8px}
       .fpv-lesson-body{font-weight:400;font-size:14px;line-height:1.5;color:#e9efe9;white-space:pre-line}
       .fpv-lesson-key{margin-top:10px;font-size:11px;color:#ffd54f;letter-spacing:2px;animation:fpvblink 1s steps(2) infinite}
-      .fpv-help{position:absolute;left:50%;bottom:2.5%;transform:translateX(-50%);font-size:11px;font-weight:400;letter-spacing:1px;white-space:nowrap;color:#c9d2c9}
+      .fpv-help{position:absolute;left:50%;bottom:2.5%;transform:translateX(-50%);font-size:9px;font-weight:400;letter-spacing:.7px;white-space:nowrap;color:#aeb8ae}
       .fpv-result{position:absolute;left:50%;top:26%;transform:translateX(-50%);padding:9px 14px;border:1px solid rgba(233,239,233,.5);background:rgba(8,10,8,.78);letter-spacing:2px;opacity:0;transition:opacity .18s}
       .fpv-review,.fpv-ready-panel{display:none;position:absolute;z-index:8;background:rgba(7,10,8,.94);border:1px solid rgba(233,239,233,.55);box-shadow:0 18px 70px rgba(0,0,0,.65);text-shadow:none}
       .fpv-replay-panel{left:6%;top:8%;padding:15px 18px;width:310px}
@@ -1098,8 +1112,9 @@ export class DroneController {
     this.aarMap = this.overlay.querySelector('.fpv-aar-map');
     this.aarProfile = this.overlay.querySelector('.fpv-aar-profile');
     this.flightHudElements = [
-      '.fpv-noise', '.fpv-tear', '.fpv-cross', '.fpv-name', '.fpv-mode', '.fpv-timer',
-      '.fpv-dist', '.fpv-batt', '.fpv-link', '.fpv-warn', '.fpv-map', '.fpv-help',
+      '.fpv-noise', '.fpv-tear', '.fpv-tear-secondary', '.fpv-cross', '.fpv-name',
+      '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt', '.fpv-link', '.fpv-warn',
+      '.fpv-map-panel', '.fpv-help',
     ].map(selector => this.overlay.querySelector(selector)).filter(Boolean);
     this.osd = {
       timer: this.overlay.querySelector('.fpv-timer'),
@@ -1108,7 +1123,7 @@ export class DroneController {
       batt: this.overlay.querySelector('.fpv-batt'),
       link: this.overlay.querySelector('.fpv-link'),
       warn: this.overlay.querySelector('.fpv-warn'),
-      tear: this.overlay.querySelector('.fpv-tear'),
+      tears: [...this.overlay.querySelectorAll('.fpv-tear')],
     };
     // Analog snow: a tiny noise canvas stretched over the screen, redrawn at television
     // cadence. Opacity rides (1 - link) so jamming looks like jamming, not like lag.
@@ -1135,7 +1150,7 @@ export class DroneController {
     this.lessonDelay = this.lessonQueue.length ? 1.4 : 0;
     this.lessonCard = this.overlay.querySelector('.fpv-lesson');
     this.lessonDim = ['.fpv-name', '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt',
-      '.fpv-link', '.fpv-map', '.fpv-help']
+      '.fpv-link', '.fpv-map-panel', '.fpv-help']
       .map(sel => this.overlay.querySelector(sel)).filter(Boolean);
     // The analog cameras strike crews fly are colour-thin and contrast-hot.
     if (this.canvas) {
@@ -1194,13 +1209,13 @@ export class DroneController {
     while (this.lessonQueue?.length) this.advanceLesson();
   }
 
-  // The operator's map board, north-up in the corner of the goggles: terrain the brief
-  // talks about (roads, woods, rail, settlements), the jammer bubbles, launch, and live
-  // target tracks. Static features bake once; the per-frame pass only blits and stamps.
+  // Explicit simulation Nav-Aid, north-up in the corner of the goggles: it replaces the
+  // paper/tablet brief the player cannot physically hold. Terrain, assigned AO, estimated
+  // jammer footprints and the intel search box are planning information—not live tracking.
   buildFpvMap(definition) {
     const mapCanvas = this.overlay.querySelector('.fpv-map');
     const def = definition.minimap;
-    if (!def) { mapCanvas.remove(); return; }
+    if (!def) { mapCanvas.closest('.fpv-map-panel')?.remove(); return; }
     const [x1, zS, , zN] = def.bounds;
     const x2 = def.bounds[2];
     // The board is square regardless of the operational area's shape: the op area sits
@@ -1249,6 +1264,9 @@ export class DroneController {
       ctx.strokeRect(Math.min(oax, obx), Math.min(oaz, obz),
         Math.abs(obx - oax), Math.abs(obz - oaz));
       ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(233,239,233,0.72)';
+      ctx.font = '700 8px ui-monospace, Menlo, monospace';
+      ctx.fillText('AO', Math.min(oax, obx) + 3, Math.min(oaz, obz) + 10);
     }
     const strokeRuns = (runs, style, width) => {
       ctx.strokeStyle = style;
@@ -1336,7 +1354,7 @@ export class DroneController {
       ctx.setLineDash([]);
       ctx.fillStyle = 'rgba(255,92,70,0.9)';
       ctx.font = '700 8px ui-monospace, Menlo, monospace';
-      ctx.fillText('TGT', Math.min(sx, ex) + 2, Math.min(sz, ez) - 2);
+      ctx.fillText('SEARCH', Math.min(sx, ex) + 2, Math.min(sz, ez) - 2);
     }
     ctx.fillStyle = '#aab3aa';
     ctx.font = '700 9px ui-monospace, Menlo, monospace';
@@ -2095,7 +2113,10 @@ export class DroneController {
       const lockAngle = this.payloadNadir ? -76 : -80;
       this.payloadNadir = this.pitch * 180 / Math.PI <= lockAngle;
     }
-    this.roll += ((-input.move.x * 0.42) - this.roll) * Math.min(1, dt * 6);
+    // The FPV camera is fixed to the airframe: lateral input banks the entire horizon.
+    // The payload platform is gimballed and therefore remains deliberately steadier.
+    const bank = this.mode === 'bomber' ? 0.1 : 0.58;
+    this.roll += ((-input.move.x * bank) - this.roll) * Math.min(1, dt * 6);
 
     const cp = Math.cos(this.pitch);
     this.forward.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
@@ -2218,7 +2239,14 @@ export class DroneController {
 
     this.camera.position.copy(this.pos);
     this.camera.rotation.order = 'YXZ';
-    this.camera.rotation.set(this.pitch, this.yaw, this.roll);
+    // Small deterministic motor/prop vibration sells a camera bolted to a carbon frame
+    // without moving collision rays or turning the simulated aircraft into a random walk.
+    const vibration = this.mode === 'bomber' ? 0.0012 : 0.0038;
+    const vibrationLoad = 0.35 + 0.65 * Math.min(1, this.vel.length() / this.worldMaxSpeed);
+    const buzzPitch = Math.sin(this.flightTime * 91) * vibration * vibrationLoad;
+    const buzzYaw = Math.sin(this.flightTime * 67 + 1.7) * vibration * vibrationLoad * 0.55;
+    const buzzRoll = Math.sin(this.flightTime * 113 + 0.4) * vibration * vibrationLoad * 0.8;
+    this.camera.rotation.set(this.pitch + buzzPitch, this.yaw + buzzYaw, this.roll + buzzRoll);
 
     this.recordAttemptTelemetry(dt, solids);
     if (this.isFpvFamily && this.training.allowAbort && input.breachPressed) {
@@ -2575,13 +2603,18 @@ export class DroneController {
         data[i + 3] = 255;
       }
       this.noiseCtx.putImageData(image, 0, 0);
-      // Horizontal tear bars: the classic analog break-up as SNR falls.
-      if (signal < 0.8 && Math.random() < (1 - signal) * 0.55) {
-        osd.tear.style.top = `${(Math.random() * 90) | 0}%`;
-        osd.tear.style.height = `${2 + Math.random() * 14}px`;
-        osd.tear.style.opacity = String(0.25 + (1 - signal) * 0.5);
-      } else {
-        osd.tear.style.opacity = '0';
+      // Horizontal sync tears arrive in short, displaced bands rather than as uniform snow.
+      for (const [index, tear] of osd.tears.entries()) {
+        const chance = (1 - signal) * (index ? 0.38 : 0.6);
+        if (signal < 0.84 && Math.random() < chance) {
+          const displacement = (Math.random() - 0.5) * (8 + (1 - signal) * 56);
+          tear.style.top = `${(Math.random() * 92) | 0}%`;
+          tear.style.height = `${1 + Math.random() * (index ? 8 : 15)}px`;
+          tear.style.opacity = String(0.18 + (1 - signal) * 0.54);
+          tear.style.transform = `translateX(${displacement}px)`;
+        } else {
+          tear.style.opacity = '0';
+        }
       }
     }
     const minutes = String(Math.floor(this.flightTime / 60)).padStart(2, '0');
@@ -2644,6 +2677,19 @@ export class DroneController {
         : signal < 0.3 ? 'JAMMING — BREAK LINE OF SIGHT'
           : this.battery < 9 ? 'LAND NOW'
             : this.battery < 22 ? 'LOW BATTERY' : '';
+  }
+
+  // Frame-state handoff for the renderer's camera/signal emulation. Keeping this separate
+  // from mission rules means compatibility rendering can simply ignore it.
+  feedVisualState() {
+    if (!this.isFpvFamily) return null;
+    return {
+      active: true,
+      signal: this.frozen ? 0 : this.signal,
+      time: this.flightTime,
+      thermal: this.thermalEnabled,
+      stabilized: this.mode === 'bomber',
+    };
   }
 
   updateThermalSignatures() {

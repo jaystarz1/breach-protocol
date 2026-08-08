@@ -151,6 +151,31 @@ def main():
         assert all(entry["coached"] and entry["unassisted"] for entry in catalogue), catalogue
         assert catalogue[1]["droneSteps"] == 10, catalogue
 
+        # The operator view is a 4:3 camera, while the map is an explicit simulation aid:
+        # it carries assigned-area/search intelligence and never claims a live target track.
+        page.evaluate("() => BP.startLevel(11)")
+        page.wait_for_function("() => BP.mode === 'playing' && BP.world?.drone")
+        operator_view = page.evaluate("""() => {
+          const d = BP.world.drone;
+          d.skipLessons?.();
+          d.attemptStateTime = 1;
+          d.updateAttemptState(.1, { firePressed: true });
+          d.updateFpvOsd(0);
+          const optic = document.querySelector('.fpv-optic').getBoundingClientRect();
+          const navLabel = document.querySelector('.fpv-map-label')?.textContent || '';
+          return {
+            ratio: optic.width / optic.height,
+            navLabel,
+            searchMarked: !!d.mapStatic,
+            feed: d.feedVisualState(),
+          };
+        }""")
+        assert abs(operator_view["ratio"] - 4 / 3) < .01, operator_view
+        assert "NAV-AID" in operator_view["navLabel"] and "NOT LIVE TRACK" in operator_view["navLabel"], operator_view
+        assert operator_view["searchMarked"] and operator_view["feed"]["active"], operator_view
+        if args.output:
+            page.screenshot(path=args.output / "operator-day.png")
+
         # A long drone phase can always be bypassed from pause, and a failure in the next
         # phase retries that phase rather than sending the operator back through phase one.
         page.evaluate("() => BP.startLevel(13)")

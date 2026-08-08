@@ -74,6 +74,11 @@ export function createRenderPipeline(canvas, settings) {
       uniforms: {
         tDiffuse: { value: target.texture },
         resolution: { value: new THREE.Vector2(1, 1) },
+        fpvActive: { value: 0 },
+        fpvSignal: { value: 1 },
+        fpvTime: { value: 0 },
+        fpvThermal: { value: 0 },
+        fpvStabilized: { value: 0 },
       },
       vertexShader: `
         varying vec2 vUv;
@@ -85,6 +90,11 @@ export function createRenderPipeline(canvas, settings) {
       fragmentShader: `
         uniform sampler2D tDiffuse;
         uniform vec2 resolution;
+        uniform float fpvActive;
+        uniform float fpvSignal;
+        uniform float fpvTime;
+        uniform float fpvThermal;
+        uniform float fpvStabilized;
         varying vec2 vUv;
 
         float hash(vec2 p) {
@@ -95,11 +105,34 @@ export function createRenderPipeline(canvas, settings) {
 
         void main() {
           vec2 px = 1.0 / resolution;
-          vec3 c = texture2D(tDiffuse, vUv).rgb;
-          vec3 n = texture2D(tDiffuse, vUv + vec2(0.0, px.y)).rgb;
-          vec3 s = texture2D(tDiffuse, vUv - vec2(0.0, px.y)).rgb;
-          vec3 e = texture2D(tDiffuse, vUv + vec2(px.x, 0.0)).rgb;
-          vec3 w = texture2D(tDiffuse, vUv - vec2(px.x, 0.0)).rgb;
+          vec2 sampleUv = vUv;
+          float opticEdge = 1.0;
+          float breakup = 0.0;
+          if (fpvActive > 0.5) {
+            // Centre-crop the output to a 4:3 FPV sensor. Wide displays retain black goggle
+            // borders instead of stretching the camera image to a cinematic aspect ratio.
+            float halfWidth = min(0.5, resolution.y * (4.0 / 3.0) / resolution.x * 0.5);
+            vec2 lens = vec2((vUv.x - 0.5) / halfWidth, (vUv.y - 0.5) / 0.5);
+            if (abs(lens.x) > 1.0 || abs(lens.y) > 1.0) {
+              gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+              return;
+            }
+            float radius2 = dot(lens, lens);
+            float barrel = mix(0.105, 0.035, fpvStabilized);
+            lens *= 1.0 + barrel * radius2;
+            sampleUv = vec2(0.5 + lens.x * halfWidth, 0.5 + lens.y * 0.5);
+            opticEdge = 1.0 - smoothstep(0.48, 1.22, radius2);
+            breakup = pow(1.0 - clamp(fpvSignal, 0.0, 1.0), 1.7);
+            float band = floor(lens.y * 42.0 + fpvTime * 1.7);
+            float tear = step(0.76, hash(vec2(band, floor(fpvTime * 12.0))));
+            sampleUv.x += (hash(vec2(band, floor(fpvTime * 19.0))) - 0.5)
+              * 0.055 * breakup * tear;
+          }
+          vec3 c = texture2D(tDiffuse, sampleUv).rgb;
+          vec3 n = texture2D(tDiffuse, sampleUv + vec2(0.0, px.y)).rgb;
+          vec3 s = texture2D(tDiffuse, sampleUv - vec2(0.0, px.y)).rgb;
+          vec3 e = texture2D(tDiffuse, sampleUv + vec2(px.x, 0.0)).rgb;
+          vec3 w = texture2D(tDiffuse, sampleUv - vec2(px.x, 0.0)).rgb;
           // Restrained local contrast: surface grain and frame edges survive the filmic curve
           // without turning every high-frequency texture into a halo.
           c += (c * 4.0 - n - s - e - w) * 0.045;
@@ -109,6 +142,22 @@ export function createRenderPipeline(canvas, settings) {
           c = (c - 0.5) * 1.025 + 0.5;
           float vignette = 1.0 - smoothstep(0.28, 0.72, length(vUv - 0.5));
           c *= mix(0.9, 1.0, vignette);
+          if (fpvActive > 0.5) {
+            // Weak analog links lose colour and horizontal lock before the image disappears.
+            float channelSlip = (0.0007 + breakup * 0.006) * (1.0 - fpvThermal);
+            c.r = texture2D(tDiffuse, sampleUv + vec2(channelSlip, 0.0)).r;
+            c.b = texture2D(tDiffuse, sampleUv - vec2(channelSlip, 0.0)).b;
+            float gray = dot(c, vec3(0.299, 0.587, 0.114));
+            float dropoutBand = step(0.7, hash(vec2(floor(gl_FragCoord.y / 7.0),
+              floor(fpvTime * 9.0)))) * breakup;
+            c = mix(c, vec3(gray), clamp(breakup * 0.72 + dropoutBand * 0.52, 0.0, 1.0));
+            if (fpvThermal > 0.5) {
+              gray = floor(pow(clamp(gray, 0.0, 1.0), 0.78) * 11.0) / 11.0;
+              c = vec3(gray);
+            }
+            float scan = 0.965 + 0.035 * step(0.5, fract(gl_FragCoord.y * 0.5));
+            c *= scan * mix(0.46, 1.0, opticEdge);
+          }
           // Stable screen-space dither keeps gradients and photographic surfaces from
           // banding without making broad walls and dark window bays crawl every frame.
           c += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
@@ -145,6 +194,12 @@ export function createRenderPipeline(canvas, settings) {
         renderer.setRenderTarget(target);
         renderWithViewmodel(scene, camera, frameState.viewmodel);
         renderer.setRenderTarget(null);
+        const fpv = frameState.fpv;
+        postMaterial.uniforms.fpvActive.value = fpv?.active ? 1 : 0;
+        postMaterial.uniforms.fpvSignal.value = fpv?.signal ?? 1;
+        postMaterial.uniforms.fpvTime.value = fpv?.time ?? 0;
+        postMaterial.uniforms.fpvThermal.value = fpv?.thermal ? 1 : 0;
+        postMaterial.uniforms.fpvStabilized.value = fpv?.stabilized ? 1 : 0;
         renderer.render(postScene, postCamera);
       } else {
         renderWithViewmodel(scene, camera, frameState.viewmodel);
