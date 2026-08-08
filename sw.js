@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v162-day-mission';
+const CACHE = 'breach-protocol-v163-day-night-missions';
 const ASSETS = [
   './', 'index.html', 'manifest.json',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -8,6 +8,7 @@ const ASSETS = [
   'src/levels/acts.js', 'src/levels/drone-training.js', 'src/levels/terrain-deep-fence.js',
   'src/navgrid.js', 'src/terrain.js', 'src/trees.js', 'src/hamlet.js',
   'src/mission-variants.js',
+  'src/time-of-day.js',
   'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js', 'src/street-sweep-art.js',
   'src/visual-kit.js', 'src/character-assets.js', 'src/interior-mission-art.js',
   'src/frontline-art.js',

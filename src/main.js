@@ -47,6 +47,7 @@ import {
   resolveReinforcementVariant,
   seededRandom,
 } from './mission-variants.js';
+import { levelTimeOfDay, missionLightingVariant } from './time-of-day.js';
 
 const $ = id => document.getElementById(id);
 
@@ -92,6 +93,8 @@ const levelAfter = id => {
   const index = LEVELS.findIndex(l => l.id === id);
   return index >= 0 ? LEVELS[index + 1] || null : null;
 };
+let currentTimeOfDay = levelTimeOfDay(levelById(currentLevel),
+  S.timeOfDayByLevel?.[currentLevel]);
 // Keyed by mission id (including the 100-series QA registry) so retries rotate their
 // authored mission variant everywhere.
 const missionRuns = {};
@@ -125,22 +128,46 @@ function buildLevelList() {
   LEVELS.forEach((L, index) => {
     const btn = document.createElement('button');
     btn.className = 'menu-btn';
-    const best = S.best[L.id];
-    const timeOfDay = (L.timeOfDay || 'night').toUpperCase();
+    const variants = S.bestByTime?.[L.id] || {};
+    const result = time => {
+      const best = variants[time]
+        || (time === levelTimeOfDay(L) ? S.best?.[L.id] : null);
+      return best ? `${best.grade} ${best.score}` : '—';
+    };
     btn.innerHTML = `${String(index + 1).padStart(2, '0')} — ${L.name}` +
-      `<span class="sub">${timeOfDay} · ${best ? `BEST: ${best.grade} · ${best.score}${best.difficulty ? ' · ' + best.difficulty : ''}` : 'NOT COMPLETED'}${L.sniper ? ' · SNIPER' : ''}</span>`;
+      `<span class="sub">DAY ${result('day')} · NIGHT ${result('night')}${L.sniper ? ' · SNIPER' : ''}</span>`;
     btn.onclick = () => showBrief(L.id);
     list.appendChild(btn);
   });
+}
+
+function renderBriefTime() {
+  const L = levelById(currentLevel);
+  const missionNumber = LEVELS.findIndex(l => l.id === currentLevel) + 1;
+  $('brief-day').classList.toggle('sel', currentTimeOfDay === 'day');
+  $('brief-night').classList.toggle('sel', currentTimeOfDay === 'night');
+  $('brief-num').textContent = `MISSION ${String(missionNumber).padStart(2, '0')} · ${currentTimeOfDay.toUpperCase()} · ${DIFFICULTIES[S.difficulty].name}`;
+  const selectedBest = S.bestByTime?.[currentLevel]?.[currentTimeOfDay]
+    || (currentTimeOfDay === levelTimeOfDay(L) ? S.best?.[currentLevel] : null);
+  $('brief-go').textContent = selectedBest
+    ? `DEPLOY · BEST ${selectedBest.grade} ${selectedBest.score}` : 'DEPLOY';
+  // The level lookup keeps this helper honest when QA opens a 100-series source mission.
+  if (!L) $('brief-go').textContent = 'DEPLOY';
+}
+
+function selectBriefTime(timeOfDay) {
+  currentTimeOfDay = levelTimeOfDay(levelById(currentLevel), timeOfDay);
+  S.timeOfDayByLevel[currentLevel] = currentTimeOfDay;
+  save.save();
+  renderBriefTime();
 }
 
 function showBrief(id) {
   currentLevel = id;
   resumePhase = 0;   // launching from the menu is always a fresh start
   const L = levelById(id);
+  currentTimeOfDay = levelTimeOfDay(L, S.timeOfDayByLevel?.[id]);
   const mission = campaignMission(id);
-  const missionNumber = LEVELS.findIndex(l => l.id === id) + 1;
-  $('brief-num').textContent = `MISSION ${String(missionNumber).padStart(2, '0')} · ${(L.timeOfDay || 'night').toUpperCase()} · ${DIFFICULTIES[S.difficulty].name}`;
   $('brief-title').textContent = L.name;
   $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/${LEVELS.length} NODES SECURED`;
   $('brief-target-status').textContent = mission.target;
@@ -148,8 +175,12 @@ function showBrief(id) {
   const phasePlan = (L.objectives || []).map((phaseDef, index) =>
     `${index + 1}. ${phaseDef.text || phaseDef.id || 'AUTHORED PHASE'}`).join('\n');
   $('brief-text').textContent = `${briefingText(id, L.brief)}\n\nOPERATION PLAN\n${phasePlan}`;
+  renderBriefTime();
   hud.screen('brief');
 }
+
+$('brief-day').onclick = () => selectBriefTime('day');
+$('brief-night').onclick = () => selectBriefTime('night');
 
 $('menu-continue').onclick = () => {
   audioUnlock();
@@ -411,7 +442,10 @@ function emergencyPower() {
   hud.feed('EMERGENCY POWER ONLINE — RED CIRCUIT ONLY', '#ff8a65');
 }
 
-function startLevel(id) {
+function startLevel(id, requestedTimeOfDay = null) {
+  // Retries and checkpoint restarts inherit the running variant even when QA launched it
+  // directly without saving a menu preference.
+  const retryTime = id === currentLevel ? world?.level?.timeOfDay : null;
   resetInput();
   if (world?.drone) {
     world.drone.dispose();
@@ -436,7 +470,10 @@ function startLevel(id) {
   }
   const loadId = ++levelLoadId;
   currentLevel = id;
-  const L = levelById(id);
+  const baseLevel = levelById(id);
+  currentTimeOfDay = levelTimeOfDay(baseLevel,
+    requestedTimeOfDay || retryTime || S.timeOfDayByLevel?.[id]);
+  const L = missionLightingVariant(baseLevel, currentTimeOfDay);
   const diff = DIFFICULTIES[S.difficulty];
   missionRuns[id] = (missionRuns[id] ?? 0);
   const missionVariant = missionRuns[id]++ % 3;
@@ -2681,7 +2718,8 @@ function winMission() {
   const g = grade(world.stats.score, world.stats.civKills, acc);
   // 100-series QA boots never write campaign progress.
   if (currentLevel < 100) {
-    save.recordResult(currentLevel, Math.max(0, world.stats.score), g, DIFFICULTIES[S.difficulty].name);
+    save.recordResult(currentLevel, Math.max(0, world.stats.score), g,
+      DIFFICULTIES[S.difficulty].name, world.level.timeOfDay);
   }
   showDebrief(true, g, t, acc, timeBonus);
 }
@@ -2717,6 +2755,7 @@ function showDebrief(won, g, t, acc, timeBonus, reason) {
     $('debrief-grade').textContent = g;
     $('debrief-grade').style.color = won ? '#ffc107' : '#ef5350';
     const rows = [
+      ['Mission conditions', world.level.timeOfDay.toUpperCase()],
       ['Hostiles eliminated', world.stats.kills],
       ['Hostiles surrendered', world.stats.surrenders],
       ['Detainees secured', world.stats.detaineesSecured],
@@ -3107,13 +3146,14 @@ window.BP = {
   get player() { return player; },
   get weapons() { return weapons; },
   get mode() { return mode; },
+  get timeOfDay() { return world?.level?.timeOfDay || currentTimeOfDay; },
   get rendererMode() { return renderPipeline.mode; },
   get performance() { return renderPipeline.performanceSnapshot(); },
   startLevel, LEVELS, LEGACY_LEVELS, S, input,
   // Boot an act at one of its authored checkpoints — the same path a death-retry takes.
-  startLevelAt(id, phaseIndex) {
+  startLevelAt(id, phaseIndex, timeOfDay = null) {
     resumePhase = phaseIndex;
-    startLevel(id);
+    startLevel(id, timeOfDay);
   },
   setNvg,
   // Real-path device activation for focused browser QA: the F interaction is gated behind
