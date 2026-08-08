@@ -1010,6 +1010,17 @@ export class DroneController {
         <div class="fpv-tear fpv-tear-secondary"></div>
         <div class="fpv-scanlines"></div>
         <div class="fpv-lens"></div>
+        ${this.mode === 'fpv' ? `
+        <div class="fpv-airframe" aria-hidden="true">
+          <div class="fpv-arm fpv-arm-left"></div>
+          <div class="fpv-arm fpv-arm-right"></div>
+          <div class="fpv-prop fpv-prop-left"></div>
+          <div class="fpv-prop fpv-prop-right"></div>
+          <svg class="fpv-whiskers" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path d="M43 103 C44 84 49 66 57 43" />
+            <path d="M57 103 C56 83 51 64 43 45" />
+          </svg>
+        </div>` : ''}
         <div class="fpv-cross">+</div>
         <div class="fpv-name">${this.craftName}</div>
         <div class="fpv-mode">${this.mode === 'bomber' ? 'ANGLE // PAYLOAD' : 'ACRO // ARMED'}</div>
@@ -1074,6 +1085,16 @@ export class DroneController {
       .fpv-tear-secondary{mix-blend-mode:difference}
       .fpv-scanlines{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.07) 0,rgba(0,0,0,.07) 1px,transparent 1px,transparent 3px);opacity:.45}
       .fpv-lens{position:absolute;inset:-1px;z-index:3;border-radius:11% / 18%;box-shadow:inset 0 0 8vmin 2.4vmin rgba(0,0,0,.84);background:radial-gradient(ellipse 78% 72% at center,transparent 50%,rgba(0,0,0,.11) 72%,rgba(0,0,0,.72) 100%)}
+      .fpv-airframe{position:absolute;inset:0;z-index:2;overflow:hidden}
+      .fpv-arm{position:absolute;bottom:-2.5%;width:25%;height:3.2%;border-radius:999px;background:linear-gradient(0deg,#080908,#262825 47%,#080908);box-shadow:0 2px 8px rgba(0,0,0,.8)}
+      .fpv-arm-left{left:-2%;transform:rotate(-17deg);transform-origin:left center}
+      .fpv-arm-right{right:-2%;transform:rotate(17deg);transform-origin:right center}
+      .fpv-prop{position:absolute;bottom:-7%;width:34%;height:25%;border:5px solid rgba(195,202,190,.15);border-bottom-color:rgba(195,202,190,.035);border-radius:50%;filter:blur(2px);mix-blend-mode:screen;animation:fpvprop .075s steps(2) infinite}
+      .fpv-prop::after{content:'';position:absolute;inset:9% 3%;border:2px solid rgba(220,226,214,.09);border-radius:50%}
+      .fpv-prop-left{left:-7%;transform:rotate(-7deg)}
+      .fpv-prop-right{right:-7%;transform:rotate(7deg);animation-delay:-.037s}
+      .fpv-whiskers{position:absolute;left:31%;bottom:-2%;width:38%;height:55%;overflow:visible;filter:drop-shadow(1px 1px 1px #000)}
+      .fpv-whiskers path{fill:none;stroke:rgba(191,176,143,.82);stroke-width:1.1;vector-effect:non-scaling-stroke}
       .fpv-cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);font-size:18px;font-weight:400}
       .fpv-name{position:absolute;left:6%;top:5%}
       .fpv-mode{position:absolute;left:6%;top:calc(5% + 22px);font-size:12px;color:#cfd8cf}
@@ -1109,6 +1130,7 @@ export class DroneController {
       .fpv-review-key{margin-top:13px;color:#ffd54f;font-size:11px;letter-spacing:2px;animation:fpvblink 1s steps(2) infinite}
       @media(max-width:850px){.fpv-debrief-panel{inset:2%;overflow:auto}.fpv-debrief-grid{grid-template-columns:1fr 1fr}.fpv-aar-metrics{grid-column:1/-1}.fpv-coaching{grid-template-columns:1fr}.fpv-review-title{font-size:17px}}
       @keyframes fpvblink{50%{opacity:0.15}}
+      @keyframes fpvprop{50%{opacity:.48;filter:blur(2.8px)}}
     `;
     this.overlay.appendChild(style);
     document.body.appendChild(this.overlay);
@@ -1124,7 +1146,7 @@ export class DroneController {
     this.flightHudElements = [
       '.fpv-noise', '.fpv-tear', '.fpv-tear-secondary', '.fpv-cross', '.fpv-name',
       '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt', '.fpv-link', '.fpv-warn',
-      '.fpv-fiber', '.fpv-map-panel', '.fpv-help',
+      '.fpv-fiber', '.fpv-airframe', '.fpv-map-panel', '.fpv-help',
     ].map(selector => this.overlay.querySelector(selector)).filter(Boolean);
     this.osd = {
       timer: this.overlay.querySelector('.fpv-timer'),

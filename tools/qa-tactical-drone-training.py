@@ -176,6 +176,8 @@ def main():
             viewport: [innerWidth, innerHeight],
             externalMap: mapPanel?.parentElement === d.overlay,
             mapTop: getComputedStyle(mapPanel).top,
+            frontProps: document.querySelectorAll('.fpv-prop').length,
+            whiskers: document.querySelectorAll('.fpv-whiskers path').length,
             navLabel,
             searchMarked: !!d.mapStatic,
             feed: d.feedVisualState(),
@@ -183,6 +185,7 @@ def main():
         }""")
         assert operator_view["optic"] == operator_view["viewport"], operator_view
         assert operator_view["externalMap"] and operator_view["mapTop"] != "auto", operator_view
+        assert operator_view["frontProps"] == 2 and operator_view["whiskers"] == 2, operator_view
         assert "NAV-AID" in operator_view["navLabel"] and "NOT CAMERA" in operator_view["navLabel"], operator_view
         assert operator_view["searchMarked"] and operator_view["feed"]["active"], operator_view
         if args.output:
