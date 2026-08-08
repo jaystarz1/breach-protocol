@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import {
   groundHeight, hasLOS, raycastSolids, raySphere, rayVerticalCapsule,
 } from './physics.js';
+import {
+  militaryVehicleModel, militaryVehicleNameForLabel,
+} from './military-vehicles.js';
+import {
+  animateAuthoredCharacter, createAuthoredCharacter, kneelAuthoredCharacter,
+  stopAuthoredCharacter,
+} from './character-assets.js';
 
 const MAX_RANGE = 95;
 const MAX_SPEED = 16;
@@ -62,6 +69,21 @@ const DRONE_TRACER_MAT = new THREE.LineBasicMaterial({
   name: 'drone-rifle-tracer', color: 0xffc887,
   transparent: true, opacity: 0.54, depthWrite: false,
 });
+
+// Ground-fire lethality against a small FPV airframe, per aimed rifle shot. Anchored to
+// the drone-war record: rifle fire almost never downs an FPV (which is why both sides
+// issue shotguns for the last 30-50m), a quad presents ~0.05-0.1 m² of lethal
+// cross-section moving 10-20 m/s with jink, and a stressed standing shooter's dispersion
+// plus lead error dominates everything past pistol range. The curve lands ~7% at 5m,
+// ~3% at 20m, ~0.5% at 50m, ~0.06% at 100m before the speed factor: a hovering aircraft
+// is ~3x easier to hit than one crossing at full tilt. Any connecting rifle round kills
+// a quad outright — there is no such thing as a wounded FPV. (Halved from the first
+// tuning pass after playtest: the lucky shot was landing too often.)
+export function groundFireHitChance(distance, speedFraction = 0) {
+  const base = 0.09 * Math.exp(-distance / 16) + 0.004 * Math.exp(-distance / 45);
+  const speedFactor = 1 - 0.65 * Math.min(1, Math.max(0, speedFraction));
+  return Math.min(0.35, base * speedFactor);
+}
 const DRONE_HEAT_CORE_MAT = new THREE.MeshBasicMaterial({
   name: 'drone-thermal-core', color: 0xd8d4bb,
   transparent: true, opacity: 0.46, depthTest: true, depthWrite: false,
@@ -111,6 +133,18 @@ for (const material of [
   STRIKE_SQUIRTER_UNIFORM_MAT, STRIKE_SQUIRTER_SKIN_MAT,
 ]) {
   material.userData.bpPersistent = true;
+}
+
+// Articulated characters clone shared skeleton geometry and faction materials that live
+// for the whole session (character-assets caches them across every level). Flag them so
+// disposeObject never frees GPU resources still referenced by other soldiers.
+function markCharacterShared(root) {
+  root.traverse(part => {
+    if (part.geometry) part.geometry.userData.bpPersistent = true;
+    for (const material of [].concat(part.material || [])) {
+      if (material) material.userData.bpPersistent = true;
+    }
+  });
 }
 
 function disposeObject(root) {
@@ -259,7 +293,7 @@ function reconRouteModel(target) {
   return root;
 }
 
-function strikeTargetModel(target) {
+export function strikeTargetModel(target) {
   const root = new THREE.Group();
   root.name = `drone-strike-target-${target.kind || 'asset'}`;
   const olive = new THREE.MeshStandardMaterial({
@@ -296,7 +330,35 @@ function strikeTargetModel(target) {
     return mesh;
   };
 
-  if (target.kind === 'technical') {
+  // Authored hull from the military pool when the desktop build carries one for this kind;
+  // the procedural assembly remains the offline/mobile fallback. Rail and artillery targets
+  // stay procedural (the crewed battery and the consist are their own set pieces). The seed
+  // is position-derived so a mission replays with the same column every boot.
+  // The authored technical is the UAZ-469, which ships with its own pintle recoilless.
+  const authoredSlots = {
+    tank: 'tank', apc: 'apc', armor: 'apc', ew: 'gaz66', technical: 'uaz469',
+    jeep: 'jeep', truck: 'truck', tanker: 'tanker',
+  };
+  let authored = null;
+  if (authoredSlots[target.kind] && !target.procedural) {
+    const seed = target.index ?? Math.abs(Math.round(
+      (target.pos?.x ?? 0) * 7 + (target.pos?.z ?? 0) * 13));
+    authored = militaryVehicleModel(
+      militaryVehicleNameForLabel(target.label) || authoredSlots[target.kind], seed);
+    if (authored) root.add(authored);
+  }
+
+  if (target.kind === 'technical' && authored) {
+    // The authored UAZ-469 carries its own pintle recoilless; a Tigr variant (label-
+    // forced) gets the procedural roof gun so the target still reads armed.
+    if (authored.userData.variant === 'tigr') {
+      const roof = (authored.userData.height || 2.2) - 0.2;
+      add(new THREE.CylinderGeometry(0.1, 0.14, 0.5, 10), steel, [0.35, roof + 0.1, 0]);
+      add(new THREE.BoxGeometry(0.46, 0.28, 0.3), dark, [0.35, roof + 0.42, 0]);
+      add(new THREE.CylinderGeometry(0.055, 0.075, 1.75, 8), steel,
+        [-0.45, roof + 0.45, 0], [0, 0, Math.PI / 2]);
+    }
+  } else if (target.kind === 'technical') {
     // A light assault pickup: readable from altitude, open enough that jury-rigged grenades
     // remain a believable counter, and much cheaper than loading another authored vehicle.
     add(new THREE.BoxGeometry(3.9, 0.38, 1.85), olive, [0, 0.68, 0]);
@@ -312,18 +374,22 @@ function strikeTargetModel(target) {
     add(new THREE.CylinderGeometry(0.055, 0.075, 1.75, 8), steel,
       [-0.12, 1.94, 0], [0, 0, Math.PI / 2]);
   } else if (target.kind === 'ew') {
-    add(new THREE.BoxGeometry(3.5, 0.72, 1.75), olive, [0, 0.78, 0]);
-    add(new THREE.BoxGeometry(1.15, 1.08, 1.68), olive, [-1.05, 1.58, 0]);
-    add(new THREE.BoxGeometry(0.86, 0.42, 1.7), glass, [-1.32, 1.75, 0]);
-    for (const x of [-1.15, 1.1]) for (const z of [-0.92, 0.92]) {
-      add(new THREE.CylinderGeometry(0.36, 0.36, 0.24, 16), dark,
-        [x, 0.48, z * 0.76], [Math.PI / 2, 0, 0]);
+    if (!authored) {
+      add(new THREE.BoxGeometry(3.5, 0.72, 1.75), olive, [0, 0.78, 0]);
+      add(new THREE.BoxGeometry(1.15, 1.08, 1.68), olive, [-1.05, 1.58, 0]);
+      add(new THREE.BoxGeometry(0.86, 0.42, 1.7), glass, [-1.32, 1.75, 0]);
+      for (const x of [-1.15, 1.1]) for (const z of [-0.92, 0.92]) {
+        add(new THREE.CylinderGeometry(0.36, 0.36, 0.24, 16), dark,
+          [x, 0.48, z * 0.76], [Math.PI / 2, 0, 0]);
+      }
+      add(new THREE.BoxGeometry(1.2, 1.1, 1.45), dark, [0.85, 1.65, 0]);
     }
+    // The jamming mast rides both hulls: on the authored GAZ-66 the van body is the
+    // shelter, so only the antenna array marks the emitter.
     add(new THREE.CylinderGeometry(0.045, 0.065, 4.4, 8), steel, [0.75, 3.15, 0]);
     for (const y of [2.65, 3.65, 4.55]) {
       add(new THREE.BoxGeometry(1.5, 0.06, 0.06), steel, [0.75, y, 0]);
     }
-    add(new THREE.BoxGeometry(1.2, 1.1, 1.45), dark, [0.85, 1.65, 0]);
   } else if (target.kind === 'artillery') {
     add(new THREE.BoxGeometry(3.8, 0.48, 1.65), olive, [0, 0.72, 0]);
     for (const x of [-1.22, 1.22]) for (const z of [-0.94, 0.94]) {
@@ -413,21 +479,23 @@ function strikeTargetModel(target) {
     // A main battle tank with a welded cope cage. The cage is the doctrine lesson made
     // visible from FPV distance: the roof is screened, so the drone has to come in on the
     // rear arc where the standoff frame is open and the engine deck is thin.
-    add(new THREE.BoxGeometry(4.6, 0.72, 2.55), olive, [0, 0.92, 0]);
-    add(new THREE.BoxGeometry(3.4, 0.3, 2.4), olive, [-0.35, 1.35, 0], [0, 0, -0.03]);
-    for (const z of [-1.22, 1.22]) {
-      add(new THREE.BoxGeometry(4.4, 0.58, 0.42), dark, [0, 0.58, z]);
-      for (const x of [-1.7, -0.85, 0, 0.85, 1.7]) {
-        add(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 14), steel,
-          [x, 0.56, z * 1.01], [Math.PI / 2, 0, 0]);
+    if (!authored) {
+      add(new THREE.BoxGeometry(4.6, 0.72, 2.55), olive, [0, 0.92, 0]);
+      add(new THREE.BoxGeometry(3.4, 0.3, 2.4), olive, [-0.35, 1.35, 0], [0, 0, -0.03]);
+      for (const z of [-1.22, 1.22]) {
+        add(new THREE.BoxGeometry(4.4, 0.58, 0.42), dark, [0, 0.58, z]);
+        for (const x of [-1.7, -0.85, 0, 0.85, 1.7]) {
+          add(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 14), steel,
+            [x, 0.56, z * 1.01], [Math.PI / 2, 0, 0]);
+        }
       }
+      add(new THREE.CylinderGeometry(0.95, 1.1, 0.55, 14), olive, [0.25, 1.72, 0]);
+      add(new THREE.BoxGeometry(1.5, 0.45, 1.4), olive, [0.25, 2.0, 0]);
+      add(new THREE.CylinderGeometry(0.1, 0.14, 3.9, 10), steel,
+        [-2.05, 1.95, 0], [0, 0, Math.PI / 2]);
+      // Rear engine deck: intake grilles, the aim point the mission teaches.
+      add(new THREE.BoxGeometry(1.15, 0.16, 2.2), dark, [1.65, 1.34, 0]);
     }
-    add(new THREE.CylinderGeometry(0.95, 1.1, 0.55, 14), olive, [0.25, 1.72, 0]);
-    add(new THREE.BoxGeometry(1.5, 0.45, 1.4), olive, [0.25, 2.0, 0]);
-    add(new THREE.CylinderGeometry(0.1, 0.14, 3.9, 10), steel,
-      [-2.05, 1.95, 0], [0, 0, Math.PI / 2]);
-    // Rear engine deck: intake grilles, the aim point the mission teaches.
-    add(new THREE.BoxGeometry(1.15, 0.16, 2.2), dark, [1.65, 1.34, 0]);
     // The cope cage: four standoff posts and a slat roof over the turret, open at the rear.
     const cage = new THREE.MeshStandardMaterial({
       name: 'drone-strike-cage',
@@ -484,7 +552,132 @@ function strikeTargetModel(target) {
     add(new THREE.BoxGeometry(0.9, 0.1, 1.2), steel, [4.1, 1.28, 0]);
     add(new THREE.BoxGeometry(1.2, 0.14, 0.24), steel, [-5.0, 0.92, 0]);
     add(new THREE.BoxGeometry(1.2, 0.14, 0.24), steel, [5.0, 0.92, 0]);
-  } else {
+  } else if (target.kind === 'infantry') {
+    // A dismounted individual or fire team: 1-4 figures sharing one strike point. The
+    // seed fixes poses and spacing so an authored picket replays identically.
+    // `cover` parks a pre-charred hull beside them — men holding a burned-out vehicle.
+    const seed = target.index ?? Math.abs(Math.round(
+      (target.pos?.x ?? 0) * 7 + (target.pos?.z ?? 0) * 13));
+    let roll = ((seed + 11) * 2654435761) >>> 0;
+    const rand = () => ((roll = (roll * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+    if (target.cover) {
+      const wreck = strikeTargetModel({
+        pos: new THREE.Vector3(...(target.cover.at || [2.9, 0, -0.6])),
+        kind: target.cover.kind || 'apc',
+        yaw: target.cover.yaw ?? 0.5,
+        index: seed,
+      });
+      wreck.userData.markDestroyed();
+      root.add(wreck);
+    }
+    const team = Math.max(1, Math.min(4, target.team ?? 3));
+    const poses = ['stand', 'kneel', 'prone', 'stand'];
+    const figures = [];
+    const soldiers = [];
+    // Authored figure spots override the default cluster: [dx, dz, facing] in the
+    // target's local frame — how a trench garrison stands one man per fire bay.
+    const authoredSpots = target.figures || null;
+    const count = authoredSpots ? authoredSpots.length : team;
+    const rootYaw = target.yaw || 0;
+    const cosYaw = Math.cos(rootYaw), sinYaw = Math.sin(rootYaw);
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + rand() * 1.1;
+      const radius = 0.9 + rand() * 1.4;
+      const scatterYaw = angle + Math.PI + (rand() - 0.5) * 0.8;
+      const [px, pz, facing] = authoredSpots
+        ? [authoredSpots[i][0], authoredSpots[i][1], authoredSpots[i][2] ?? scatterYaw]
+        : [Math.cos(angle) * radius, Math.sin(angle) * radius, scatterYaw];
+      // Authored spots can sit metres from the root on carved ground; re-ground each
+      // man on the terrain under his own feet instead of the team centre's height.
+      let dyGround = 0;
+      if (authoredSpots && droneTerrain && target.pos) {
+        const wx = target.pos.x + px * cosYaw + pz * sinYaw;
+        const wz = target.pos.z - px * sinYaw + pz * cosYaw;
+        dyGround = droneTerrain(wx, wz) - target.pos.y;
+      }
+      const pose = target.moving ? 'stand' : poses[(seed + i) % poses.length];
+      // The game's articulated hostile — same rig, olive field kit and carried rifle as
+      // the ground levels — with the capsule figures kept as the offline/mobile fallback.
+      // The rig has no prone clip, so prone slots kneel instead.
+      const soldier = target.procedural ? null
+        : createAuthoredCharacter({ friendly: false, variant: seed * 7 + i * 3 });
+      if (soldier) {
+        markCharacterShared(soldier);
+        soldier.position.set(px, 0.02 + dyGround, pz);
+        soldier.rotation.y = facing;
+        soldier.userData.kneel = pose !== 'stand';
+        animateAuthoredCharacter(soldier, false, 0,
+          soldier.userData.kneel ? 'engage' : 'patrol', 0);
+        if (soldier.userData.kneel) kneelAuthoredCharacter(soldier, 1);
+        root.add(soldier);
+        figures.push(soldier);
+        soldiers.push(soldier);
+        continue;
+      }
+      const figure = new THREE.Group();
+      figure.position.set(px, 0.04 + dyGround, pz);
+      figure.rotation.y = facing;
+      const part = (geometry, y, z = 0, x = 0, rotation = null) => {
+        const mesh = new THREE.Mesh(geometry, geometry.userData.skin ? crewSkin : crewUniform);
+        mesh.position.set(x, y, z);
+        if (rotation) mesh.rotation.set(...rotation);
+        mesh.castShadow = true;
+        figure.add(mesh);
+        return mesh;
+      };
+      const headGeometry = new THREE.SphereGeometry(0.19, 10, 7);
+      headGeometry.userData.skin = true;
+      if (pose === 'prone') {
+        // Lying along local +Z, head toward the facing line, rifle out past the head.
+        figure.userData.prone = true;
+        part(new THREE.CapsuleGeometry(0.21, 0.66, 4, 8), 0.24, 0.1, 0, [Math.PI / 2, 0, 0]);
+        part(headGeometry, 0.3, 0.66);
+        for (const side of [-1, 1]) {
+          part(new THREE.CapsuleGeometry(0.08, 0.44, 3, 7), 0.16, -0.62, side * 0.13,
+            [Math.PI / 2, 0, 0]);
+        }
+        part(new THREE.CylinderGeometry(0.03, 0.03, 0.95, 6), 0.34, 0.85, 0.14,
+          [Math.PI / 2, 0, 0]);
+      } else {
+        const kneeling = pose === 'kneel';
+        const torsoY = kneeling ? 0.66 : 0.92;
+        part(new THREE.CapsuleGeometry(0.23, kneeling ? 0.5 : 0.66, 4, 8), torsoY);
+        part(headGeometry, kneeling ? 1.18 : 1.57);
+        for (const side of [-1, 1]) {
+          part(new THREE.CapsuleGeometry(0.09, kneeling ? 0.26 : 0.48, 3, 7),
+            kneeling ? 0.22 : 0.37, 0, side * 0.13);
+        }
+        part(new THREE.CylinderGeometry(0.03, 0.03, 0.95, 6),
+          kneeling ? 0.92 : 1.18, 0.3, 0.08, [Math.PI / 2 - 0.18, 0, 0]);
+      }
+      root.add(figure);
+      figures.push(figure);
+    }
+    root.userData.crew = figures;
+    if (soldiers.length) {
+      // Live men breathe and scan; killed men bake the ground game's death sprawl and
+      // tip over through this same hook (createDroneAssaultVehicle ticks it per frame).
+      let clock = rand() * 8;
+      root.userData.update = (dt, moving = false) => {
+        clock += dt;
+        for (const soldier of soldiers) {
+          const fall = soldier.userData.fall;
+          if (fall) {
+            if (fall.t >= 1) continue;
+            fall.t = Math.min(1, fall.t + dt / fall.duration);
+            const ease = 1 - Math.pow(1 - fall.t, 3);
+            soldier.rotation.x = fall.targetX * ease;
+            soldier.rotation.z = fall.targetZ * ease;
+            continue;
+          }
+          if (root.userData.destroyed) continue;
+          animateAuthoredCharacter(soldier, moving, 0,
+            moving ? 'flee' : soldier.userData.kneel ? 'engage' : 'patrol', clock);
+          if (!moving && soldier.userData.kneel) kneelAuthoredCharacter(soldier, 1);
+        }
+      };
+    }
+  } else if (!authored) {
     // An IFV-like silhouette: sloped hull, continuous tracks, turret and cannon. At drone
     // altitude the outline and moving shadow matter more than tiny vehicle trim.
     add(new THREE.BoxGeometry(3.8, 0.58, 2.15), olive, [0, 0.82, 0],
@@ -514,12 +707,38 @@ function strikeTargetModel(target) {
       wreck.roughness = 0.98;
       wreck.metalness *= 0.5;
     }
+    // Authored hulls carry per-instance material clones (military-vehicles.js), so the
+    // same in-place char is safe for them too.
+    authored?.traverse(object => {
+      if (!object.isMesh) return;
+      for (const material of [].concat(object.material)) {
+        if (!material) continue;
+        material.color?.multiplyScalar(0.22);
+        if ('roughness' in material) material.roughness = 0.98;
+        if ('metalness' in material) material.metalness *= 0.5;
+      }
+    });
     root.rotation.z = target.kind === 'ew' ? 0.05 : -0.035;
     for (const [index, soldier] of (root.userData.crew || []).entries()) {
       if (index < (target.squirters || 0)) {
         soldier.visible = false;
         continue;
       }
+      if (soldier.userData.rig?.authored) {
+        // The ground game's kill: bake the limb sprawl once, then let the per-frame
+        // update ease the body over. Varied per man so a team doesn't fall in unison.
+        stopAuthoredCharacter(soldier);
+        const mode = index % 3;
+        const side = index % 2 ? 1 : -1;
+        soldier.userData.fall = {
+          t: 0, duration: 0.48 + (index % 5) * 0.035,
+          targetX: mode === 1 ? -0.3 : mode === 2 ? -1.24 : -1.49,
+          targetZ: mode === 1 ? side * 1.45 : mode === 2 ? side * 0.42 : side * 0.12,
+        };
+        continue;
+      }
+      // A prone figure is already on the ground; sideways flop is for the standing poses.
+      if (soldier.userData.prone) continue;
       soldier.rotation.z = (index % 2 ? -1 : 1) * (1.12 + index * 0.08);
       soldier.position.y = 0.16;
     }
@@ -535,6 +754,9 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
   pos.y += droneTerrain ? droneTerrain(pos.x, pos.z) : 0;
   const mesh = strikeTargetModel({
     pos, kind: definition.kind || 'technical', yaw: definition.yaw || 0,
+    label: definition.label, team: definition.team, figures: definition.figures,
+    cover: definition.cover, procedural: definition.procedural,
+    moving: definition.kind === 'infantry' && (definition.route?.length || 0) > 0,
   });
   mesh.name = 'drone-assault-technical';
   scene.add(mesh);
@@ -542,12 +764,19 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
   const metersPerUnit = definition.metersPerUnit ?? 1;
   const authoredSpeed = definition.speed ?? 4.4;
   const worldSpeed = definition.speedPhysical === false ? authoredSpeed : authoredSpeed / metersPerUnit;
+  const evasion = definition.kind === 'infantry' && definition.evasion ? {
+    ...definition.evasion,
+    triggerRadius: (definition.evasion.triggerRadius ?? 140) / metersPerUnit,
+    decisionMin: definition.evasion.decisionMin ?? 0.45,
+    decisionMax: definition.evasion.decisionMax ?? 0.9,
+  } : null;
   const vehicle = {
     pos,
     mesh,
     kind: definition.kind || 'technical',
-    maxHealth: definition.health ?? 190,
-    health: definition.health ?? 190,
+    // Men are soft: a fire team dies to any near miss a hull would shrug off.
+    maxHealth: definition.health ?? (definition.kind === 'infantry' ? 90 : 190),
+    health: definition.health ?? (definition.kind === 'infantry' ? 90 : 190),
     // FPV target attributes: `cage` arms the rear-aspect rule, `label` names the kill feed.
     cage: !!definition.cage,
     label: definition.label || null,
@@ -567,6 +796,10 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     stopsConsist: !!definition.stopsConsist,
     stopMessage: definition.stopMessage || null,
     shelter: definition.shelter || null,
+    evasion,
+    evasionTimer: 0.18,
+    evasionDirection: 1,
+    evasionDecisions: 0,
     // Optional instructor line delivered when this target dies (the flight-school voice).
     killMessage: definition.killMessage || null,
     dead: false,
@@ -591,15 +824,50 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
       this.mesh.userData.markDestroyed?.();
       return true;
     },
-    update(dt, solids) {
+    update(dt, solids, threatPos = null) {
+      // The model's own animation hook follows target motion: routed infantry run instead
+      // of sliding in an idle firing pose; parked teams still breathe and scan.
+      this.mesh.userData.update?.(dt, !this.dead && this.route.length > 0);
       if (this.dead || !this.route.length) return;
       const previousX = this.pos.x;
       const previousZ = this.pos.z;
+      if (this.evasion && threatPos) {
+        this.evasionTimer -= dt;
+        const threatDistance = Math.hypot(threatPos.x - this.pos.x, threatPos.z - this.pos.z);
+        if (threatDistance <= this.evasion.triggerRadius && this.evasionTimer <= 0
+          && this.route.length > 2) {
+          const count = this.route.length;
+          const current = this.routeIdx;
+          const reverse = (current - this.evasionDirection + count) % count;
+          const forwardPoint = this.route[current];
+          const reversePoint = this.route[reverse];
+          const forwardSpace = Math.hypot(forwardPoint.x - threatPos.x, forwardPoint.z - threatPos.z);
+          const reverseSpace = Math.hypot(reversePoint.x - threatPos.x, reversePoint.z - threatPos.z);
+          // Prefer the adjacent node that opens distance from the aircraft. A deterministic
+          // feint every third decision prevents a pilot from solving the runner as a simple
+          // "always go away" vector while keeping every turn on the authored safe path.
+          const feint = this.evasionDecisions % 3 === 2;
+          if ((reverseSpace > forwardSpace + 0.35) !== feint) {
+            this.routeIdx = reverse;
+            this.evasionDirection *= -1;
+          }
+          this.evasionDecisions++;
+          const span = Math.max(0, this.evasion.decisionMax - this.evasion.decisionMin);
+          const pulse = Math.abs(Math.sin(
+            this.evasionDecisions * 2.399963 + this.pos.x * 0.17 + this.pos.z * 0.11));
+          this.evasionTimer = this.evasion.decisionMin + span * pulse;
+        }
+      }
       const waypoint = this.route[Math.min(this.routeIdx, this.route.length - 1)];
       const dx = waypoint.x - this.pos.x;
       const dz = waypoint.z - this.pos.z;
       const distance = Math.hypot(dx, dz);
       if (distance < 0.7) {
+        if (this.evasion) {
+          this.routeIdx = (this.routeIdx + this.evasionDirection + this.route.length)
+            % this.route.length;
+          return;
+        }
         if (this.routeIdx < this.route.length - 1) { this.routeIdx++; return; }
         // A patrol route loops; an ingress route parks at its last waypoint.
         if (this.loop) { this.routeIdx = 0; return; }
@@ -624,6 +892,17 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     },
   };
   return vehicle;
+}
+
+function occupiedShelter(target) {
+  const shelter = target?.shelter;
+  if (!shelter || !target?.pos) return null;
+  const dx = target.pos.x - shelter.x, dz = target.pos.z - shelter.z;
+  const cu = Math.cos(shelter.yaw), su = Math.sin(shelter.yaw);
+  const u = dx * cu + dz * su;
+  const v = -dx * su + dz * cu;
+  return Math.abs(u) < shelter.L / 2 - 0.15 && Math.abs(v) < shelter.D / 2 - 0.15
+    ? shelter : null;
 }
 
 export function dronePrewarmGroup(definition) {
@@ -680,9 +959,19 @@ export function dronePrewarmGroup(definition) {
     for (const vehicle of definition.vehicles || []) {
       root.add(strikeTargetModel({
         pos: new THREE.Vector3(), kind: vehicle.kind || 'tank', yaw: 0,
+        label: vehicle.label,
       }));
     }
     root.add(thermalSignature({ dead: false, pos: new THREE.Vector3() }, true));
+    root.add(thermalSignature({ dead: false, pos: new THREE.Vector3() }));
+    // Ambient population shares the infantry rig; warm its shaders even on missions
+    // whose target list carries no infantry of its own.
+    if (definition.population?.length
+      && !definition.vehicles?.some(vehicle => vehicle.kind === 'infantry')) {
+      root.add(strikeTargetModel({
+        pos: new THREE.Vector3(), kind: 'infantry', yaw: 0, index: 0,
+      }));
+    }
   }
   if (definition.mode === 'combat') {
     if (definition.combatWave?.vehicle) {
@@ -773,14 +1062,22 @@ export class DroneController {
     this.batteryDrain = this.batterySeconds
       ? 100 / this.batterySeconds / 1.3
       : (definition.batteryDrain ?? 0.72);
+    this.thermalBatteryMultiplier = definition.thermalBatteryMultiplier ?? 1.22;
     this.maxSpeed = definition.maxSpeed ?? MAX_SPEED;
     this.accel = definition.accel ?? 19;
+    // Camera-bolt buzz only. Flight dynamics and analog-link artifacts are independent.
+    // Reduced to 40% of the original amplitude after video-reference review.
+    this.cameraVibration = definition.cameraVibration
+      ?? (this.mode === 'bomber' ? 0.00048 : 0.00152);
     this.worldMaxSpeed = this.isFpvFamily ? this.maxSpeed / this.metersPerUnit : this.maxSpeed;
     this.worldAccel = this.isFpvFamily ? this.accel / this.metersPerUnit : this.accel;
     this.bombs = this.mode === 'bomber' ? (definition.bombs ?? 6) : 0;
     this.bombsTotal = this.bombs;
     this.craftName = definition.craftName || (this.mode === 'bomber' ? 'HW-16 HERON' : 'VMS-7 KESTREL');
-    this.thermalPersistent = !!definition.thermalPersistent;
+    // FPV-family aircraft may all carry a switchable thermal channel. Individual mission
+    // definitions can explicitly disable it, while legacy combat drones retain their
+    // short burst sensor unless authored otherwise.
+    this.thermalPersistent = definition.thermalPersistent ?? this.isFpvFamily;
     this.onFailed = definition.onFailed || null;
     this.onVehicleKilled = definition.onVehicleKilled || null;
     this.onAttemptReviewed = definition.onAttemptReviewed || null;
@@ -823,6 +1120,7 @@ export class DroneController {
     this.egressRequired = false;
     this.batteryCall30 = false;
     this.batteryCall20 = false;
+    this.departedLaunchArea = false;
     this.lastBombImpact = null;
     this.identifyCandidate = null;
     // A fresh airframe arms after launch, like the real munition. During the arming window
@@ -939,12 +1237,34 @@ export class DroneController {
       // Thermal blobs only, no targeting boxes: the FPV pilot finds the target with their
       // eyes and the map brief, exactly like the real thing. Thermal is the night aid.
       for (const vehicle of this.combatVehicles) {
+        // A fire team reads as separate man-shaped blooms, not one vehicle slab; each
+        // signature tracks its own figure so the picket's spread survives the palette.
+        const figures = vehicle.kind === 'infantry'
+          ? vehicle.mesh?.userData.crew || [] : null;
+        if (figures?.length) {
+          for (const figure of figures) {
+            const signature = thermalSignature(vehicle);
+            signature.userData.figure = figure;
+            if (figure.userData.prone) signature.scale.set(1, 0.38, 1);
+            else if (figure.userData.kneel) signature.scale.set(1, 0.72, 1);
+            scene.add(signature);
+            this.thermalSignatures.push(signature);
+          }
+          continue;
+        }
         const signature = thermalSignature(vehicle, true);
         scene.add(signature);
         this.thermalSignatures.push(signature);
       }
       if (this.training.requireReturn) this.buildLaunchMarker();
       if (this.fiberControlled) this.buildFiberCourse();
+    }
+    // Ambient population: trench garrisons and small parties moving inside their own
+    // areas. Scenery with body heat — never targets, never counted, but a blast that
+    // reaches one kills him.
+    this.populationActors = [];
+    if (this.isFpvFamily && definition.population?.length) {
+      this.buildPopulation(definition.population);
     }
 
     if (this.isFpvFamily) {
@@ -1032,10 +1352,10 @@ export class DroneController {
         <div class="fpv-warn"></div>
         <div class="fpv-help">SIM CONTROL // ${this.mode === 'bomber'
     ? 'WASD FLIGHT · MOUSE GIMBAL · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP · N THERMAL'
-    : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · CONTACT TO STRIKE'}</div>
+    : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · N EO/THERMAL · CONTACT TO STRIKE'}</div>
       </div>
       <div class="fpv-map-panel">
-        <div class="fpv-map-label">EXTERNAL SIM NAV-AID // AO + SEARCH // NOT CAMERA</div>
+        <div class="fpv-map-label">EXTERNAL SIM NAV-AID // AO + SEARCH + TOO // NOT CAMERA</div>
         <canvas class="fpv-map"></canvas>
       </div>
       <div class="fpv-lesson">
@@ -1360,11 +1680,14 @@ export class DroneController {
       const [ax, az] = this.mapPoint(...def.alternateRoute[1]);
       ctx.fillText('ALT', ax + 2, az - 3);
     }
-    // The target is NOT tracked live: intel gives a search box, the pilot does the finding.
+    // The assigned target is NOT tracked live: intel gives a search box, the pilot does
+    // the finding. Optional infantry must not expand that box until it covers half the map.
     // Box is the bounding area of the briefed patrol route (or parked position), padded.
-    if (this.combatVehicles.length) {
+    const assignedTargets = this.combatVehicles.filter(vehicle =>
+      !vehicle.optional && !vehicle.decoy && !vehicle.protected);
+    if (assignedTargets.length) {
       let bx1 = Infinity, bz1 = Infinity, bx2 = -Infinity, bz2 = -Infinity;
-      for (const vehicle of this.combatVehicles) {
+      for (const vehicle of assignedTargets) {
         const points = vehicle.route?.length
           ? vehicle.route.map(p => [p.x, p.z]) : [[vehicle.pos.x, vehicle.pos.z]];
         for (const [px, pz] of points) {
@@ -1383,6 +1706,22 @@ export class DroneController {
       ctx.fillStyle = 'rgba(255,92,70,0.9)';
       ctx.font = '700 8px ui-monospace, Menlo, monospace';
       ctx.fillText('SEARCH', Math.min(sx, ex) + 2, Math.min(sz, ez) - 2);
+    }
+    // These are area-intelligence marks, not live tracks. They identify an occupied trench
+    // system without revealing which firing bay an individual soldier currently occupies.
+    for (const target of this.combatVehicles.filter(vehicle =>
+      vehicle.optional && vehicle.kind === 'infantry')) {
+      const [tx, tz] = this.mapPoint(target.pos.x, target.pos.z);
+      ctx.beginPath();
+      ctx.arc(tx, tz, 4.2, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,190,80,0.8)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,205,110,0.9)';
+      ctx.font = '700 7px ui-monospace, Menlo, monospace';
+      ctx.fillText('TOO', tx + 5, tz + 2);
     }
     ctx.fillStyle = '#aab3aa';
     ctx.font = '700 9px ui-monospace, Menlo, monospace';
@@ -1635,14 +1974,22 @@ export class DroneController {
   }
 
   nearestLiveVehicle(position = this.pos) {
+    // Required targets outrank optional ones: an optional dismount picket posted beside
+    // a primary must not capture the acquire/identify track from the vehicle that
+    // actually completes the mission.
     let nearest = null;
     let distance = Infinity;
+    let nearestOptional = null;
+    let optionalDistance = Infinity;
     for (const vehicle of this.combatVehicles) {
       if (vehicle.dead || vehicle.decoy || vehicle.protected) continue;
       const d = vehicle.pos.distanceTo(position);
-      if (d < distance) { nearest = vehicle; distance = d; }
+      if (vehicle.optional) {
+        if (d < optionalDistance) { nearestOptional = vehicle; optionalDistance = d; }
+      } else if (d < distance) { nearest = vehicle; distance = d; }
     }
-    return { vehicle: nearest, distance };
+    if (nearest) return { vehicle: nearest, distance };
+    return { vehicle: nearestOptional, distance: optionalDistance };
   }
 
   recordAttemptTelemetry(dt, solids) {
@@ -1857,7 +2204,9 @@ export class DroneController {
       firstPass,
       targetSpeed: targetSpeed * this.metersPerUnit,
       targetCaged: !!target?.cage,
-      targetShelter: target?.shelter || null,
+      // A mobile runner may leave and re-enter a barn. Credit an indoor attack only when
+      // the target was physically inside at impact, not merely because its route uses one.
+      targetShelter: occupiedShelter(target),
       impactDistance: target ? target.pos.distanceTo(outcome.impact || this.pos) * this.metersPerUnit : 0,
       terminalCorrection,
       targetLabel: target?.label || 'NO CONFIRMED TARGET',
@@ -2100,7 +2449,7 @@ export class DroneController {
     return resolved;
   }
 
-  serveNewTargetSet() {
+  serveNewTargetSet(readyReason = '') {
     if (!this.combatVehicleDefinitions.length) {
       this.pendingMissionComplete = false;
       this.pendingMissionFailure = false;
@@ -2109,7 +2458,7 @@ export class DroneController {
       this.batteryCall30 = false;
       this.batteryCall20 = false;
       this.airframesLost = 0;
-      this.prepareNextAirframe();
+      this.prepareNextAirframe(readyReason);
       return;
     }
     for (const signature of this.thermalSignatures) {
@@ -2141,7 +2490,7 @@ export class DroneController {
     this.batteryCall30 = false;
     this.batteryCall20 = false;
     this.buildFpvMap(this.definition);
-    this.prepareNextAirframe();
+    this.prepareNextAirframe(readyReason);
   }
 
   advanceTrainingStage() {
@@ -2177,7 +2526,7 @@ export class DroneController {
     this.radioCall(`RANGE CONTROL — ${effect}${tactical}RETASK ${remaining[0].label}. ${remaining.length} REQUIRED TARGET${remaining.length === 1 ? '' : 'S'} REMAIN · ${this.bombs} BOMBS · BATTERY ${Math.round(this.battery)}%. RTB AFTER FINAL EFFECT.`, 6500);
   }
 
-  prepareNextAirframe() {
+  prepareNextAirframe(readyReason = '') {
     this.detonated = false;
     this.pos.copy(this.launch);
     this.pos.y += 1.7;
@@ -2188,8 +2537,12 @@ export class DroneController {
     this.payloadNadir = false;
     this.battery = 100;
     this.signal = 1;
+    this.setThermalEnabled(false);
+    this.thermalBurstRemaining = 0;
+    this.thermalRechargeRemaining = 0;
     this.jamFactor = 1;
     this.linkLowTimer = 0;
+    this.departedLaunchArea = false;
     this.armTimer = 1.2;
     this.camera.position.copy(this.pos);
     this.camera.rotation.set(this.pitch, this.yaw, 0);
@@ -2199,7 +2552,10 @@ export class DroneController {
     for (const element of this.flightHudElements) element.style.display = '';
     this.help.style.display = 'none';
     if (this.canvas) this.canvas.style.filter = 'saturate(.62) contrast(1.14) brightness(.94)';
-    this.readyPanel.querySelector('.fpv-ready-title').textContent = `AIRFRAME ${this.airframesLost + 1}/${this.airframes} READY`;
+    this.readyPanel.querySelector('.fpv-review-kicker').textContent = readyReason
+      ? 'BATTERY CHANGE // NEUTRAL RESET' : 'NEXT AIRFRAME';
+    this.readyPanel.querySelector('.fpv-ready-title').textContent = readyReason
+      || `AIRFRAME ${this.airframesLost + 1}/${this.airframes} READY`;
     this.readyPanel.style.display = 'block';
     this.attemptState = FPV_ATTEMPT.READY;
     this.attemptStateTime = 0;
@@ -2252,6 +2608,9 @@ export class DroneController {
   }
 
   update(dt, input, solids) {
+    // Kept for effects resolved outside this call chain (a detonation callback has no
+    // solids parameter, but its cover check needs the world).
+    this.frameSolids = solids;
     if (!this.active) return;
     if (this.isFpvFamily && this.attemptState !== FPV_ATTEMPT.FLYING) {
       this.updateAttemptState(dt, input);
@@ -2399,8 +2758,7 @@ export class DroneController {
       const wave = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
       this.signal *= 1 - wave * Math.max(0, Math.min(0.85, degrade.strength ?? 0.48));
     }
-    this.battery = Math.max(0, this.battery
-      - dt * (this.batteryDrain + this.vel.length() / this.worldMaxSpeed * this.batteryDrain * 0.6));
+    this.battery = Math.max(0, this.battery - dt * this.currentBatteryDrainRate());
     if (this.mode === 'bomber' && this.training.requireReturn) {
       const homeDistance = Math.round(this.pos.distanceTo(this.launch) * this.metersPerUnit);
       if (this.battery <= 20 && !this.batteryCall20) {
@@ -2424,7 +2782,7 @@ export class DroneController {
     this.camera.rotation.order = 'YXZ';
     // Small deterministic motor/prop vibration sells a camera bolted to a carbon frame
     // without moving collision rays or turning the simulated aircraft into a random walk.
-    const vibration = this.mode === 'bomber' ? 0.0012 : 0.0038;
+    const vibration = this.cameraVibration;
     const vibrationLoad = 0.35 + 0.65 * Math.min(1, this.vel.length() / this.worldMaxSpeed);
     const buzzPitch = Math.sin(this.flightTime * 91) * vibration * vibrationLoad;
     const buzzYaw = Math.sin(this.flightTime * 67 + 1.7) * vibration * vibrationLoad * 0.55;
@@ -2444,9 +2802,11 @@ export class DroneController {
     if (this.mode === 'strike' && !this.strikeCleanup) {
       this.updateArtilleryDefence(dt, solids);
     }
+    if (this.isFpvFamily) this.updateInfantryDefence(dt, solids);
     if (this.mode === 'strike' && this.strikeCleanup) this.updateStrikeSquirters(dt, solids);
     this.updateThermalSignatures();
     this.updateTargetBoxes();
+    this.updatePopulation(dt);
     for (const model of this.targetModels) model?.userData.update?.(dt);
     this.updateMunitions(dt, solids);
     this.updateEffects(dt);
@@ -2610,7 +2970,19 @@ export class DroneController {
   }
 
   updateFpvFamily(dt, input, solids) {
-    for (const vehicle of this.combatVehicles) vehicle.update?.(dt, solids);
+    for (const vehicle of this.combatVehicles) vehicle.update?.(dt, solids, this.pos);
+    const returnRadius = this.training.returnRadius ?? 14;
+    const launchDistance = this.pos.distanceTo(this.launch);
+    if (launchDistance > returnRadius * 1.35) this.departedLaunchArea = true;
+    const assignedStillLive = this.combatVehicles.some(vehicle =>
+      !vehicle.dead && !vehicle.decoy && !vehicle.protected && !vehicle.optional);
+    if (this.training.openRange && this.departedLaunchArea && launchDistance <= returnRadius
+      && assignedStillLive) {
+      // A safe return is neither a hit nor a failure. Swap the pack and recreate the
+      // presentation so a looping vehicle cannot remain lost at the far end of its route.
+      this.serveNewTargetSet('FULL BATTERY // ASSIGNED TARGET RESET');
+      return;
+    }
     if (this.mode === 'fpv') {
       for (const vehicle of this.combatVehicles) {
         if (vehicle.dead) continue;
@@ -2666,15 +3038,26 @@ export class DroneController {
     this.detonated = true;
     this.createImpactEffect(position, this.airframesLost + 1);
     this.onCombatBlast?.(position.clone(), 8, 240);
+    this.killPopulationNear(position, 6.5);
     let note = 'AIRFRAME EXPENDED — NO EFFECT ON TARGET';
     let effect = 'NO EFFECT';
     let hitTarget = null;
     let killedTarget = false;
     let criticalFailure = false;
-    for (const vehicle of this.combatVehicles) {
-      if (vehicle.dead) continue;
-      const distance = vehicle.pos.distanceTo(position);
-      if (distance > 7) continue;
+    // The charge affects the nearest thing in range, not the first in authoring order —
+    // a dismount picket beside a required hull must not soak a strike aimed past it.
+    let struck = null;
+    let struckDistance = Infinity;
+    for (const candidate of this.combatVehicles) {
+      if (candidate.dead) continue;
+      const distance = candidate.pos.distanceTo(position);
+      const effectRadius = candidate.kind === 'infantry' ? 3.2 : 7;
+      if (distance <= effectRadius && distance < struckDistance) {
+        struck = candidate;
+        struckDistance = distance;
+      }
+    }
+    for (const vehicle of struck ? [struck] : []) {
       hitTarget = vehicle;
       if (vehicle.protected || !vehicle.hostile) {
         note = 'PROTECTED OBJECT STRUCK — IDENTIFICATION FAILURE';
@@ -2706,7 +3089,9 @@ export class DroneController {
         const killed = vehicle.damage(460);
         killedTarget = killed;
         note = killed
-          ? `${vehicle.label || 'TARGET'} DESTROYED`
+          ? vehicle.optional
+            ? `${vehicle.label || 'TARGET'} DESTROYED — TARGET OF OPPORTUNITY`
+            : `${vehicle.label || 'TARGET'} DESTROYED`
           : 'TARGET HIT — STILL MOVING';
         effect = killed ? 'DESTROYED' : 'EFFECTIVE';
         if (killed) this.onVehicleKilled?.(vehicle);
@@ -2815,12 +3200,15 @@ export class DroneController {
     const requiredTargets = this.combatVehicles.filter(vehicle =>
       !vehicle.decoy && !vehicle.protected && !vehicle.optional);
     const requiredLive = requiredTargets.filter(vehicle => !vehicle.dead).length;
-    osd.link.textContent = this.fiberControlled
+    const thermalLoad = Math.round((this.thermalBatteryMultiplier - 1) * 100);
+    const sensor = this.thermalEnabled ? `THERMAL // LOAD +${thermalLoad}%` : 'EO';
+    osd.link.textContent = (this.fiberControlled
       ? 'VIDEO OPTICAL\nCTRL OPTICAL'
-      : `LQ ${lq}\nRSSI ${rssi}DBM`
-        + (this.mode === 'bomber'
-          ? `\nBOMBS ${this.bombs}/${this.bombsTotal}  TGT ${requiredLive}/${requiredTargets.length}\n${this.thermalEnabled ? 'THERM' : 'EO'}`
-          : '');
+      : `LQ ${lq}\nRSSI ${rssi}DBM`)
+      + (this.mode === 'bomber'
+        ? `\nBOMBS ${this.bombs}/${this.bombsTotal}  TGT ${requiredLive}/${requiredTargets.length}`
+        : '')
+      + `\nSENSOR ${sensor}`;
     if (osd.fiber) {
       if (this.fiberControlled) {
         const max = this.training.fiberMaxLength ?? 650;
@@ -2887,12 +3275,134 @@ export class DroneController {
     };
   }
 
+  buildPopulation(groups) {
+    for (const [groupIndex, group] of groups.entries()) {
+      let roll = ((groupIndex + 5) * 2654435761) >>> 0;
+      const rand = () => ((roll = (roll * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+      for (let i = 0; i < (group.count ?? 2); i++) {
+        const soldier = createAuthoredCharacter({
+          friendly: group.faction === 'friendly',
+          variant: 137 + groupIndex * 13 + i * 5,
+        });
+        if (!soldier) return;   // no authored rig on this build — the map stays empty
+        markCharacterShared(soldier);
+        const actor = {
+          root: soldier,
+          pos: soldier.position,
+          home: new THREE.Vector3(group.at?.[0] ?? group.posts[0][0], 0,
+            group.at?.[1] ?? group.posts[0][1]),
+          radius: group.r ?? 10,
+          posts: group.posts || null,
+          postIndex: group.posts
+            ? Math.floor(rand() * group.posts.length) : 0,
+          dead: false,
+          fall: null,
+          walking: false,
+          timer: 1 + rand() * 5,
+          waypoint: new THREE.Vector3(),
+          speed: (group.posts ? 0.8 : 1.05) + rand() * 0.35,
+          clock: rand() * 9,
+          rand,
+        };
+        this.pickPopulationWaypoint(actor);
+        actor.pos.set(actor.waypoint.x, 0, actor.waypoint.z);
+        actor.pos.y = droneTerrainHeight(actor.pos.x, actor.pos.z);
+        soldier.rotation.y = rand() * Math.PI * 2;
+        animateAuthoredCharacter(soldier, false, 0, 'patrol', actor.clock);
+        this.scene.add(soldier);
+        const signature = thermalSignature(actor);
+        this.scene.add(signature);
+        this.thermalSignatures.push(signature);
+        this.populationActors.push(actor);
+      }
+    }
+  }
+
+  // Trench garrisons drift along the dug line one post at a time — the posts array is
+  // an ordered polyline down the slot, so nobody cuts a corner through a parapet. Free
+  // groups pick points inside their own radius. Nobody leaves their area.
+  pickPopulationWaypoint(actor) {
+    if (actor.posts) {
+      actor.postIndex = Math.min(actor.posts.length - 1, Math.max(0,
+        actor.postIndex + (actor.rand() < 0.5 ? -1 : 1)));
+      const post = actor.posts[actor.postIndex];
+      actor.waypoint.set(
+        post[0] + (actor.rand() - 0.5) * 0.5, 0,
+        post[1] + (actor.rand() - 0.5) * 0.5);
+      return;
+    }
+    const angle = actor.rand() * Math.PI * 2;
+    const reach = Math.sqrt(actor.rand()) * actor.radius;
+    actor.waypoint.set(
+      actor.home.x + Math.cos(angle) * reach, 0,
+      actor.home.z + Math.sin(angle) * reach);
+  }
+
+  updatePopulation(dt) {
+    for (const actor of this.populationActors) {
+      if (actor.dead) {
+        const fall = actor.fall;
+        if (fall && fall.t < 1) {
+          fall.t = Math.min(1, fall.t + dt / fall.duration);
+          const ease = 1 - Math.pow(1 - fall.t, 3);
+          actor.root.rotation.x = fall.targetX * ease;
+          actor.root.rotation.z = fall.targetZ * ease;
+        }
+        continue;
+      }
+      actor.clock += dt;
+      if (actor.walking) {
+        const dx = actor.waypoint.x - actor.pos.x;
+        const dz = actor.waypoint.z - actor.pos.z;
+        const distance = Math.hypot(dx, dz);
+        if (distance < 0.4) {
+          actor.walking = false;
+          actor.timer = 2.5 + actor.rand() * 7;
+        } else {
+          const step = Math.min(distance, actor.speed * dt);
+          actor.pos.x += dx / distance * step;
+          actor.pos.z += dz / distance * step;
+          actor.root.rotation.y = Math.atan2(dx, dz);
+        }
+      } else if ((actor.timer -= dt) <= 0) {
+        this.pickPopulationWaypoint(actor);
+        actor.walking = true;
+      }
+      actor.pos.y = droneTerrainHeight(actor.pos.x, actor.pos.z);
+      animateAuthoredCharacter(actor.root, actor.walking, 0, 'patrol', actor.clock);
+    }
+  }
+
+  // Blast effect on the ambient population. Overhead cover works: no line from the
+  // detonation to the man — a dugout's log roll, a berm — means no fragments reach him.
+  killPopulationNear(position, radius) {
+    for (const actor of this.populationActors) {
+      if (actor.dead) continue;
+      if (actor.pos.distanceTo(position) > radius) continue;
+      if (this.frameSolids?.length && !hasLOS(this.frameSolids,
+        position.x, position.y, position.z,
+        actor.pos.x, actor.pos.y + 1.1, actor.pos.z)) continue;
+      actor.dead = true;
+      stopAuthoredCharacter(actor.root);
+      const side = actor.rand() < 0.5 ? -1 : 1;
+      actor.fall = {
+        t: 0, duration: 0.45 + actor.rand() * 0.25,
+        targetX: -(0.9 + actor.rand() * 0.55),
+        targetZ: side * (0.15 + actor.rand() * 1.1),
+      };
+    }
+  }
+
   updateThermalSignatures() {
     for (const signature of this.thermalSignatures) {
       const target = signature.userData.target;
       signature.visible = this.thermalEnabled
         && !!target && !target.dead && !target.surrendered;
       if (!signature.visible) continue;
+      if (signature.userData.figure) {
+        signature.userData.figure.getWorldPosition(signature.position);
+        continue;
+      }
       signature.position.copy(target.pos);
       if (signature.userData.vehicle) signature.rotation.y = target.mesh?.rotation.y || 0;
     }
@@ -2922,6 +3432,45 @@ export class DroneController {
     }
   }
 
+  // Dismounted pickets and trench garrisons defend themselves the way the artillery
+  // crews always have: aimed rifle fire cycling through the living figures whenever the
+  // aircraft presses inside ~110m with line of sight. Static teams only — a runner
+  // being intercepted keeps running; a man standing a fire bay shoots back. Lethality
+  // per shot is groundFireHitChance; a trench's own parapets block low approaches, so
+  // hugging the dirt on the way in denies them the shot.
+  updateInfantryDefence(dt, solids) {
+    if (this.frozen) return;
+    for (const vehicle of this.combatVehicles) {
+      if (vehicle.kind !== 'infantry' || vehicle.dead || vehicle.surrendered
+        || vehicle.protected || vehicle.hostile === false
+        || (vehicle.route?.length ?? 0) > 1) continue;
+      const crew = vehicle.mesh?.userData.crew || [];
+      if (!crew.length) continue;
+      vehicle.defenceTimer = (vehicle.defenceTimer ?? (0.5 + Math.random() * 1.6)) - dt;
+      if (vehicle.defenceTimer > 0) continue;
+      // A three-man team keeps up roughly one aimed shot per second between them.
+      // The shot comes from the FIRST man in the cycle who can actually see the
+      // aircraft — a fire bay's parapets, revetments and the belt's trunks mask each
+      // man differently, and a team doesn't stay silent because the wrong man is up.
+      vehicle.defenceTimer = (1.5 + Math.random() * 0.9) / Math.max(1, crew.length * 0.55);
+      const aim = this.pos.clone();
+      const origin = new THREE.Vector3();
+      for (let attempt = 0; attempt < crew.length; attempt++) {
+        vehicle.defenceCrewIndex = ((vehicle.defenceCrewIndex ?? -1) + 1) % crew.length;
+        const gunner = crew[vehicle.defenceCrewIndex];
+        gunner.getWorldPosition(origin);
+        origin.y += 1.12;
+        if (origin.distanceTo(aim) > 110 || !hasLOS(
+          solids, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z,
+        )) continue;
+        gunner.rotation.y = Math.atan2(aim.x - origin.x, aim.z - origin.z)
+          - (vehicle.mesh?.rotation.y || 0);
+        this.receiveEnemyFire(origin, solids, 1.35);
+        break;
+      }
+    }
+  }
+
   receiveEnemyFire(origin, solids, impulse = 1.4) {
     if (!this.active || this.complete) return false;
     const direction = this.pos.clone().sub(origin);
@@ -2933,10 +3482,23 @@ export class DroneController {
       direction.x, direction.y, direction.z, distance,
     );
     if (blocked < distance - 0.12) return false;
-    // Draw every confirmed hit so the incoming fire still reads as a live threat. The line is
-    // deliberately dimmer and shorter-lived than the aircraft's own rifle tracer; the impulse
-    // and pressure updates below remain per-hit, preserving the original bounce cadence.
+    // One aimed shot. Almost all of them miss — see groundFireHitChance — but every
+    // unblocked round still reads as a live threat: a tracer streak, a pressure shove
+    // and the KEEP MOVING call. The streak of a miss cracks PAST the airframe with a
+    // small lateral offset; the rare connecting round ends the tracer on the hull and
+    // kills the airframe outright.
+    // groundFireLethality is a straight multiplier on the odds (default 1): QA
+    // harnesses zero it for deterministic flights; a mission could raise it for an
+    // authored AA picket.
+    const hit = Math.random() < groundFireHitChance(distance,
+      this.vel.length() / (this.worldMaxSpeed || 1)) * (this.groundFireLethality ?? 1);
     const end = this.pos.clone();
+    if (!hit) {
+      const lateral = new THREE.Vector3(direction.z, 0, -direction.x)
+        .multiplyScalar((Math.random() - 0.5) * 3.2);
+      lateral.y = (Math.random() - 0.5) * 2.4;
+      end.addScaledVector(direction, 5 + Math.random() * 9).add(lateral);
+    }
     const geometry = new THREE.BufferGeometry().setFromPoints([origin, end]);
     const tracer = new THREE.Line(geometry, DRONE_TRACER_MAT);
     tracer.name = 'drone-incoming-tracer';
@@ -2946,6 +3508,11 @@ export class DroneController {
     this.roll += (origin.x < this.pos.x ? 1 : -1) * 0.045;
     this.incomingPressure = Math.min(1, this.incomingPressure + 0.48);
     this.onIncomingFire?.(origin);
+    if (hit) {
+      this.loseAirframe('AIRFRAME HIT BY GROUND FIRE', {
+        effect: 'SHOT DOWN', impact: this.pos.clone(),
+      });
+    }
     return true;
   }
 
@@ -2958,9 +3525,15 @@ export class DroneController {
     }
   }
 
+  currentBatteryDrainRate() {
+    const propulsion = this.batteryDrain
+      + this.vel.length() / this.worldMaxSpeed * this.batteryDrain * 0.6;
+    return propulsion * (this.thermalEnabled ? this.thermalBatteryMultiplier : 1);
+  }
+
   updateThermalBurst(dt, input) {
-    // The heavy bomber carries a real gimbal thermal, not a burst gadget: N is a plain
-    // toggle, on for as long as the pilot wants it. That is how Baba Yaga crews fly nights.
+    // FPV-family aircraft carry a real switchable thermal channel: N is a plain toggle,
+    // so the operator can flash thermal on to find a heat source and return to EO to fly.
     if (this.thermalPersistent) {
       if (input.nvgPressed) this.setThermalEnabled(!this.thermalEnabled);
       return;
@@ -3004,7 +3577,9 @@ export class DroneController {
 
   thermalStatus() {
     if (this.thermalEnabled) {
-      return `SENSOR THERMAL ${this.thermalBurstRemaining.toFixed(1)}s // AI TRACK`;
+      return this.thermalPersistent
+        ? 'SENSOR THERMAL // AI TRACK'
+        : `SENSOR THERMAL ${this.thermalBurstRemaining.toFixed(1)}s // AI TRACK`;
     }
     if (this.thermalRechargeRemaining > 0) {
       return `SENSOR EO // THERM CHG ${this.thermalRechargeRemaining.toFixed(1)}s // AI TRACK`;
@@ -3263,6 +3838,7 @@ export class DroneController {
       }
     }
     if (this.isFpvFamily) {
+      this.killPopulationNear(position, 8);
       // A dropped bomb is a top attack: cages and aspect do not apply, blast falloff does.
       let nearest = null;
       let nearestDistance = Infinity;
@@ -3465,6 +4041,10 @@ export class DroneController {
     for (const actor of this.strikeSquirters) {
       this.scene.remove(actor.mesh);
       disposeObject(actor.mesh);
+    }
+    for (const actor of this.populationActors || []) {
+      this.scene.remove(actor.root);
+      disposeObject(actor.root);   // shared rig assets are flagged persistent; no-op there
     }
     for (const signature of this.thermalSignatures) {
       this.scene.remove(signature);

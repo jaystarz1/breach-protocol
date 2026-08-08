@@ -1,7 +1,7 @@
 import { floorSlab } from '../levelgen.js';
-import { terrainSampler, carveRailGrade, RAIL_TOP } from '../terrain.js';
+import { terrainSampler, carveRailGrade, carveTrenchLine, RAIL_TOP } from '../terrain.js';
 import { lift, sandbags, table, poleWire } from '../world.js';
-import { hedgeStands, rightOfWay, treeTrunkColliders } from '../trees.js';
+import { hedgeStands, rightOfWay, treePlacements, treeTrunkColliders } from '../trees.js';
 import { hamletColliders, hamletLayout } from '../hamlet.js';
 import { DEEP_FENCE_TERRAIN } from './terrain-deep-fence.js';
 
@@ -17,6 +17,207 @@ const phase = (id, text, steps) => ({ id, text, steps });
 const TRAINING_RAIL = [{ points: [[245, 870], [245, -1870]] }];
 const DEEP_RAIL = [{ points: [[245, -60], [272, -118], [300, -180], [330, -250], [330, -1870]] }];
 carveRailGrade(DEEP_FENCE_TERRAIN, [...TRAINING_RAIL, ...DEEP_RAIL]);
+
+// ----------------------------------------------------------------- field fortifications
+// Traversed fire trenches dug into the shelterbelt wood lines, on the pattern the drone
+// war actually photographs: straight fire bays of a few metres broken by perpendicular
+// traverse doglegs (never a long straight run an attacker could enfilade or one blast
+// could sweep), a ~1.4m-wide revetted slot between spoil parapets, and a 3x3m dugout
+// cut behind the line — entrance shielded by the traverse — under a roll of tree-trunk
+// logs, half a metre of soil and cut branches. The DEM carve supplies the excavation
+// depression; the works on top complete the 1.5m+ floor-to-crest profile.
+function trenchLayout(at, axis = 'x', side = 1, label = 'TRENCH') {
+  // u runs along the frontage, v across it; `side` flips which way the middle bay jogs
+  // and puts the dugout on the opposite (sheltered) side.
+  const bays = [
+    { u0: -9, u1: -2.6, v: 0 },
+    { u0: -2.6, u1: 3.6, v: 2.3 * side },
+    { u0: 3.6, u1: 9, v: 0 },
+  ];
+  const traverses = [
+    { u: -2.6, v0: 0, v1: 2.3 * side },
+    { u: 3.6, v0: 0, v1: 2.3 * side },
+  ];
+  const dugout = { u: -6.2, v: -3.4 * side, sap: { u: -6.2, v0: 0, v1: -3.4 * side } };
+  const toWorld = (u, v) => (axis === 'x'
+    ? [at[0] + u, at[1] + v] : [at[0] + v, at[1] + u]);
+  return { at, axis, side, label, bays, traverses, dugout, toWorld };
+}
+
+// Every trench sits ON a shelterbelt line (BASE_BELTS/DEEP_BELTS below), dug along the
+// wood so the surviving tree row screens it. Siting stays clear of every road and rail
+// right-of-way, authored vehicle route (including the ±22 offset presentation variants)
+// and settlement yard.
+const BASE_TRENCHES = [
+  trenchLayout([150, 90], 'x', 1, 'EAST TRENCH'),
+  trenchLayout([-165, 265], 'x', -1, 'WEST TRENCH'),
+  trenchLayout([-255, 305], 'x', -1, 'NORTH BELT TRENCH'),
+  trenchLayout([-200, -35], 'x', 1, 'SOUTH BELT TRENCH'),
+];
+const DEEP_TRENCHES = [
+  trenchLayout([200, -381], 'x', -1, 'RAIL TRENCH'),
+  trenchLayout([-82, -640], 'z', 1, 'GULLY TRENCH'),
+  trenchLayout([-200, -938], 'x', 1, 'WOODLINE TRENCH'),
+  trenchLayout([-250, -381], 'x', 1, 'WEST STEPPE TRENCH'),
+  trenchLayout([60, -780], 'z', -1, 'EAST HEDGE TRENCH'),
+  trenchLayout([170, -937], 'x', 1, 'KOLKHOZ BELT TRENCH'),
+  trenchLayout([-260, -1149], 'x', 1, 'FAR BELT TRENCH'),
+];
+
+function trenchTrace(layout) {
+  const { bays, dugout, toWorld } = layout;
+  const points = [
+    toWorld(bays[0].u0, bays[0].v), toWorld(bays[0].u1, bays[0].v),
+    toWorld(bays[1].u0, bays[1].v), toWorld(bays[1].u1, bays[1].v),
+    toWorld(bays[2].u0, bays[2].v), toWorld(bays[2].u1, bays[2].v),
+  ];
+  return [
+    { points, depth: 0.85 },
+    { points: [toWorld(dugout.sap.u, dugout.sap.v0), toWorld(dugout.u, dugout.v)],
+      depth: 1.05, half: 2.2, blend: 7 },
+  ];
+}
+
+// One channel piece of trench works: dark excavated floor, plank revetments on both
+// walls, pale fresh-spoil parapets outside them (solid — an airframe that clips a berm
+// detonates in the dirt). Runs along `dir` ('u' = the frontage axis, 'v' = a traverse).
+function trenchChannel(g, terrain, layout, uc, vc, length, dir) {
+  const along = (layout.axis === 'x') === (dir === 'u');
+  // Short sub-pieces, each grounded on its own terrain sample: a single 7m box on the
+  // carved slope leaves one end floating and buries the other.
+  const pieces = Math.max(1, Math.ceil(length / 3));
+  const step = length / pieces;
+  for (let p = 0; p < pieces; p++) {
+    const c = uc - length / 2 + step * (p + 0.5);
+    const [wx, wz] = dir === 'u' ? layout.toWorld(c, vc) : layout.toWorld(uc, vc - length / 2 + step * (p + 0.5));
+    const y0 = terrain(wx, wz);
+    const B = (dy, sy, off, thickness, color, solid = false) => {
+      g.push(along
+        ? [wx, y0 + dy, wz + off, step + 0.25, sy, thickness, color, solid]
+        : [wx + off, y0 + dy, wz, thickness, sy, step + 0.25, color, solid]);
+    };
+    B(0.03, 0.07, 0, 1.4, 0x282b20);                      // excavated floor
+    for (const s of [-1, 1]) {
+      B(0.4, 0.72, s * 0.74, 0.09, 0x4a3d2a);             // plank revetment
+      B(0.32, 0.62, s * 1.32, 1.0, 0x5a523d, true);       // spoil parapet
+    }
+  }
+}
+
+function trenchWorks(terrain, layout) {
+  const g = [];
+  for (const bay of layout.bays) {
+    trenchChannel(g, terrain, layout,
+      (bay.u0 + bay.u1) / 2, bay.v, Math.abs(bay.u1 - bay.u0) + 0.4, 'u');
+  }
+  for (const traverse of layout.traverses) {
+    trenchChannel(g, terrain, layout,
+      traverse.u, (traverse.v0 + traverse.v1) / 2,
+      Math.abs(traverse.v1 - traverse.v0) + 1.4, 'v');
+  }
+  const { dugout } = layout;
+  trenchChannel(g, terrain, layout,
+    dugout.sap.u, (dugout.sap.v0 + dugout.sap.v1) / 2,
+    Math.abs(dugout.sap.v1 - dugout.sap.v0), 'v');
+  // The dugout: a 3x3 chamber under a roll of tree-trunk logs, soil, and cut branches.
+  // The roof is solid — a drone cannot reach whoever is under the nakat, only whoever
+  // is standing in an open bay. Same lesson as the barn, dug into the ground.
+  const [dx, dz] = layout.toWorld(dugout.u, dugout.v);
+  const dy = terrain(dx, dz);
+  const logAlong = layout.axis === 'x';
+  for (let log = 0; log < 6; log++) {
+    const off = (log - 2.5) * 0.56;
+    const tone = log % 2 ? 0x4a3b28 : 0x423424;
+    g.push(logAlong
+      ? [dx + off, dy + 0.62, dz, 0.52, 0.3, 3.5, tone, true]
+      : [dx, dy + 0.62, dz + off, 3.5, 0.3, 0.52, tone, true]);
+  }
+  g.push([dx, dy + 0.92, dz, 3.2, 0.32, 3.2, 0x50483a, true]);   // soil cover
+  g.push([dx + 0.4, dy + 1.12, dz - 0.3, 2.6, 0.14, 2.2, 0x36402a, false]); // branches
+  g.push([dx - 0.7, dy + 1.1, dz + 0.8, 1.8, 0.12, 1.6, 0x3d4630, false]);
+  // Sandbagged fire steps at the outer bay ends.
+  const ends = [layout.toWorld(layout.bays[0].u0 + 1, layout.bays[0].v - 2.1 * layout.side),
+    layout.toWorld(layout.bays[2].u1 - 1, layout.bays[2].v - 2.1 * layout.side)];
+  for (const [sx, sz] of ends) {
+    g.push(...lift(sandbags(sx, sz, 4, 2, layout.axis === 'z', 5), terrain(sx, sz)));
+  }
+  return g;
+}
+
+// Garrison walk path for the ambient population: an ORDERED polyline down the slot —
+// dugout mouth, bay, traverse corners, bay — so a man moving between posts follows the
+// dug line instead of clipping through a parapet corner.
+function trenchPosts(layout) {
+  const [b0, b1, b2] = layout.bays;
+  return [
+    layout.toWorld(layout.dugout.sap.u, layout.dugout.sap.v1 * 0.55),
+    layout.toWorld(layout.dugout.sap.u, 0),
+    layout.toWorld((b0.u0 + b0.u1) / 2, b0.v),
+    layout.toWorld(b0.u1, b0.v),
+    layout.toWorld(b1.u0, b1.v),
+    layout.toWorld((b1.u0 + b1.u1) / 2, b1.v),
+    layout.toWorld(b1.u1, b1.v),
+    layout.toWorld(b2.u0, b2.v),
+    layout.toWorld((b2.u0 + b2.u1) / 2, b2.v),
+  ];
+}
+
+// People behind the launch line remain scenery. Hostile trench occupants never satisfy
+// the assigned vehicle task: garrison fire teams are optional strike targets, ambient
+// walkers are scenery that happens to be standing in a hole.
+const FARM_SCENERY = [
+  { at: [-190, 395], r: 13, count: 2, faction: 'friendly' },
+];
+
+const trenchOpportunity = (layout, label, team = 3, yaw = 0) => ({
+  kind: 'infantry', label, optional: true, team, yaw: 0,
+  pos: [layout.at[0], 0, layout.at[1]],
+  // Explicit figure offsets: one man per fire bay, standing in the dug slot instead of
+  // scattered across his own parapet. `yaw` seeds the facing variety only.
+  figures: layout.bays.slice(0, team).map((bay, index) => [
+    (bay.u0 + bay.u1) / 2 + (index - 1) * 0.6, bay.v, yaw + index * 2.3,
+  ]).map(([u, v, facing]) => {
+    const [wx, wz] = layout.toWorld(u, v);
+    return [wx - layout.at[0], wz - layout.at[1], facing];
+  }),
+  killMessage: `${label} WAS A TARGET OF OPPORTUNITY — ASSIGNED TASK STILL ACTIVE.`,
+});
+
+// Which trenches are manned is rolled fresh for every level build. The dug line is
+// permanent — the DEM carve and the works never move — but the men in it change:
+// roughly a third of the lines stand empty, a quarter carry one or two soldiers
+// drifting between posts (ambient scenery, killable but unscored beyond the blast),
+// and the rest mount a fire team the player can spend an airframe on. A guaranteed
+// minimum of two garrisons per map keeps every sortie offering optional trench
+// targets (and keeps the QA harness honest).
+function trenchRoster(deep) {
+  const layouts = deep ? [...BASE_TRENCHES, ...DEEP_TRENCHES] : BASE_TRENCHES;
+  const states = layouts.map(() => {
+    const roll = Math.random();
+    return roll < 0.35 ? 'empty' : roll < 0.6 ? 'ambient' : 'garrison';
+  });
+  const ensureGarrisons = (from, to, want) => {
+    let have = states.slice(from, to).filter(state => state === 'garrison').length;
+    while (have < want) {
+      const pick = from + Math.floor(Math.random() * (to - from));
+      if (states[pick] !== 'garrison') { states[pick] = 'garrison'; have++; }
+    }
+  };
+  ensureGarrisons(0, BASE_TRENCHES.length, 2);
+  if (deep) ensureGarrisons(BASE_TRENCHES.length, layouts.length, 2);
+  return {
+    population: layouts.flatMap((layout, index) => (states[index] === 'ambient'
+      ? [{ posts: trenchPosts(layout), count: 1 + (Math.random() < 0.5 ? 1 : 0) }]
+      : [])),
+    opportunities: layouts.flatMap((layout, index) => (states[index] === 'garrison'
+      ? [trenchOpportunity(layout, `${layout.label} FIRE TEAM`,
+        2 + (Math.random() < 0.65 ? 1 : 0), Math.random() * Math.PI * 2)]
+      : [])),
+  };
+}
+
+carveTrenchLine(DEEP_FENCE_TERRAIN,
+  [...BASE_TRENCHES, ...DEEP_TRENCHES].flatMap(trenchTrace));
 
 // A fuelcar's wheels (radius 0.34, axle at 0.55) bottom out 0.21 above its origin; this
 // authored y offset puts them on the railhead instead of sinking the bogies in ballast.
@@ -149,6 +350,8 @@ const DEEP_CLEARWAYS = [
   { at: [115, -680], r: 10 },                                             // decoy tank
   { at: [105, -1010], r: 8 },                                             // farm truck
   { at: [-11, -524], r: 7 },                                              // village EW mast
+  { at: [176, -714], r: 9 },                                              // crossroads dismount post
+  { at: [110, -1052], r: 9 },                                             // kolkhoz security detail
 ];
 
 function hamletPlanFor(roadPaint, railLines, deep) {
@@ -162,18 +365,56 @@ function hamletPlanFor(roadPaint, railLines, deep) {
   };
 }
 
-function treePlanFor(roadPaint, railLines, deep, hamletPlan) {
+// Every corridor a mission vehicle can actually drive — authored routes, reaction
+// routes, the moving range's offset presentation variants — plus every parked hull.
+// Trees and roadside scrub must clear them: a truck ploughing through a hedge is a
+// planting bug, not a tactic.
+function vehicleClearways(objectives) {
+  const clearways = [];
+  const flat = point => [point[0], point.length > 2 ? point[2] : point[1]];
+  for (const phaseDef of objectives) {
+    for (const step of phaseDef.steps || [phaseDef]) {
+      for (const vehicle of step.vehicles || []) {
+        const routes = [vehicle.route, vehicle.reaction?.route,
+          ...(vehicle.variants || []).map(variant => variant.route)];
+        for (const route of routes) {
+        if (route?.length > 1) clearways.push({
+          points: route.map(flat), half: vehicle.kind === 'infantry' ? 1.5 : 6,
+        });
+        }
+        for (const pos of [vehicle.pos, ...(vehicle.positions || []),
+          ...(vehicle.variants || []).map(variant => variant.pos)]) {
+          if (pos) clearways.push({ at: flat(pos), r: vehicle.kind === 'infantry' ? 2 : 6 });
+        }
+      }
+    }
+  }
+  return clearways;
+}
+
+function treePlanFor(roadPaint, railLines, deep, hamletPlan, routeAvoid = []) {
   // Plants also clear the settlement yards — a birch through a roof is not a look.
   const yardAvoid = [
     ...(hamletPlan?.settlements || []).map(s => ({ at: s.at, r: (s.r ?? 38) + 12 })),
     ...(hamletPlan?.farms || []).map(f => ({ at: f.at, r: 26 })),
   ];
+  // The digging kept the trunks out of the works themselves and nothing more: the
+  // avoid footprint hugs the dug slot, parapets and dugout, so the belt's surviving
+  // row stands right at the lip and its canopy closes over the trench. Finding the
+  // line means looking through trees, and striking it means flying down through them.
+  const trenchAvoid = (deep ? [...BASE_TRENCHES, ...DEEP_TRENCHES] : BASE_TRENCHES)
+    .flatMap(layout => [
+      { points: [layout.toWorld(-10.5, layout.side * 1.15),
+        layout.toWorld(10.5, layout.side * 1.15)], half: 4.6 },
+      { at: layout.toWorld(layout.dugout.u, layout.dugout.v), r: 3.6 },
+    ]);
   return {
     stands: [
       ...(deep ? [...BASE_BELTS, ...DEEP_BELTS] : BASE_BELTS),
       ...hedgeStands(roadPaint, railLines),
     ],
-    avoid: [...rightOfWay(roadPaint, railLines), OP_PAD_AVOID, ...yardAvoid],
+    avoid: [...rightOfWay(roadPaint, railLines), OP_PAD_AVOID, ...yardAvoid,
+      ...trenchAvoid, ...routeAvoid],
   };
 }
 
@@ -225,6 +466,10 @@ function droneFieldGeo(seed, options = {}, treePlan = null, treeSeed = 0, hamlet
   if (treePlan) {
     g.push(...treeTrunkColliders(DEEP_FENCE_TERRAIN, treePlan, treeSeed));
   }
+  // The fortification works draped into their carved depressions along the wood lines.
+  for (const layout of (options.deep ? [...BASE_TRENCHES, ...DEEP_TRENCHES] : BASE_TRENCHES)) {
+    g.push(...trenchWorks(terrain, layout));
+  }
   if (hamletPlan) {
     g.push(...hamletColliders(DEEP_FENCE_TERRAIN, hamletPlan, treeSeed));
   }
@@ -251,33 +496,160 @@ function droneFieldGeo(seed, options = {}, treePlan = null, treeSeed = 0, hamlet
   return g;
 }
 
+function pointSegmentDistance(x, z, a, b) {
+  const dx = b[0] - a[0], dz = b[1] - a[1];
+  const t = Math.max(0, Math.min(1,
+    ((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz || 1)));
+  return Math.hypot(x - (a[0] + dx * t), z - (a[1] + dz * t));
+}
+
+function treeCoverRoute(route, placements, wanted = 4) {
+  const usable = placements.filter(tree => tree.species !== 'shrub')
+    .map(tree => ({
+      tree,
+      distance: Math.min(...route.slice(1).map((point, index) =>
+        pointSegmentDistance(tree.x, tree.z, route[index], point))),
+    }))
+    .filter(candidate => candidate.distance < 10)
+    .sort((a, b) => a.tree.x - b.tree.x);
+  if (!usable.length) return route;
+  const selected = [];
+  for (let index = 0; index < wanted; index++) {
+    const candidate = usable[Math.round(index * (usable.length - 1) / Math.max(1, wanted - 1))];
+    if (candidate && !selected.includes(candidate)) selected.push(candidate);
+  }
+  return selected.flatMap(({ tree }, index) => {
+    const radius = 1.25 + (index % 2) * 0.25;
+    const direction = index % 2 ? -1 : 1;
+    return [0, 1, 2, 3].map(step => {
+      const angle = direction * step * Math.PI / 2 + index * 0.63;
+      return [tree.x + Math.cos(angle) * radius, tree.z + Math.sin(angle) * radius];
+    });
+  });
+}
+
+function buildingRunnerRoute(building, requested, placements) {
+  const cu = Math.cos(building.yaw), su = Math.sin(building.yaw);
+  const at = (u, v) => [building.x + u * cu - v * su, building.z + u * su + v * cu];
+  const front = -building.D / 2;
+  const outside = front - 2.1;
+  const cornerU = building.L / 2 + 1.8;
+  const cornerV = building.D / 2 + 1.8;
+  const door = building.doorU;
+  const interiorSide = Math.max(1.2, building.L * 0.28);
+  const route = [
+    at(-interiorSide, 0.45), at(interiorSide, 0.45),
+    at(door, front + 1.0), at(door, outside),
+    at(-cornerU, outside), at(-cornerU, cornerV),
+  ];
+
+  if (requested.woodline) {
+    const [cx, cz] = requested.woodline;
+    const covers = placements.filter(tree => tree.species !== 'shrub')
+      .sort((a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz))
+      .slice(0, 3);
+    for (const [index, tree] of covers.entries()) {
+      const r = 1.3 + index * 0.12;
+      route.push(
+        [tree.x + r, tree.z], [tree.x, tree.z + r],
+        [tree.x - r, tree.z], [tree.x, tree.z - r],
+      );
+    }
+    // Return on the same clear exterior approach. Connecting the last tree straight to
+    // the door could cut diagonally through the barn depending on its seeded rotation.
+    route.push(at(-cornerU, cornerV), at(-cornerU, outside));
+  } else {
+    route.push(at(cornerU, cornerV), at(cornerU, outside));
+  }
+
+  if (requested.vehicleOrbit) {
+    const center = at(door + 1.5, front - 6.5);
+    route.push(
+      [center[0] + 3.0 * cu, center[1] + 3.0 * su],
+      [center[0] - 3.0 * su, center[1] + 3.0 * cu],
+      [center[0] - 3.0 * cu, center[1] - 3.0 * su],
+      [center[0] + 3.0 * su, center[1] - 3.0 * cu],
+    );
+  }
+  route.push(at(door, outside), at(door, front + 1.0), at(interiorSide, 0.45));
+  return route;
+}
+
+function routePresentations(route, speed, starts = [0, 1, 2]) {
+  return starts.map(start => {
+    const rotated = [...route.slice(start), ...route.slice(0, start)];
+    return { pos: [rotated[0][0], 0, rotated[0][1]], route: rotated, speed };
+  });
+}
+
 function droneLevel(id, name, brief, objectives, options = {}) {
   const deep = !!options.geo?.deep;
   const roadPaint = clipTracks(options.roadPaint || (deep ? DEEP_ROADPAINT : BASE_ROADPAINT));
   const railLines = deep ? [...TRAINING_RAIL, ...DEEP_RAIL] : TRAINING_RAIL;
   const hamletPlan = hamletPlanFor(roadPaint, railLines, deep);
-  const treePlan = treePlanFor(roadPaint, railLines, deep, hamletPlan);
+  const treePlan = treePlanFor(roadPaint, railLines, deep, hamletPlan,
+    vehicleClearways(objectives));
   const buildings = hamletLayout(hamletPlan, id);
+  const treeCovers = treePlacements(treePlan, id);
+  // One occupancy roll per level build: within a mission the same trenches stay manned
+  // across sorties, but the next session's build rolls again.
+  const roster = trenchRoster(deep);
   const resolvedObjectives = objectives.map(phaseDef => ({
     ...phaseDef,
     steps: (phaseDef.steps || [phaseDef]).map(step => ({
       ...step,
-      vehicles: (step.vehicles || []).map(vehicle => {
-        if (!vehicle.shelter) return vehicle;
+      // Rear-area friendlies and this build's ambient trench walkers remain scenery.
+      // Rolled trench garrisons are appended to every sortie as optional targets:
+      // killing one scores, but never advances the assigned task.
+      ...(step.type === 'drone' && ['fpv', 'bomber'].includes(step.mode) && !step.population
+        ? { population: [...FARM_SCENERY, ...roster.population] } : {}),
+      vehicles: [
+        ...(step.vehicles || []),
+        ...(step.type === 'drone' && ['fpv', 'bomber'].includes(step.mode)
+          ? roster.opportunities : []),
+      ].map(vehicle => {
+        if (!vehicle.shelter) {
+          if (vehicle.kind !== 'infantry' || vehicle.evasion?.style !== 'wooded') return vehicle;
+          const route = treeCoverRoute(vehicle.route, treeCovers);
+          return {
+            ...vehicle, route,
+            pos: [route[0][0], 0, route[0][1]],
+            variants: routePresentations(route, vehicle.speed, [0, 4, 8]),
+          };
+        }
         const requested = vehicle.shelter;
-        const matches = buildings.filter(building =>
+        let matches = buildings.filter(building =>
           building.kind === (requested.kind || 'barn')
-          && (!requested.state || building.state === requested.state));
+          && (!requested.state || building.state === requested.state)
+          && (!requested.standing || building.state !== 'gutted'));
+        if (!matches.length && requested.standing) {
+          matches = buildings.filter(building => building.kind === (requested.kind || 'barn'));
+        }
+        if (requested.near) matches.sort((a, b) =>
+          Math.hypot(a.x - requested.near[0], a.z - requested.near[1])
+          - Math.hypot(b.x - requested.near[0], b.z - requested.near[1]));
         const building = matches[requested.index || 0];
         if (!building) {
           throw new Error(`Drone level ${id}: no ${requested.state || ''} ${requested.kind || 'barn'} for ${vehicle.label}`);
         }
-        const u = requested.u || 0, v = requested.v || 0;
+        const u = requested.doorOffset !== undefined
+          ? building.doorU + requested.doorOffset : (requested.u || 0);
+        const v = requested.outsideFront !== undefined
+          ? -building.D / 2 - requested.outsideFront : (requested.v || 0);
         const cu = Math.cos(building.yaw), su = Math.sin(building.yaw);
         const { positions: _positions, shelter: _shelter, ...rest } = vehicle;
+        const runnerRoute = vehicle.kind === 'infantry' && requested.evasionRoute
+          ? buildingRunnerRoute(building, requested, treeCovers) : null;
         return {
           ...rest,
-          pos: [building.x + u * cu - v * su, 0, building.z + u * su + v * cu],
+          pos: runnerRoute
+            ? [runnerRoute[0][0], 0, runnerRoute[0][1]]
+            : [building.x + u * cu - v * su, 0, building.z + u * su + v * cu],
+          ...(runnerRoute ? {
+            route: runnerRoute,
+            variants: routePresentations(runnerRoute, vehicle.speed),
+            loop: true,
+          } : {}),
           yaw: building.yaw + (requested.yawOffset || 0),
           shelter: {
             kind: building.kind, state: building.state,
@@ -326,10 +698,40 @@ const interceptRuns = [
     lesson: lesson('DO NOT TAIL-CHASE', 'A vehicle going away invites a battery-burning chase. Cross to a flank, fly the shorter line and meet it farther down the road.'),
   },
   { id: 'flank', title: 'OPEN FLANK INTERCEPT', speed: 5.2, pos: [-70, 0, 320], route: [[-70, 320], [-70, -120]] },
-  { id: 'fast-cross', title: 'FAST PERPENDICULAR CROSSING', speed: 7.4, pos: [-220, 0, 150], route: [[-220, 150], [220, 150]] },
-  { id: 'oblique', title: 'OBLIQUE CROSSING', speed: 5.8, pos: [-210, 0, 30], route: [[-210, 30], [180, 230]] },
+  {
+    id: 'woodline-runner', title: 'WOODLINE RUNNER', kind: 'infantry', team: 1,
+    label: 'WOODLINE RUNNER', health: 60, speed: 8.6, pos: [75, 0, 83],
+    route: [[75, 83], [120, 96], [170, 84], [220, 98], [270, 83]], loop: true,
+    evasion: { style: 'wooded', triggerRadius: 150, decisionMin: 0.42, decisionMax: 0.9 },
+    lesson: lesson('FLASH, FLY, REACQUIRE', 'Use a brief thermal flash to pick the runner out of the trees, return to EO for branches and terrain, then anticipate the next gap instead of following the last heat image.'),
+  },
+  {
+    id: 'farm-corners', title: 'FARMYARD CORNER PURSUIT', kind: 'infantry', team: 1,
+    label: 'FARMYARD RUNNER', health: 60, speed: 8.2, pos: [200, 0, 55],
+    route: [[200, 55], [205, 62]], loop: true,
+    shelter: {
+      kind: 'barn', standing: true, near: [200, 55], evasionRoute: true,
+      vehicleOrbit: true,
+    },
+    evasion: { style: 'building', triggerRadius: 150, decisionMin: 0.38, decisionMax: 0.82 },
+    supportVehicles: [
+      { kind: 'technical', label: 'PARKED FARM TRUCK', health: 180,
+        optional: true, hostile: false,
+        shelter: { kind: 'barn', standing: true, near: [200, 55],
+          doorOffset: 1.5, outsideFront: 6.5, yawOffset: 1.4 } },
+    ],
+  },
   { id: 'junction', title: 'TURN AT THE JUNCTION', speed: 5.1, pos: [-210, 0, 330], route: [[-210, 330], [-6, 330], [-6, 40]] },
-  { id: 'concealed', title: 'WINDBREAK REAPPEARANCE', speed: 4.5, pos: [-250, 0, 285], route: [[-250, 285], [-70, 285], [80, 150], [230, 150]] },
+  {
+    id: 'farm-to-woods', title: 'BUILDING-TO-WOODS REACQUISITION',
+    kind: 'infantry', team: 1, label: 'FARMSTEAD RUNNER', health: 60, speed: 8.8,
+    pos: [-190, 0, 395], route: [[-190, 395], [-205, 425]], loop: true,
+    shelter: {
+      kind: 'barn', standing: true, near: [-190, 395], evasionRoute: true,
+      woodline: [-205, 428],
+    },
+    evasion: { style: 'building-woods', triggerRadius: 165, decisionMin: 0.35, decisionMax: 0.76 },
+  },
   {
     id: 'evaluation', title: 'RANDOMIZED INTERCEPT', speed: 6,
     pos: [-210, 0, -120], route: [[-210, -120], [190, -120]],
@@ -356,6 +758,14 @@ function offsetPresentations(run) {
   }));
 }
 
+function runnerPresentations(run) {
+  const offsets = [0, Math.floor(run.route.length / 3), Math.floor(run.route.length * 2 / 3)];
+  return offsets.map(start => {
+    const route = [...run.route.slice(start), ...run.route.slice(0, start)];
+    return { pos: [route[0][0], 0, route[0][1]], route, speed: run.speed };
+  });
+}
+
 const movingRangeObjectives = interceptRuns.map((run, index) => phase(
   `intercept-${index + 1}-${run.id}`,
   `${index + 1}/10 — ${run.title}`,
@@ -364,11 +774,14 @@ const movingRangeObjectives = interceptRuns.map((run, index) => phase(
     airframes: 2,
     lessons: run.lesson ? [run.lesson] : [],
     vehicles: [{
-      kind: index === 9 ? 'default' : 'technical',
-      label: `RUN ${index + 1} TARGET`, health: index === 9 ? 220 : 150,
-      pos: run.pos, route: run.route, speed: run.speed, loop: true,
-      variants: run.variants || offsetPresentations(run),
-    }],
+      kind: run.kind || (index === 9 ? 'default' : 'technical'),
+      label: run.label || `RUN ${index + 1} TARGET`,
+      health: run.health ?? (index === 9 ? 220 : 150), team: run.team,
+      pos: run.pos, route: run.route, speed: run.speed, loop: run.loop ?? true,
+      variants: run.variants || (run.kind === 'infantry' && !run.shelter
+        ? runnerPresentations(run) : offsetPresentations(run)),
+      shelter: run.shelter, evasion: run.evasion,
+    }, ...(run.supportVehicles || [])],
     startMessage: `KAVUN — RUN ${index + 1}. ${run.title}. FLY THE MEETING POINT.`,
     result: `INTERCEPT RUN ${index + 1} COMPLETE`,
   })],
@@ -383,7 +796,7 @@ export const DRONE_TRAINING_LEVELS = [
         airframes: 4,
         lessons: [
           lesson('CONTROL THE AIRFRAME', 'WASD sets the flight line. Mouse looks and turns. RMB or Z climbs; CTRL or C descends. Keep moving while you learn.', '.fpv-help'),
-          lesson('READ THE FLIGHT DISPLAY', 'The on-screen display (OSD) shows heading, speed, distance, home direction, battery and link quality. Check it during the route, not after the picture is already lost.', '.fpv-batt'),
+          lesson('READ THE FLIGHT DISPLAY', 'The on-screen display (OSD) shows heading, speed, distance, home direction, battery and link quality. Press N to flash the thermal channel on when searching for people or hot machinery, then return to EO for terrain detail. Thermal adds 22% battery load, so scan with it instead of leaving it on. Check the display during the route, not after the picture is already lost.', '.fpv-batt'),
         ],
         vehicles: [
           { kind: 'default', label: 'HANDLING HULL ONE', health: 180, pos: [-45, 0, 335], yaw: 0.4 },
@@ -408,7 +821,7 @@ export const DRONE_TRAINING_LEVELS = [
     }),
 
   droneLevel(12, 'MOVING RANGE',
-    'Ten live intercept repetitions: opposite crossings, approaching and receding traffic, flank cuts, speed, turns, concealment and one randomized final check.',
+    'Ten live intercept repetitions: vehicle crossings and turns, then individual runners using farm buildings, wooded cover and broken lines of sight before one randomized final check.',
     movingRangeObjectives,
     { curriculum: ['moving-target interception', 'terminal attack aspect'] }),
 
@@ -557,6 +970,9 @@ export const DRONE_TRAINING_LEVELS = [
         ],
         vehicles: [
           { kind: 'technical', label: 'BARN-HIDDEN SUPPLY TRUCK', targetId: 'hunt-primary', health: 160, requiresIdentification: true, shelter: { kind: 'barn', state: 'damaged', entry: 'doorway' } },
+          // The hide has a picket: a fire team on the barn's blind side. Optional credit —
+          // the lesson stays the truck, but the farm no longer reads as abandoned.
+          { kind: 'infantry', label: 'BARN SECURITY DETAIL', optional: true, team: 3, shelter: { kind: 'barn', state: 'damaged', u: 3.0, v: 5.4 } },
           { kind: 'technical', label: 'DECOY TRUCK', health: 80, decoy: true, pos: [80, 0, 150], yaw: 2.2 },
           { kind: 'default', label: 'ABANDONED APC', health: 100, decoy: true, pos: [-130, 0, 20], yaw: 4.1 },
         ],
@@ -658,6 +1074,10 @@ export const DRONE_TRAINING_LEVELS = [
           { kind: 'tank', label: 'T-72B3 PATROL', cage: true, health: 500, requiresIdentification: true, pos: [-120, 0, -700], route: [[-120, -700], [80, -700]], speed: 3.2, loop: true, reaction: { speedMultiplier: 1.35, route: [[80, -700], [-6, -520], [-180, -520]] } },
           { kind: 'tank', label: 'TANK DECOY', cage: true, health: 120, decoy: true, pos: [115, 0, -680], yaw: 0.3 },
           { kind: 'ew', label: 'VILLAGE EW', targetId: 'village-ew', jammerId: 'village-ew', health: 180, optional: true, pos: [-11, 0, -524], yaw: 1.2 },
+          // Dismounts on the ground the briefs imply: a team dug in around a burned-out
+          // APC at the shelled crossroads, and an OP in a gutted cottage shell.
+          { kind: 'infantry', label: 'CROSSROADS DISMOUNT POST', optional: true, team: 4, pos: [176, 0, -714], yaw: 2.1, cover: { kind: 'apc', yaw: 0.4 } },
+          { kind: 'infantry', label: 'RUIN OBSERVATION TEAM', optional: true, team: 2, shelter: { kind: 'khata', state: 'gutted', u: 0, v: -3.8 } },
         ],
         startMessage: 'OPERATIONS — REPORT IS SIX MINUTES OLD. CONFIRM THE PATROL; THE EW CIRCLE IS ESTIMATED.',
         result: 'PATROL ARMOR STOPPED — BDA SUBMITTED',
@@ -672,6 +1092,7 @@ export const DRONE_TRAINING_LEVELS = [
         vehicles: [
           { kind: 'apc', label: 'BTR-82A', health: 320, requiresIdentification: true, pos: [134, 0, -1030], route: [[134, -1030], [104, -1000], [150, -1000], [150, -1060]], speed: 3.8, loop: true, reaction: { speedMultiplier: 1.45, route: [[150, -1060], [20, -1145], [-160, -1145]] } },
           { kind: 'technical', label: 'FARM SERVICE TRUCK', hostile: false, protected: true, pos: [105, 0, -1010], yaw: 2.4 },
+          { kind: 'infantry', label: 'KOLKHOZ SECURITY DETAIL', optional: true, team: 3, pos: [110, 0, -1052], yaw: 5.0, cover: { kind: 'technical', yaw: 2.6 } },
         ],
         startMessage: 'OPERATIONS — THE FARM IS MOVING AFTER THE TANK STRIKE. IDENTIFY BEFORE TERMINAL COMMITMENT.',
         result: 'KOLKHOZ SCREEN INTERDICTED — BDA SUBMITTED',
@@ -688,6 +1109,7 @@ export const DRONE_TRAINING_LEVELS = [
           { kind: 'fuelcar', label: 'FUEL WAGON TWO', health: 220, pos: [330, WAGON_LIFT,-1237], yaw: Math.PI / 2 },
           { kind: 'fuelcar', label: 'FUEL WAGON THREE', health: 220, pos: [330, WAGON_LIFT,-1249], yaw: Math.PI / 2 },
           { kind: 'fuelcar', label: 'EMPTY DECOY WAGON', health: 100, decoy: true, pos: [330, WAGON_LIFT,-1270], yaw: Math.PI / 2 },
+          { kind: 'infantry', label: 'SIDING LOADING PARTY', optional: true, team: 3, pos: [322, 0, -1243], yaw: 1.2 },
         ],
         startMessage: 'OPERATIONS — NIGHT PAYLOAD RUN. CONFIRM THE WARM WAGONS, MANAGE DRIFT, RETAIN AN EGRESS RESERVE.',
         result: 'DEEP FENCE COMPLETE — ECHELON EFFECTS CONFIRMED',
