@@ -36,8 +36,11 @@ import {
 } from './campaign.js';
 import {
   createDroneAssaultVehicle, DroneController, dronePrewarmGroup, setDroneTerrain,
+  setDroneFoliage,
 } from './drone.js';
 import { terrainSampler, terrainMin, buildTerrainMesh, buildTerrainApron, buildRoadRibbons, buildRailLine } from './terrain.js';
+import { buildTreeStands, treeFoliageColliders } from './trees.js';
+import { buildHamlet } from './hamlet.js';
 import {
   authoredActorSockets,
   resolveActorVariant,
@@ -162,7 +165,19 @@ $('pause-restart').onclick = () => {
   resumePhase = currentCheckpointPhase();
   startLevel(currentLevel);
 };
-$('pause-skip').onclick = () => startLevel(levelAfter(currentLevel)?.id ?? LEVELS[0].id);
+$('pause-skip').onclick = () => {
+  if (canSkipDronePhase()) {
+    // Let the ordinary objective-completion path perform the handoff. Marking the last
+    // step complete avoids replaying the rest of a long training phase while preserving
+    // every cleanup/setup operation used by a normally completed sortie.
+    world.objectiveStepIdx = Math.max(0, phaseSteps(currentPhase()).length - 1);
+    world.drone.complete = true;
+    mode = 'playing';
+    hud.screen(null);
+    return;
+  }
+  startLevel(levelAfter(currentLevel)?.id ?? LEVELS[0].id);
+};
 $('pause-quit').onclick = () => toMenu();
 $('debrief-retry').onclick = () => startLevel(currentLevel);
 $('debrief-menu').onclick = () => toMenu();
@@ -424,10 +439,16 @@ function startLevel(id) {
   const diff = DIFFICULTIES[S.difficulty];
   missionRuns[id] = (missionRuns[id] ?? 0);
   const missionVariant = missionRuns[id]++ % 3;
-  // Checkpoint resume: only meaningful for a merged act that authored the requested phase.
-  const resume = L.checkpoints?.some(c => c.phase === resumePhase) ? resumePhase : 0;
+  // Merged acts resume only at authored checkpoints. Drone school is intentionally more
+  // permissive: every top-level drone phase is a several-minute repetition block, so a
+  // retry or explicit skip may start directly at any authored drone phase.
+  const resumeCandidate = L.objectives?.[resumePhase];
+  const resumableDronePhase = resumePhase > 0
+    && phaseSteps(resumeCandidate).some(step => step.type === 'drone');
+  const resume = L.checkpoints?.some(c => c.phase === resumePhase) || resumableDronePhase
+    ? resumePhase : 0;
   resumePhase = 0;
-  const checkpoint = resume ? L.checkpoints.find(c => c.phase === resume) : null;
+  const checkpoint = resume ? (L.checkpoints?.find(c => c.phase === resume) || null) : null;
   const spawnPoint = checkpoint?.start || L.start;
 
   scene = new THREE.Scene();
@@ -465,6 +486,11 @@ function startLevel(id) {
     // Roads are ribbons draped onto the sampled surface, not boxes floating over it.
     if (L.roadPaint) terrainGroup.add(buildRoadRibbons(L.terrainDef, L.roadPaint));
     if (L.railLines) terrainGroup.add(buildRailLine(L.terrainDef, L.railLines));
+    // Shelterbelts, hedgerows and verge scrub: one merged mesh, every plant stamped onto
+    // its own sampled ground (see trees.js).
+    if (L.treePlan) terrainGroup.add(buildTreeStands(L.terrainDef, L.treePlan, L.id));
+    // Crossroad hamlets and farmsteads, stamped building-by-building the same way.
+    if (L.hamletPlan) terrainGroup.add(buildHamlet(L.terrainDef, L.hamletPlan, L.id));
     terrainGroup.userData.dispose = () => {
       for (const child of terrainGroup.children) child.userData.dispose?.();
     };
@@ -472,6 +498,9 @@ function startLevel(id) {
     scene.userData.terrain = terrainGroup;
   }
   setDroneTerrain(terrainSample);
+  // Canopy stops aircraft but never bullets: the foliage AABBs live outside `solids`.
+  setDroneFoliage(L.treePlan && L.terrainDef
+    ? treeFoliageColliders(L.terrainDef, L.treePlan, L.id) : []);
   if (!indoor) {
     skyMesh = skyDome(L.sky, L.fog[0], L.id * 7919, { rural: L.backdrop === 'rural' });
     scene.add(skyMesh);
@@ -629,7 +658,12 @@ function startLevel(id) {
     };
     addInteriorMissionArt(segScene, seg.id);
     if (!indoor && !seg.indoor) {
-      addFrontlineAmbientArt(segScene, seg.id, seg.bounds || bounds);
+      // On terrain levels the ambient blast art must land on the DEM, not the y=0
+      // street datum. The sampler is offset-aware: art builds in segment-local coords.
+      addFrontlineAmbientArt(segScene, seg.id, seg.bounds || bounds,
+        terrainSample
+          ? (x, z) => terrainSample(x + seg.dx, z + seg.dz) - (seg.dy || 0)
+          : null);
     }
     addFrontlineMissionArt(segScene, seg.id);
     if (seg.id === 2) {
@@ -2601,6 +2635,7 @@ function grade(score, civKills, accuracy) {
 // The checkpoint the current position of the act has earned: the highest authored
 // checkpoint at or below the active phase. Zero for legacy single levels.
 function currentCheckpointPhase() {
+  if (world?.drone && (world.objectiveIdx ?? 0) > 0) return world.objectiveIdx;
   const checkpointList = world?.level?.checkpoints;
   if (!checkpointList) return 0;
   let phaseIndex = 0;
@@ -2608,6 +2643,22 @@ function currentCheckpointPhase() {
     if ((world.objectiveIdx ?? 0) >= c.phase) phaseIndex = c.phase;
   }
   return phaseIndex;
+}
+
+function canSkipDronePhase() {
+  if (!world?.drone || world.over) return false;
+  const nextPhase = world.level.objectives?.[(world.objectiveIdx ?? 0) + 1];
+  return phaseSteps(nextPhase).some(step => step.type === 'drone');
+}
+
+function preparePauseActions() {
+  const button = $('pause-skip');
+  if (!button) return;
+  if (canSkipDronePhase()) {
+    const nextIndex = world.objectiveIdx + 1;
+    const nextPhase = world.level.objectives[nextIndex];
+    button.textContent = `SKIP TO PHASE ${nextIndex + 1} — ${nextPhase.text || 'NEXT DRONE PHASE'}`;
+  } else button.textContent = 'SKIP TO NEXT MISSION';
 }
 
 function winMission() {
@@ -2705,7 +2756,13 @@ function frame() {
     return;
   }
 
-  if (input.pausePressed) { mode = 'paused'; hud.screen('pause'); clearEdges(); return; }
+  if (input.pausePressed) {
+    mode = 'paused';
+    preparePauseActions();
+    hud.screen('pause');
+    clearEdges();
+    return;
+  }
 
   // Arrow-key aim feeds lookDelta before the player consumes it. Real dt, not sdt:
   // slow-mo shouldn't make you turn slower.

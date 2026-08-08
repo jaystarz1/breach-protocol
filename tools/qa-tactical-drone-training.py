@@ -126,7 +126,7 @@ def main():
         page.goto(args.url, wait_until="domcontentloaded")
         page.wait_for_function("() => !!window.BP")
 
-        catalogue = page.evaluate("""() => BP.LEVELS.slice(10).map(level => ({
+        catalogue = page.evaluate("""() => BP.LEVELS.filter(level => level.id >= 11 && level.id <= 20).map(level => ({
           id: level.id, name: level.name, curriculum: level.curriculum,
           targetDuration: level.targetDuration,
           concepts: level.curriculum.length,
@@ -147,6 +147,128 @@ def main():
         assert all(not entry["oldDrain"] and entry["timedBattery"] for entry in catalogue), catalogue
         assert all(entry["coached"] and entry["unassisted"] for entry in catalogue), catalogue
         assert catalogue[1]["droneSteps"] == 10, catalogue
+
+        # A long drone phase can always be bypassed from pause, and a failure in the next
+        # phase retries that phase rather than sending the operator back through phase one.
+        page.evaluate("() => BP.startLevel(13)")
+        page.wait_for_function("() => BP.mode === 'playing' && BP.world?.drone")
+        page.evaluate("() => { BP.input.pausePressed = true; }")
+        page.wait_for_function("() => BP.mode === 'paused'")
+        phase_skip_label = page.locator("#pause-skip").inner_text()
+        assert "PHASE 2" in phase_skip_label, phase_skip_label
+        page.locator("#pause-skip").click()
+        page.wait_for_function("""() => BP.mode === 'playing'
+          && BP.world?.objectiveIdx === 1
+          && BP.phase?.id === 'payload-check'
+          && BP.world?.drone?.mode === 'bomber'""")
+        heavy_hands_feasibility = page.evaluate("""() => {
+          const d = BP.world.drone;
+          const vehicles = d.combatVehicles;
+          const locomotive = vehicles.find(v => v.label === 'DIESEL LOCOMOTIVE');
+          const tanker = vehicles.find(v => v.label === 'FUEL TANKER');
+          const escort = vehicles.find(v => v.label === 'SERVICE-ROAD ESCORT');
+          const cruise = Math.min(d.worldMaxSpeed, d.worldAccel / 1.45);
+          const at = (vehicle, seconds) => {
+            const start = vehicle.route[0], end = vehicle.route[1];
+            const length = Math.hypot(end.x - start.x, end.z - start.z);
+            const periodDistance = (vehicle.speed * seconds) % (2 * length);
+            const along = periodDistance <= length ? periodDistance : 2 * length - periodDistance;
+            return {
+              x: start.x + (end.x - start.x) * along / length,
+              z: start.z + (end.z - start.z) * along / length,
+            };
+          };
+          const intercept = (position, startTime, vehicle) => {
+            for (let time = startTime; time < startTime + 1200; time += .05) {
+              const target = at(vehicle, time);
+              if (Math.hypot(target.x - position.x, target.z - position.z)
+                  <= cruise * (time - startTime)) return { time, position: target };
+            }
+            throw new Error('no feasible intercept');
+          };
+          const permutations = [
+            [locomotive, tanker, escort], [locomotive, escort, tanker],
+            [tanker, locomotive, escort], [tanker, escort, locomotive],
+            [escort, locomotive, tanker], [escort, tanker, locomotive],
+          ];
+          let best = null;
+          for (const order of permutations) {
+            let position = { x: d.launch.x, z: d.launch.z }, time = 0;
+            for (const vehicle of order) {
+              const result = intercept(position, time, vehicle);
+              time = result.time; position = result.position;
+            }
+            time += Math.hypot(position.x - d.launch.x, position.z - d.launch.z) / cruise;
+            const batteryUsed = time * d.batteryDrain
+              * (1 + .6 * cruise / d.worldMaxSpeed);
+            if (!best || batteryUsed < best.batteryUsed) {
+              best = { time, batteryUsed, order: order.map(v => v.label) };
+            }
+          }
+          const spacingBefore = locomotive.pos.distanceTo(tanker.pos);
+          locomotive.update(5, BP.world.solids);
+          tanker.update(5, BP.world.solids);
+          const spacingAfter = locomotive.pos.distanceTo(tanker.pos);
+          d.setThermalEnabled(true);
+          d.updateThermalSignatures();
+          const launchMarker = BP.scene.getObjectByName('drone-forward-launch-marker');
+          const homeThermal = BP.scene.getObjectByName('drone-thermal-home-beacon');
+          const bomberCoach = d.coachAttempt({
+            effect: 'DESTROYED', aspect: 'REAR', targetCaged: false,
+            firstPass: true, routeEfficiency: 1, distance: 100, baselineDistance: 100,
+            returnIncluded: true, jamTime: 0, minSignal: 1, batteryAtEnd: 80,
+            chaseTime: 120, maxAgl: 0, terminalCorrection: 0, acquired: true,
+          });
+          return {
+            launch: d.definition.launch,
+            kinds: [locomotive.kind, locomotive.label, tanker.label, escort.label],
+            trainKmh: locomotive.speed * d.metersPerUnit * 3.6,
+            spacingBefore, spacingAfter, best,
+            home: {
+              label: d.training.homeLabel,
+              marker: !!launchMarker,
+              markerChildren: launchMarker?.children.length || 0,
+              aligned: !!launchMarker
+                && Math.hypot(launchMarker.position.x - d.launch.x,
+                  launchMarker.position.z - d.launch.z) < .01,
+              thermal: !!homeThermal && homeThermal.visible,
+            },
+            bomberFeedback: [...bomberCoach.improve, bomberCoach.instruction].join(' '),
+          };
+        }""")
+        assert heavy_hands_feasibility["launch"] == [120, 0, 300], heavy_hands_feasibility
+        assert heavy_hands_feasibility["kinds"] == [
+            "locomotive", "DIESEL LOCOMOTIVE", "FUEL TANKER", "SERVICE-ROAD ESCORT"
+        ], heavy_hands_feasibility
+        assert abs(heavy_hands_feasibility["trainKmh"] - 12) < 0.01, heavy_hands_feasibility
+        assert abs(heavy_hands_feasibility["spacingBefore"] - 11) < 0.1, heavy_hands_feasibility
+        assert abs(heavy_hands_feasibility["spacingAfter"] - 11) < 0.1, heavy_hands_feasibility
+        assert 40 < heavy_hands_feasibility["best"]["batteryUsed"] < 70, heavy_hands_feasibility
+        assert heavy_hands_feasibility["home"] == {
+            "label": "FORWARD LZ", "marker": True, "markerChildren": 9,
+            "aligned": True, "thermal": True,
+        }, heavy_hands_feasibility
+        assert "behind" not in heavy_hands_feasibility["bomberFeedback"].lower(), heavy_hands_feasibility
+        assert "flank" not in heavy_hands_feasibility["bomberFeedback"].lower(), heavy_hands_feasibility
+        train_stopped = page.evaluate("""() => {
+          const d = BP.world.drone;
+          const locomotive = d.combatVehicles.find(v => v.label === 'DIESEL LOCOMOTIVE');
+          const tanker = d.combatVehicles.find(v => v.label === 'FUEL TANKER');
+          d.combatImpact(locomotive.pos.clone());
+          const before = tanker.pos.clone();
+          tanker.update(5, BP.world.solids);
+          return { locomotiveDead: locomotive.dead, tankerSpeed: tanker.speed,
+            tankerMovement: tanker.pos.distanceTo(before), radio: d.result.textContent };
+        }""")
+        assert train_stopped["locomotiveDead"] and train_stopped["tankerSpeed"] == 0, train_stopped
+        assert train_stopped["tankerMovement"] == 0 and "CONSIST STOPPED" in train_stopped["radio"], train_stopped
+        page.evaluate("() => BP.world.drone.onFailed('QA PHASE RETRY')")
+        page.wait_for_function("() => BP.mode === 'debrief'")
+        page.locator("#debrief-retry").click()
+        page.wait_for_function("""() => BP.mode === 'playing'
+          && BP.world?.objectiveIdx === 1
+          && BP.phase?.id === 'payload-check'
+          && BP.world?.drone?.mode === 'bomber'""")
 
         # Inspect the complete state sequence and telemetry-derived coaching on one real hit.
         page.evaluate("() => BP.startLevel(11)")
@@ -234,6 +356,67 @@ def main():
         page.evaluate("() => BP.startLevel(13)")
         page.wait_for_function("() => BP.world?.level?.id === 13 && !!BP.world.drone")
         accelerate_review(page)
+        heron_nadir = page.evaluate("""() => {
+          const d = BP.world.drone;
+          d.skipLessons?.();
+          d.pos.set(0, 24, 300); d.vel.set(0, 0, 0); d.yaw = 0;
+          d.pitch = -85 * Math.PI / 180;
+          const input = {
+            lookDelta: { x: 0, y: 0 }, move: { x: 0, y: -1 },
+            ads: false, crouch: false, firePressed: false, nadePressed: false,
+            breachPressed: false, reloadPressed: false,
+          };
+          d.update(.2, input, BP.world.solids);
+          d.updateFpvOsd(0);
+          const locked = { nadir: d.payloadNadir, vy: d.vel.y, vz: d.vel.z,
+            pitch: d.pitch * 180 / Math.PI, mode: d.osd.mode.textContent };
+          d.pitch = -75 * Math.PI / 180;
+          input.move.y = 0;
+          d.update(.02, input, BP.world.solids);
+          return { ...locked, released: !d.payloadNadir };
+        }""")
+        assert heron_nadir["nadir"] and heron_nadir["released"], heron_nadir
+        assert abs(heron_nadir["vy"]) < 0.01 and heron_nadir["vz"] < 0, heron_nadir
+        assert "NADIR LOCK" in heron_nadir["mode"] and "ALT HOLD" in heron_nadir["mode"], heron_nadir
+        assert heron_nadir["pitch"] < -80, heron_nadir
+
+        # Desktop C is held altitude input even though infantry crouch remains a toggle.
+        # Once released, a latched crouch flag cannot pull the Heron into the ground, and
+        # looking down while flying forward cannot introduce a hidden descent component.
+        page.evaluate("() => { BP.input.crouch = false; }")
+        page.keyboard.down("c")
+        assert page.evaluate("() => BP.input.droneDescend")
+        page.keyboard.up("c")
+        released_descent = page.evaluate("() => ({ held: BP.input.droneDescend, crouch: BP.input.crouch })")
+        assert not released_descent["held"] and released_descent["crouch"], released_descent
+        heron_altitude_hold = page.evaluate("""() => {
+          const d = BP.world.drone;
+          d.pos.set(0, 24, 300); d.vel.set(0, 0, 0); d.yaw = 0;
+          d.pitch = -45 * Math.PI / 180;
+          const neutral = {
+            lookDelta: { x: 0, y: 0 }, move: { x: 0, y: -1 },
+            desktopAltitude: true, droneClimb: false, droneDescend: false,
+            ads: false, crouch: true, firePressed: false, nadePressed: false,
+            breachPressed: false, reloadPressed: false,
+          };
+          const startY = d.pos.y;
+          for (let i = 0; i < 60; i++) d.update(.016, neutral, BP.world.solids);
+          const forwardHold = { deltaY: d.pos.y - startY, vy: d.vel.y };
+          neutral.move.y = 0;
+          neutral.droneDescend = true;
+          d.update(.1, neutral, BP.world.solids);
+          const commandedVy = d.vel.y;
+          neutral.droneDescend = false;
+          for (let i = 0; i < 60; i++) d.update(.016, neutral, BP.world.solids);
+          d.updateFpvOsd(0);
+          return { ...forwardHold, commandedVy, releasedVy: d.vel.y,
+            mode: d.osd.mode.textContent };
+        }""")
+        assert abs(heron_altitude_hold["deltaY"]) < 0.02, heron_altitude_hold
+        assert abs(heron_altitude_hold["vy"]) < 0.01, heron_altitude_hold
+        assert heron_altitude_hold["commandedVy"] < 0, heron_altitude_hold
+        assert abs(heron_altitude_hold["releasedVy"]) < 0.01, heron_altitude_hold
+        assert "GIMBAL" in heron_altitude_hold["mode"] and "ALT HOLD" in heron_altitude_hold["mode"], heron_altitude_hold
         heron_exhausted = page.evaluate("""() => {
           const d = BP.world.drone;
           d.skipLessons?.();
@@ -253,7 +436,7 @@ def main():
         }""")
         page.wait_for_function("() => BP.world.drone.attemptState === 'debrief'")
         heron_prompt = page.locator(".fpv-debrief-panel .fpv-review-key").inner_text()
-        assert "NEW TARGET SET" in heron_prompt and "NEXT STAGE" in heron_prompt, heron_prompt
+        assert "REPEAT THIS PHASE" in heron_prompt and "ADVANCE TO NEXT PHASE" in heron_prompt, heron_prompt
         page.evaluate("""() => {
           const d = BP.world.drone;
           d.attemptStateTime = 1;
@@ -301,6 +484,11 @@ def main():
           const d = BP.world.drone;
           const last = d.combatVehicles.find(v => !v.dead && !v.optional && !v.decoy && !v.protected);
           d.combatImpact(last.pos.clone().add({ x: 0, y: .2, z: 0 }));
+          const [firstTarget, secondTarget] = d.combatVehicles;
+          const requiredBaseline = d.attemptStart.distanceTo(firstTarget.pos)
+            + firstTarget.pos.distanceTo(secondTarget.pos)
+            + secondTarget.pos.distanceTo(d.launch);
+          d.attemptDistance = requiredBaseline * 1.12;
           d.updateFpvFamily(.1, { firePressed: false, nadePressed: false }, BP.world.solids);
           return { message: d.result.textContent, egress: d.egressRequired,
             state: d.attemptState, complete: d.pendingMissionComplete };
@@ -313,6 +501,16 @@ def main():
           d.updateFpvFamily(.1, { firePressed: false, nadePressed: false }, BP.world.solids);
         }""")
         assert page.evaluate("() => BP.world.drone.attemptState") == "impact_hold"
+        heron_route = page.evaluate("""() => ({
+          efficiency: BP.world.drone.review.routeEfficiency,
+          legs: BP.world.drone.review.requiredLegs,
+          returnIncluded: BP.world.drone.review.returnIncluded,
+          improve: BP.world.drone.review.coaching.improve,
+          baseline: BP.world.drone.review.baselineDistance,
+        })""")
+        assert heron_route["legs"] == 3 and heron_route["returnIncluded"], heron_route
+        assert 1.1 < heron_route["efficiency"] < 1.15 and heron_route["baseline"] > 0, heron_route
+        assert not any("route" in item.lower() or "turn" in item.lower() for item in heron_route["improve"]), heron_route
 
         completed = {}
         for level_id in range(11, 21):
@@ -358,12 +556,70 @@ def main():
 
         page.evaluate("() => BP.startLevel(17)")
         page.wait_for_function("() => BP.world?.level?.id === 17 && !!BP.world.drone")
-        hunt = page.evaluate("""() => ({
-          requiresId: BP.world.drone.combatVehicles.some(v => v.requiresIdentification),
-          decoys: BP.world.drone.combatVehicles.filter(v => v.decoy).length,
-          abort: BP.world.drone.training.allowAbort,
-        })""")
-        assert hunt == {"requiresId": True, "decoys": 2, "abort": True}, hunt
+        hunt = page.evaluate("""async () => {
+          const { hasLOS } = await import('./src/physics.js');
+          const d = BP.world.drone;
+          const target = d.combatVehicles.find(v => v.requiresIdentification && !v.decoy);
+          const s = target.shelter;
+          const worldPoint = (u, v) => ({
+            x: s.x + u * Math.cos(s.yaw) - v * Math.sin(s.yaw),
+            z: s.z + u * Math.sin(s.yaw) + v * Math.cos(s.yaw),
+          });
+          const doorOutside = worldPoint(s.doorU, -s.D / 2 - 3);
+          const sideOutside = worldPoint(s.L / 2 + 3, 0);
+          const y = target.pos.y + 1.2;
+          const base = {
+            effect: 'DESTROYED', aspect: 'FLANK', targetCaged: false,
+            targetShelter: s, firstPass: true, routeEfficiency: 1,
+            distance: 100, baselineDistance: 100, returnIncluded: false,
+            jamTime: 0, minSignal: 1, batteryAtEnd: 80, chaseTime: 0,
+            maxAgl: 0, terminalCorrection: 0, acquired: true,
+          };
+          const successCoach = d.coachAttempt(base);
+          const missCoach = d.coachAttempt({ ...base, effect: 'MISS' });
+          return {
+            requiresId: d.combatVehicles.some(v => v.requiresIdentification),
+            decoys: d.combatVehicles.filter(v => v.decoy).length,
+            abort: d.training.allowAbort,
+            shelter: { kind: s.kind, state: s.state, entry: s.entry },
+            inside: Math.hypot(target.pos.x - s.x, target.pos.z - s.z) < 0.1,
+            doorOpen: hasLOS(BP.world.solids,
+              doorOutside.x, y, doorOutside.z, target.pos.x, y, target.pos.z),
+            sideSolid: !hasLOS(BP.world.solids,
+              sideOutside.x, y, sideOutside.z, target.pos.x, y, target.pos.z),
+            successFeedback: successCoach.good.join(' '),
+            missFeedback: missCoach.instruction,
+          };
+        }""")
+        assert hunt["requiresId"] and hunt["decoys"] == 2 and hunt["abort"], hunt
+        assert hunt["shelter"] == {
+            "kind": "barn", "state": "damaged", "entry": "doorway",
+        }, hunt
+        assert hunt["inside"] and hunt["doorOpen"] and hunt["sideSolid"], hunt
+        assert "inside" in hunt["successFeedback"] and "doorway" in hunt["successFeedback"], hunt
+        assert "threshold" in hunt["missFeedback"] and "doorway" in hunt["missFeedback"], hunt
+
+        page.evaluate("() => BP.startLevelAt(17, 1)")
+        page.wait_for_function("""() => BP.world?.level?.id === 17
+          && BP.world?.objectiveIdx === 1 && BP.phase?.id === 'hunt-check'
+          && !!BP.world.drone""")
+        roof_entry = page.evaluate("""async () => {
+          const { hasLOS } = await import('./src/physics.js');
+          const target = BP.world.drone.combatVehicles.find(v =>
+            v.requiresIdentification && !v.decoy);
+          const s = target.shelter;
+          return {
+            shelter: { kind: s.kind, state: s.state, entry: s.entry },
+            inside: Math.hypot(target.pos.x - s.x, target.pos.z - s.z) < .1,
+            roofOpen: hasLOS(BP.world.solids,
+              target.pos.x, target.pos.y + 10, target.pos.z,
+              target.pos.x, target.pos.y + 1, target.pos.z),
+          };
+        }""")
+        assert roof_entry == {
+            "shelter": {"kind": "barn", "state": "gutted", "entry": "roof opening"},
+            "inside": True, "roofOpen": True,
+        }, roof_entry
 
         page.evaluate("() => BP.startLevel(18)")
         page.wait_for_function("() => BP.world?.level?.id === 18 && !!BP.world.drone")
@@ -381,6 +637,7 @@ def main():
             "completedAttempts": completed,
             "linkedJammer": linked,
             "hunt": hunt,
+            "roofEntry": roof_entry,
             "brokenPlan": broken,
             "errors": errors[:10],
         }

@@ -16,6 +16,11 @@ export const input = {
   breath: false,
   pausePressed: false,
   crouch: false,
+  // Dedicated held controls for multirotor altitude. Z/C also retain their infantry
+  // meanings, but the drone must never inherit crouch's latched state as a descent command.
+  droneClimb: false,
+  droneDescend: false,
+  desktopAltitude: false,
   leanLeft: false,
   leanRight: false,
   sensitivity: 1.0,
@@ -78,6 +83,7 @@ export const isDesktop = !matchMedia('(pointer: coarse)').matches && !('ontouchs
 
 export function initInput() {
   if (isDesktop) document.body.classList.add('desktop');
+  input.desktopAltitude = isDesktop;
   const stickZone = el('stick-zone');
   const lookZone = el('look-zone');
   const stickBase = el('stick-base');
@@ -208,8 +214,11 @@ export function initInput() {
     if (e.code === 'ShiftLeft') input.breath = true;
     // Keyboard aim, held like the mouse button. Right-click was the ONLY way to scope,
     // which is no use to anyone whose pointer lock is refusing to engage.
-    if (e.code === 'KeyZ') input.ads = true;
-    if (e.code === 'ControlLeft' || e.code === 'KeyC') input.crouch = !input.crouch;
+    if (e.code === 'KeyZ') { input.ads = true; input.droneClimb = true; }
+    if (e.code === 'ControlLeft' || e.code === 'KeyC') {
+      input.crouch = !input.crouch;
+      input.droneDescend = true;
+    }
     if (e.code === 'KeyQ') input.leanLeft = true;
     if (e.code === 'KeyE') input.leanRight = true;
     updateKeyMove();
@@ -219,7 +228,8 @@ export function initInput() {
     keys[e.code] = false;
     if (e.code === 'Space') input.fire = false;
     if (e.code === 'ShiftLeft') input.breath = false;
-    if (e.code === 'KeyZ') input.ads = false;
+    if (e.code === 'KeyZ') { input.ads = false; input.droneClimb = false; }
+    if (e.code === 'ControlLeft' || e.code === 'KeyC') input.droneDescend = false;
     if (e.code === 'KeyQ') input.leanLeft = false;
     if (e.code === 'KeyE') input.leanRight = false;
     updateKeyMove();
@@ -244,11 +254,11 @@ export function initInput() {
     // Hold to aim, not toggle. A toggle strands you in the scope with nothing saying so,
     // and on the sniper mission the player is locked in place, so a stuck scope IS the
     // whole level. Touch keeps its toggle — there is no hold gesture on a thumb button.
-    if (e.button === 2) input.ads = true;
+    if (e.button === 2) { input.ads = true; input.droneClimb = true; }
   });
   window.addEventListener('mouseup', e => {
     if (e.button === 0) input.fire = false;
-    if (e.button === 2) input.ads = false;
+    if (e.button === 2) { input.ads = false; input.droneClimb = false; }
   });
   window.addEventListener('mousemove', e => {
     if (document.pointerLockElement !== canvas) return;
@@ -263,6 +273,8 @@ export function initInput() {
     input.move.x = 0; input.move.y = 0;
     input.fire = false;
     input.breath = false;
+    input.droneClimb = false;
+    input.droneDescend = false;
     // ads is held now, so losing focus mid-aim must drop it or you come back stuck scoped
     if (isDesktop) input.ads = false;
     input.leanLeft = false; input.leanRight = false;

@@ -195,6 +195,8 @@ export function buildRoadRibbons(def, runs) {
   for (const run of runs) {
     const pts = run.points;
     const width = run.width ?? 7;
+    // Paved by default; a run may declare its own surface tone (dirt field tracks).
+    const surface = run.surface ?? SURFACE;
     // Resample the polyline at a fixed step, keeping every authored corner.
     const line = [];
     for (let s = 0; s < pts.length - 1; s++) {
@@ -219,7 +221,7 @@ export function buildRoadRibbons(def, runs) {
         positions.push(wx, sample(wx, wz) + LIFT, wz);
         const jitter = 0.88 + hash(Math.round(wx * 2), Math.round(wz * 2)) * 0.24;
         color.setRGB(
-          SURFACE[0] / 255 * jitter, SURFACE[1] / 255 * jitter, SURFACE[2] / 255 * jitter,
+          surface[0] / 255 * jitter, surface[1] / 255 * jitter, surface[2] / 255 * jitter,
           THREE.SRGBColorSpace);
         colors.push(color.r, color.g, color.b);
       }

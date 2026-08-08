@@ -911,15 +911,22 @@ export function addFrontlineStreetArt(scene) {
 
 // Low-cost common language shared by the other outdoor missions. The layout remains authored;
 // this pass only makes the perimeter and approach read as a district under sustained fire.
-export function addFrontlineAmbientArt(scene, levelId, bounds) {
+export function addFrontlineAmbientArt(scene, levelId, bounds, groundAt = null) {
   if (!quality.desktop || !bounds || levelId === 2) return;
   const R = rng(81001 + levelId * 997);
   const frontline = frontlineMaterials();
-  const char = new THREE.MeshStandardMaterial({ color: 0x17191a, roughness: 1 });
+  const char = new THREE.MeshStandardMaterial({
+    color: 0x17191a, roughness: 1,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
   const chunks = [[], [], []];
   const fineRubble = [];
   const craters = [];
   const radius = Math.max(10, Math.min(bounds.r * 0.78, 42));
+  // Flat street levels sit on the y=0 datum. Terrain levels pass their DEM sampler:
+  // every scar vertex, rim and rubble chunk lands on the sampled ground under it —
+  // nothing hangs in the air over a dip or buries itself in a rise.
+  const ground = groundAt || (() => 0);
 
   for (let cluster = 0; cluster < 4; cluster++) {
     const angle = R() * Math.PI * 2;
@@ -930,8 +937,9 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
     for (let i = 0; i < 18; i++) {
       const a = R() * Math.PI * 2;
       const d = 0.7 + R() * 2.1;
+      const cx = x + Math.cos(a) * d, cz = z + Math.sin(a) * d;
       chunks[(cluster + i) % chunks.length].push([
-        x + Math.cos(a) * d, 0.08 + R() * 0.13, z + Math.sin(a) * d,
+        cx, ground(cx, cz) + 0.08 + R() * 0.13, cz,
         (R() - 0.5) * 0.46, R() * Math.PI * 2, (R() - 0.5) * 0.46,
         0.3 + R() * 0.5, 0.52 + R() * 0.4, 0.3 + R() * 0.5,
       ]);
@@ -940,8 +948,9 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
       const a = R() * Math.PI * 2;
       const d = 0.6 + R() * 2.35;
       const scale = 0.46 + R() * 0.94;
+      const fx = x + Math.cos(a) * d, fz = z + Math.sin(a) * d;
       fineRubble.push([
-        x + Math.cos(a) * d, 0.05 + R() * 0.04, z + Math.sin(a) * d,
+        fx, ground(fx, fz) + 0.05 + R() * 0.04, fz,
         R() * Math.PI, R() * Math.PI, R() * Math.PI,
         scale * (0.76 + R() * 0.48), scale * (0.58 + R() * 0.42), scale,
       ]);
@@ -949,15 +958,24 @@ export function addFrontlineAmbientArt(scene, levelId, bounds) {
   }
   for (let i = 0; i < craters.length; i++) {
     const [x, z, scale] = craters[i];
-    const scar = new THREE.Mesh(raggedDisc(scale, 18, levelId * 41 + i), char);
-    scar.rotation.x = -Math.PI / 2;
-    scar.position.set(x, 0.028, z);
+    // Drape the scar per-vertex like the road ribbons: the planar ragged disc becomes a
+    // ground-following patch. ShapeGeometry builds in XY; remap (px, py) -> (px, -py)
+    // on the ground plane so the layout matches the old rotation.x = -PI/2 orientation.
+    const geo = raggedDisc(scale, 18, levelId * 41 + i);
+    const pos = geo.attributes.position;
+    for (let v = 0; v < pos.count; v++) {
+      const px = pos.getX(v), py = pos.getY(v);
+      pos.setXYZ(v, px, ground(x + px, z - py) + 0.045, -py);
+    }
+    geo.computeVertexNormals();
+    const scar = new THREE.Mesh(geo, char);
+    scar.position.set(x, 0, z);
     scene.add(scar);
   }
   const rimMaterial = [3, 5].includes(levelId) ? frontline.concreteDark : frontline.asphalt;
   const craterRims = instanced(scene, CRATER_RIM_GEO, rimMaterial,
     craters.map(([x, z, scale], i) =>
-      [x, 0.03, z, 0, i * 1.39 + levelId, 0, scale * 1.2, 1, scale * 1.2]), false);
+      [x, ground(x, z) + 0.03, z, 0, i * 1.39 + levelId, 0, scale * 1.2, 1, scale * 1.2]), false);
   craterRims.name = 'frontline-ambient-crater-rims';
   for (let i = 0; i < chunks.length; i++) {
     const rubble = instanced(scene, RUBBLE_GEOMETRIES[i],

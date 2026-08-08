@@ -1,16 +1,21 @@
 import { floorSlab } from '../levelgen.js';
 import { terrainSampler, carveRailGrade, RAIL_TOP } from '../terrain.js';
-import { lift, rng, sandbags, table, poleWire } from '../world.js';
+import { lift, sandbags, table, poleWire } from '../world.js';
+import { hedgeStands, rightOfWay, treeTrunkColliders } from '../trees.js';
+import { hamletColliders, hamletLayout } from '../hamlet.js';
 import { DEEP_FENCE_TERRAIN } from './terrain-deep-fence.js';
 
 const phase = (id, text, steps) => ({ id, text, steps });
 
-// The two rail lines are engineered into the land itself, once, before anything samples
+// The rail lines are engineered into the land itself, once, before anything samples
 // it: carveRailGrade cuts and fills the DEM so the line holds a railway gradient, and
 // buildRailLine (via each level's railLines) drapes ballast, ties and narrow-gauge steel
 // on the result. Every training level shares this DEM, so the earthworks are permanent.
-const TRAINING_RAIL = [{ points: [[245, 130], [245, -560]] }];
-const DEEP_RAIL = [{ points: [[330, -260], [330, -1420]] }];
+// The main line runs margin to margin — nothing on this map is a random piece of track
+// in the middle of a field — and the deep siding diverges from it at a real junction
+// before running north to the far margin, so rolling stock can be staged anywhere on it.
+const TRAINING_RAIL = [{ points: [[245, 870], [245, -1870]] }];
+const DEEP_RAIL = [{ points: [[245, -60], [272, -118], [300, -180], [330, -250], [330, -1870]] }];
 carveRailGrade(DEEP_FENCE_TERRAIN, [...TRAINING_RAIL, ...DEEP_RAIL]);
 
 // A fuelcar's wheels (radius 0.34, axle at 0.55) bottom out 0.21 above its origin; this
@@ -20,14 +25,157 @@ const MPU = 3.5;
 const TRAINING_BOUNDS = [-720, 505, 720, -935];
 const TRAINING_AREA = [-330, 500, 330, -650];
 const TRAINING_ROADS = [
-  [-6, 500, -6, -650], [-260, 330, 260, 330], [-260, 150, 260, 150],
-  [-160, -120, 180, -120],
+  [-6, 505, -6, -935], [-720, 330, 720, 330], [-720, 150, 720, 150],
+  [-720, -120, 720, -120],
 ];
 const TRAINING_WOODS = [
   [-220, 428, -18, 430], [18, 430, 220, 428],
   [-280, 305, -70, 305], [-280, 265, -70, 265],
   [65, 90, 285, 90], [-285, -35, -60, -35],
 ];
+
+// Every paved run reaches the DEM margin or a junction — roads go somewhere, which is
+// also what lets this rectangle tile into a larger battle space later. The narrow dirt
+// runs are field tracks along the shelterbelts, the section-road grid of the steppe.
+const DIRT = [84, 76, 58];
+const track = (points) => ({ points, width: 3, surface: DIRT });
+const BASE_ROADPAINT = [
+  { points: [[-6, 870], [-6, -935]], width: 8 },
+  { points: [[-810, 330], [810, 330]], width: 8 },
+  { points: [[-810, 150], [810, 150]], width: 8 },
+  { points: [[-810, -120], [810, -120]], width: 7 },
+  track([[-810, 437], [810, 437]]),
+  track([[-810, 285], [-6, 285]]),
+  track([[-6, 98], [810, 98]]),
+  track([[-810, -27], [-6, -27]]),
+];
+const DEEP_ROADPAINT = [
+  { points: [[-6, 870], [-6, -1870]], width: 8 },
+  { points: [[-810, 330], [810, 330]], width: 8 },
+  { points: [[-810, 150], [810, 150]], width: 8 },
+  { points: [[-810, -120], [810, -120]], width: 7 },
+  { points: [[-810, -700], [810, -700]], width: 9 },
+  { points: [[150, -700], [150, -1870]], width: 9 },
+  track([[-810, 437], [810, 437]]),
+  track([[-810, 285], [-6, 285]]),
+  track([[-6, 98], [810, 98]]),
+  track([[-810, -27], [-6, -27]]),
+  track([[-810, -370], [810, -370]]),
+  track([[-810, -928], [810, -928]]),
+  track([[-92, -370], [-92, -928]]),
+  track([[50, -370], [50, -928]]),
+  track([[-810, -1138], [150, -1138]]),
+];
+
+// Dirt tracks end at the asphalt edge instead of painting over it. Every field-track
+// run is clipped out of each paved corridor it crosses, so a crossing reads as a track
+// meeting a road, never gravel smeared across the pavement.
+function nearRun(x, z, pts, r) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+    const dx = bx - ax, dz = bz - az;
+    const t = Math.max(0, Math.min(1,
+      ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+    if (Math.hypot(x - (ax + dx * t), z - (az + dz * t)) < r) return true;
+  }
+  return false;
+}
+
+function clipTracks(runs) {
+  const paved = runs.filter(r => (r.width ?? 7) >= 5);
+  const out = [];
+  for (const run of runs) {
+    if ((run.width ?? 7) >= 5) { out.push(run); continue; }
+    for (let i = 0; i < run.points.length - 1; i++) {
+      const [ax, az] = run.points[i], [bx, bz] = run.points[i + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(1, Math.ceil(len / 2));
+      const at = (t) => [ax + (bx - ax) * t, az + (bz - az) * t];
+      let start = null;
+      for (let k = 0; k <= n; k++) {
+        const t = k / n;
+        const [x, z] = at(t);
+        const blocked = paved.some(p => nearRun(x, z, p.points, (p.width ?? 7) / 2 + 1));
+        if (!blocked && start === null) start = t;
+        if ((blocked || k === n) && start !== null) {
+          const end = blocked ? (k - 1) / n : t;
+          if ((end - start) * len > 6) out.push({ ...run, points: [at(start), at(end)] });
+          start = null;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Shelterbelts: the old single-file box rows become 10m-wide two-row belts with a scrub
+// base (see trees.js). Same lines the minimap woods entries draw.
+const BASE_BELTS = [
+  { kind: 'belt', from: [-220, 428], to: [-18, 430] },
+  { kind: 'belt', from: [18, 430], to: [220, 428] },
+  { kind: 'belt', from: [-280, 305], to: [-70, 305] },
+  { kind: 'belt', from: [-280, 265], to: [-70, 265] },
+  { kind: 'belt', from: [65, 90], to: [285, 90] },
+  { kind: 'belt', from: [-285, -35], to: [-60, -35] },
+];
+const DEEP_BELTS = [
+  { kind: 'belt', from: [-330, -382], to: [-70, -378] },
+  { kind: 'belt', from: [60, -378], to: [330, -384] },
+  { kind: 'belt', from: [-330, -940], to: [-60, -936] },
+  { kind: 'belt', from: [110, -936], to: [330, -940] },
+  { kind: 'belt', from: [-84, -430], to: [-80, -880] },
+  { kind: 'belt', from: [62, -560], to: [58, -1000] },
+  { kind: 'belt', from: [-330, -1150], to: [-30, -1146] },
+];
+
+// Nothing may grow on the OP pad or block the launch line.
+const OP_PAD_AVOID = { points: [[0, 444], [0, 482]], half: 28 };
+
+// The built half of the map: lone farms on the training range, and on the deep map the
+// shelled village the EW mast sits in, the kolkhoz the BTR patrols, and a crossroads
+// hamlet at the -700 junction. Positions match the deep missions' authored minimap
+// `places` footprints — the buildings the briefs always implied are now standing.
+const BASE_FARMS = [{ at: [-190, 395] }, { at: [200, 55] }];
+const DEEP_SETTLEMENTS = [
+  { at: [-14, -527], r: 44, count: 8, ruin: 0.75 },   // village around the EW mast
+  { at: [134, -1030], r: 42, count: 4, ruin: 0.5 },   // the kolkhoz
+  { at: [150, -700], r: 34, count: 4, ruin: 0.8 },    // shelled crossroads hamlet
+];
+// Authored off-road vehicle paths and parked hulls: no building may stand on them.
+const DEEP_CLEARWAYS = [
+  { points: [[80, -700], [-6, -520], [-180, -520]], half: 8 },            // tank reaction
+  { points: [[134, -1030], [104, -1000], [150, -1000], [150, -1060], [134, -1030]], half: 8 },
+  { points: [[150, -1060], [20, -1145], [-160, -1145]], half: 8 },        // BTR reaction
+  { at: [115, -680], r: 10 },                                             // decoy tank
+  { at: [105, -1010], r: 8 },                                             // farm truck
+  { at: [-11, -524], r: 7 },                                              // village EW mast
+];
+
+function hamletPlanFor(roadPaint, railLines, deep) {
+  const avoid = [...rightOfWay(roadPaint, railLines), OP_PAD_AVOID,
+    ...(deep ? DEEP_CLEARWAYS : [])];
+  return {
+    settlements: deep ? DEEP_SETTLEMENTS : [],
+    farms: BASE_FARMS,
+    roads: roadPaint,
+    avoid,
+  };
+}
+
+function treePlanFor(roadPaint, railLines, deep, hamletPlan) {
+  // Plants also clear the settlement yards — a birch through a roof is not a look.
+  const yardAvoid = [
+    ...(hamletPlan?.settlements || []).map(s => ({ at: s.at, r: (s.r ?? 38) + 12 })),
+    ...(hamletPlan?.farms || []).map(f => ({ at: f.at, r: 26 })),
+  ];
+  return {
+    stands: [
+      ...(deep ? [...BASE_BELTS, ...DEEP_BELTS] : BASE_BELTS),
+      ...hedgeStands(roadPaint, railLines),
+    ],
+    avoid: [...rightOfWay(roadPaint, railLines), OP_PAD_AVOID, ...yardAvoid],
+  };
+}
 
 const lesson = (title, body, highlight) => ({ title, body, ...(highlight ? { highlight } : {}) });
 
@@ -60,62 +208,25 @@ function trainingMap(overrides = {}) {
     opArea: TRAINING_AREA,
     roads: TRAINING_ROADS,
     woods: TRAINING_WOODS,
-    rail: [[245, 130, 245, -560]],
+    rail: [[245, 505, 245, -935]],
     places: [],
     ...overrides,
   };
 }
 
-function droneFieldGeo(seed, options = {}) {
+function droneFieldGeo(seed, options = {}, treePlan = null, treeSeed = 0, hamletPlan = null) {
   const g = [];
-  const random = rng(seed);
   const terrain = terrainSampler(DEEP_FENCE_TERRAIN);
-  const canopyTones = [
-    [0x293c20, 0x334a28, 0x415c31],
-    [0x263a1e, 0x2f4426, 0x3c522c],
-    [0x2c4023, 0x374e2b, 0x466036],
-  ];
-  // The rail corridors are a cleared right-of-way: no trunk grows on the formation.
-  const nearRail = (x, z) =>
-    (Math.abs(x - 245) < 8 && z < 140 && z > -570)
-    || (options.deep && Math.abs(x - 330) < 8 && z < -250 && z > -1430);
-  const tree = (x, z, scale = 1) => {
-    if (nearRail(x, z)) return;
-    const tones = canopyTones[Math.floor(random() * canopyTones.length)];
-    const y = terrain(x, z);
-    g.push([x, y + 0.9 * scale, z, 0.38 * scale, 1.8 * scale, 0.38 * scale, 0x453727]);
-    for (const [w, oy, h, tone] of [[3, 2.4, 1.5, 0], [2.5, 3.3, 1.4, 1], [1.9, 4.2, 1.3, 1], [1.1, 5, 1.2, 2]]) {
-      g.push([
-        x + (random() - 0.5) * 0.55 * scale, y + oy * scale,
-        z + (random() - 0.5) * 0.55 * scale,
-        w * scale, h * scale, w * scale, tones[tone],
-      ]);
-    }
-  };
-  const treeRow = (x1, z1, x2, z2, spacing = 16) => {
-    const count = Math.max(2, Math.round(Math.hypot(x2 - x1, z2 - z1) / spacing));
-    for (let index = 0; index <= count; index++) {
-      const t = index / count;
-      tree(x1 + (x2 - x1) * t + (random() - 0.5) * 4,
-        z1 + (z2 - z1) * t + (random() - 0.5) * 4, 0.86 + random() * 0.45);
-    }
-  };
 
   g.push(...floorSlab(0, 462, 40, 32, terrain(0, 462), 1, 0x4a4636));
-  treeRow(-220, 428, -18, 430, 15);
-  treeRow(18, 430, 220, 428, 15);
-  treeRow(-280, 305, -70, 305, 14);
-  treeRow(-280, 265, -70, 265, 14);
-  treeRow(65, 90, 285, 90, 16);
-  treeRow(-285, -35, -60, -35, 16);
-  if (options.deep) {
-    treeRow(-330, -382, -70, -378, 17);
-    treeRow(60, -378, 330, -384, 17);
-    treeRow(-330, -940, -60, -936, 17);
-    treeRow(110, -936, 330, -940, 17);
-    treeRow(-84, -430, -80, -880, 17);
-    treeRow(62, -560, 58, -1000, 17);
-    treeRow(-330, -1150, -30, -1146, 17);
+  // The visible forest and villages are merged meshes built by main.js from the level's
+  // treePlan/hamletPlan. What the box world needs from them is the mass: one slim
+  // invisible solid per trunk (leaves stay soft), one per building footprint.
+  if (treePlan) {
+    g.push(...treeTrunkColliders(DEEP_FENCE_TERRAIN, treePlan, treeSeed));
+  }
+  if (hamletPlan) {
+    g.push(...hamletColliders(DEEP_FENCE_TERRAIN, hamletPlan, treeSeed));
   }
   for (const [jx, jz] of options.jammers || []) {
     const y = terrain(jx, jz);
@@ -141,26 +252,62 @@ function droneFieldGeo(seed, options = {}) {
 }
 
 function droneLevel(id, name, brief, objectives, options = {}) {
+  const deep = !!options.geo?.deep;
+  const roadPaint = clipTracks(options.roadPaint || (deep ? DEEP_ROADPAINT : BASE_ROADPAINT));
+  const railLines = deep ? [...TRAINING_RAIL, ...DEEP_RAIL] : TRAINING_RAIL;
+  const hamletPlan = hamletPlanFor(roadPaint, railLines, deep);
+  const treePlan = treePlanFor(roadPaint, railLines, deep, hamletPlan);
+  const buildings = hamletLayout(hamletPlan, id);
+  const resolvedObjectives = objectives.map(phaseDef => ({
+    ...phaseDef,
+    steps: (phaseDef.steps || [phaseDef]).map(step => ({
+      ...step,
+      vehicles: (step.vehicles || []).map(vehicle => {
+        if (!vehicle.shelter) return vehicle;
+        const requested = vehicle.shelter;
+        const matches = buildings.filter(building =>
+          building.kind === (requested.kind || 'barn')
+          && (!requested.state || building.state === requested.state));
+        const building = matches[requested.index || 0];
+        if (!building) {
+          throw new Error(`Drone level ${id}: no ${requested.state || ''} ${requested.kind || 'barn'} for ${vehicle.label}`);
+        }
+        const u = requested.u || 0, v = requested.v || 0;
+        const cu = Math.cos(building.yaw), su = Math.sin(building.yaw);
+        const { positions: _positions, shelter: _shelter, ...rest } = vehicle;
+        return {
+          ...rest,
+          pos: [building.x + u * cu - v * su, 0, building.z + u * su + v * cu],
+          yaw: building.yaw + (requested.yawOffset || 0),
+          shelter: {
+            kind: building.kind, state: building.state,
+            entry: requested.entry || (building.state === 'gutted' ? 'roof opening' : 'doorway'),
+            x: building.x, z: building.z, yaw: building.yaw,
+            L: building.L, D: building.D, H: building.H,
+            doorU: building.doorU, doorW: building.doorW, doorH: building.doorH,
+          },
+        };
+      }),
+    })),
+  }));
   return {
     id, name, brief,
     curriculum: options.curriculum || [],
     targetDuration: options.targetDuration || [600, 720],
-    roadPaint: options.roadPaint || [
-      { points: [[-6, 500], [-6, -650]], width: 8 },
-      { points: [[-270, 330], [270, 330]], width: 8 },
-      { points: [[-270, 150], [270, 150]], width: 8 },
-    ],
+    roadPaint,
     weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
     lockPlayer: true, cameraFar: 3000,
     sky: options.sky ?? 0x2b2733,
     fog: options.fog || [options.sky ?? 0x35303c, 500, 2600],
     ambient: options.ambient ?? 0.8, sun: options.sun ?? 0.85,
     backdrop: 'rural', terrainDef: DEEP_FENCE_TERRAIN,
-    railLines: options.geo?.deep ? [...TRAINING_RAIL, ...DEEP_RAIL] : TRAINING_RAIL,
+    railLines,
+    treePlan,
+    hamletPlan,
     minimap: options.minimap || trainingMap(),
     start: [0, 0, 462, 0],
-    geo: () => droneFieldGeo(2000 + id * 31, options.geo || {}),
-    doors: [], enemies: [], civilians: [], objectives,
+    geo: () => droneFieldGeo(2000 + id * 31, options.geo || {}, treePlan, id, hamletPlan),
+    doors: [], enemies: [], civilians: [], objectives: resolvedObjectives,
   };
 }
 
@@ -267,7 +414,7 @@ export const DRONE_TRAINING_LEVELS = [
         text: 'REQUIRED: HOVER-DROP TRUCK + DRIFT WAGON. FOUR BOMBS. STRIKE BOTH, THEN RETURN TO LAUNCH.', bombs: 4,
         training: { requireReturn: true, returnRadius: 14 },
         lessons: [
-          lesson('PAYLOAD AND DRIFT', 'A bomb leaves with the aircraft’s movement. Settle for a vertical drop or release early when carrying speed.'),
+          lesson('PAYLOAD AND DRIFT', 'A bomb leaves with the aircraft’s movement. At 80° camera-down, NADIR LOCK appears and WASD becomes horizontal translation, so you can keep watching the target while correcting the release point.'),
           lesson('RANGE CONTROL', 'Both named vehicles are required targets. After each effect, Range Control will name what remains. After the final effect, follow the HOME arrow back inside the blue launch area.', '.fpv-batt'),
         ],
         vehicles: [
@@ -278,17 +425,25 @@ export const DRONE_TRAINING_LEVELS = [
         result: 'PAYLOAD BASICS COMPLETE',
       })]),
       phase('payload-check', 'UNASSISTED MOVING PAYLOAD CHECK', [bomber({
-        text: 'REQUIRED: TWO ROLLING WAGONS + ROAD ESCORT. FIVE BOMBS. STRIKE ALL THREE, THEN RETURN.', bombs: 5,
-        training: { requireReturn: true, returnRadius: 14 },
+        text: 'REQUIRED: SERVICE-ROAD ESCORT + DIESEL LOCOMOTIVE + COUPLED FUEL TANKER. FIVE BOMBS. STRIKE ALL THREE, THEN RETURN TO THE FORWARD LZ—NOT THE OPERATIONS BUILDING.', bombs: 5,
+        launch: [120, 0, 300],
+        training: { requireReturn: true, returnRadius: 14, homeLabel: 'FORWARD LZ' },
         vehicles: [
-          { kind: 'fuelcar', label: 'ROLLING WAGON ONE', health: 220, pos: [245, WAGON_LIFT,80], route: [[245, 80], [245, -420]], speed: 3, loop: true },
-          { kind: 'fuelcar', label: 'ROLLING WAGON TWO', health: 220, pos: [245, WAGON_LIFT,35], route: [[245, 35], [245, -465]], speed: 3, loop: true },
-          { kind: 'technical', label: 'ROAD ESCORT', health: 150, pos: [190, 0, 150], route: [[190, 150], [-170, 150]], speed: 4, loop: true },
+          { kind: 'locomotive', label: 'DIESEL LOCOMOTIVE', health: 220, pos: [245, WAGON_LIFT,80], route: [[245, 80], [245, -420]], speed: 12 / 3.6, loop: true, consistId: 'range-train', stopsConsist: true, stopMessage: 'LOCOMOTIVE DISABLED; CONSIST STOPPED.' },
+          { kind: 'fuelcar', label: 'FUEL TANKER', health: 220, pos: [245, WAGON_LIFT,91], route: [[245, 91], [245, -409]], speed: 12 / 3.6, loop: true, consistId: 'range-train' },
+          { kind: 'technical', label: 'SERVICE-ROAD ESCORT', health: 150, pos: [190, 0, 130], route: [[190, 130], [190, -370]], speed: 4, loop: true },
         ],
-        startMessage: 'RANGE CONTROL — THREE REQUIRED VEHICLES. FIVE BOMBS. EXPECT RETASKING; RETURN AFTER FINAL EFFECT.',
+        startMessage: 'RANGE CONTROL — YOU LAUNCH AND RECOVER AT THE FORWARD LZ: BLUE H-RING, HOT THERMAL BEACON. DO NOT RETURN TO THE OPERATIONS BUILDING. THREE REQUIRED VEHICLES; TRAIN SPEED 12 KM/H. KILLING THE LOCOMOTIVE STOPS THE CONSIST.',
         result: 'HEAVY PAYLOAD CERTIFIED',
       })]),
-    ], { curriculum: ['bomber handling', 'payload drift and economy'], geo: { rail: true } }),
+    ], {
+      curriculum: ['bomber handling', 'payload drift and economy'], geo: { rail: true },
+      roadPaint: [
+        ...BASE_ROADPAINT,
+        { points: [[190, 150], [190, -935]], width: 6 },
+      ],
+      minimap: trainingMap({ roads: [...TRAINING_ROADS, [190, 150, 190, -935]] }),
+    }),
 
   droneLevel(14, 'BAD PICTURE',
     'The feed degrades before the control link does. Maintain orientation, use landmarks and finish the attack without treating every patch of static as a lost aircraft.',
@@ -377,32 +532,33 @@ export const DRONE_TRAINING_LEVELS = [
     ], { curriculum: ['low-level route flying', 'obstacle discipline'], geo: { jammers: [[0, 60], [-170, -80], [120, -270]] } }),
 
   droneLevel(17, 'THE HUNT',
-    'The report is stale and the target is concealed among abandoned vehicles. Search the area, hold the picture long enough to identify and refuse the wrong strike.',
+    'The report is stale and targets are using farm structures for concealment. Search likely hides, hold the picture long enough to identify, enter through a real opening and refuse the wrong strike.',
     [
       phase('hunt-coached', 'COACHED SEARCH AND IDENTIFICATION', [fpv({
-        text: 'FIND THE REAL TRUCK AMONG TWO DECOYS.', airframes: 3,
+        text: 'FIND THE REAL TRUCK INSIDE THE DAMAGED FARM BARN. IDENTIFY IT, CENTER THE DOORWAY AND CARRY THE ATTACK INSIDE.', airframes: 3,
         training: { identifyRange: 55, allowAbort: true },
         lessons: [
           lesson('INTELLIGENCE AGES', 'The red box is where the target was expected, not a live track. Search routes and likely hides.'),
           lesson('POSITIVE IDENTIFICATION', 'Hold the target in view long enough to confirm it. A visually similar vehicle is not permission to strike.'),
+          lesson('ENTRY IS A FLIGHT GATE', 'The barn walls and roof are solid. Reduce speed before the threshold, center the open doorway and finish identification through the opening. Hitting the wall is a failed attack, not an indoor strike.'),
         ],
         vehicles: [
-          { kind: 'technical', label: 'REPORTED SUPPLY TRUCK', targetId: 'hunt-primary', health: 160, requiresIdentification: true, positions: [[-170, 0, 150], [120, 0, 25], [-80, 0, -120]], pos: [-170, 0, 150], yaw: 0.5 },
+          { kind: 'technical', label: 'BARN-HIDDEN SUPPLY TRUCK', targetId: 'hunt-primary', health: 160, requiresIdentification: true, shelter: { kind: 'barn', state: 'damaged', entry: 'doorway' } },
           { kind: 'technical', label: 'DECOY TRUCK', health: 80, decoy: true, pos: [80, 0, 150], yaw: 2.2 },
           { kind: 'default', label: 'ABANDONED APC', health: 100, decoy: true, pos: [-130, 0, 20], yaw: 4.1 },
         ],
-        startMessage: 'KAVUN — THREE SHAPES, ONE VALID TARGET. MAKE THE CAMERA EARN THE WARHEAD.',
+        startMessage: 'KAVUN — THE VALID TRUCK IS USING A DAMAGED BARN. CONFIRM THROUGH THE OPEN DOOR, THEN FLY THE AIRFRAME INSIDE.',
         result: 'TARGET IDENTIFIED AND ENGAGED',
       })]),
       phase('hunt-check', 'UNASSISTED DISPLACED-TARGET CHECK', [fpv({
-        text: 'STALE REPORT — LOCATE AND IDENTIFY THE EW VEHICLE.', airframes: 3,
+        text: 'STALE REPORT — LOCATE THE EW VEHICLE INSIDE A ROOFLESS BARN, IDENTIFY IT AND ATTACK THROUGH THE OPEN SHELL.', airframes: 3,
         training: { identifyRange: 52, allowAbort: true },
         vehicles: [
-          { kind: 'ew', label: 'MOBILE EW VEHICLE', health: 180, requiresIdentification: true, positions: [[160, 0, -120], [-180, 0, 45], [40, 0, -260]], pos: [160, 0, -120], yaw: 1.6 },
+          { kind: 'ew', label: 'ROOFLESS-BARN EW VEHICLE', health: 180, requiresIdentification: true, shelter: { kind: 'barn', state: 'gutted', entry: 'roof opening' } },
           { kind: 'ew', label: 'COLD EW DECOY', health: 90, decoy: true, pos: [-60, 0, -115], yaw: 0.2 },
           { kind: 'technical', label: 'PROTECTED FARM TRUCK', hostile: false, protected: true, pos: [125, 0, 65], yaw: 3.3 },
         ],
-        startMessage: 'KAVUN — THE REPORT IS OLD. FIND, IDENTIFY, THEN DECIDE.',
+        startMessage: 'KAVUN — THE REPORT SAYS A ROOFLESS FARM STRUCTURE. FIND THE OPEN SHELL, CONFIRM WHAT IS INSIDE, THEN CHOOSE YOUR ENTRY.',
         result: 'SEARCH AND IDENTIFICATION CERTIFIED',
       })]),
     ], { curriculum: ['search under stale intelligence', 'positive identification and abort'] }),
@@ -527,15 +683,11 @@ export const DRONE_TRAINING_LEVELS = [
       curriculum: ['full mission cycle', 'BDA and tactical judgment'],
       sky: 0x10151c, fog: [0x151b22, 420, 2850], ambient: 0.48, sun: 0.22,
       geo: { deep: true, rail: true, jammers: [[-11, -524], [62, -880]] },
-      roadPaint: [
-        { points: [[-6, 500], [-6, -1460]], width: 8 },
-        { points: [[-180, -700], [140, -700]], width: 9 },
-        { points: [[150, -700], [150, -1360]], width: 9 },
-      ],
       minimap: {
         bounds: [-962, 505, 962, -1420], opArea: [-360, 500, 360, -1416],
-        roads: [[-6, 500, -6, -1460], [-180, -700, 140, -700], [150, -700, 150, -1360]],
-        rail: [[330, -235, 330, -1420]],
+        roads: [[-6, 505, -6, -1420], [-810, -700, 810, -700], [150, -700, 150, -1420],
+          [-720, 330, 720, 330], [-720, 150, 720, 150], [-720, -120, 720, -120]],
+        rail: [[245, 505, 245, -1420], [330, -250, 330, -1420]],
         woods: [
           [-220, 428, -18, 430], [18, 430, 220, 428],
           [-330, -382, -70, -378], [60, -378, 330, -384],
