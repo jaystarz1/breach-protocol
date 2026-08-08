@@ -506,22 +506,30 @@ export const DRONE_TRAINING_LEVELS = [
     ], { curriculum: ['jamming', 'terrain masking'], geo: { jammers: [[0, 60], [-85, -110]] } }),
 
   droneLevel(16, 'NAP OF THE EARTH',
-    'Gullies, windbreaks and a sunken road become the flight corridor. Stay masked without trading electronic exposure for a collision.',
+    'Fly the same low terrain first on fibre, then on radio. Manage the paid-out line through broad terrain corridors before solving the familiar EW problem without guidance.',
     [
-      phase('noe-coached', 'FLAGGED LOW-LEVEL RUN', [fpv({
-        text: 'FOLLOW THE GULLY AND KEEP BELOW THE PROFILE LIMIT.', airframes: 4,
-        training: { maxAgl: 18 },
-        lessons: [
-          lesson('NAP OF THE EARTH', 'Fly below the masking line, but leave enough room to turn. Low is a tactical profile, not a contest to touch the ground.', '.fpv-map'),
-          lesson('SPEED DISCIPLINE', 'Use speed on open ground and take it out before timber, wires and blind bends.'),
-        ],
+      phase('noe-coached', 'FIBRE-GUIDED TERRAIN RUN', [fpv({
+        text: 'KEEP THE PAID-OUT LINE IN THE CYAN CORRIDOR. GIVE RED SNAG ZONES WIDE, OPEN TURNS.',
+        airframes: 4, controlLink: 'fiber',
+        training: {
+          maxAgl: 18, fiberMaxLength: 520, fiberCorridor: 62,
+          fiberRoute: [[6, 448], [48, 390], [58, 330], [34, 265], [18, 185]],
+          fiberHazards: [
+            { x: 104, z: 375, r: 25 },
+            { x: -18, z: 304, r: 24 },
+            { x: 78, z: 220, r: 24 },
+          ],
+        },
+        minimap: trainingMap({
+          route: [[6, 448], [48, 390], [58, 330], [34, 265], [18, 185]],
+        }),
         jammers: [{ x: 0, z: 60, r: 240, estimated: true }],
         vehicles: [
           { kind: 'technical', label: 'GULLY TRUCK', health: 150, pos: [60, 0, 365], yaw: 1.2 },
           { kind: 'default', label: 'GULLY APC', health: 220, pos: [40, 0, 260], yaw: 2.6 },
         ],
-        startMessage: 'KAVUN — BELOW THE RIM, ABOVE THE TREES. FLY THE PROFILE.',
-        result: 'LOW-LEVEL PROFILE FLOWN',
+        startMessage: 'KAVUN — CONNECTOR CHECK COMPLETE. FIBRE IS IMMUNE TO THE MAST; THE TERRAIN CAN STILL TAKE THE LINE. CYAN ROUTE, RED NO-GO.',
+        result: 'FIBRE TERRAIN PROFILE FLOWN',
       })]),
       phase('noe-check', 'UNASSISTED ROAD AND WINDBREAK RUN', [fpv({
         text: 'MOVERS IN THE LANES — NO TRAINING FLAGS.', airframes: 4,
@@ -531,10 +539,10 @@ export const DRONE_TRAINING_LEVELS = [
           { kind: 'technical', label: 'LANE TRUCK', health: 150, pos: [-230, 0, 285], route: [[-230, 285], [-80, 285], [-6, 150], [190, 150]], speed: 4.7, loop: true },
           { kind: 'default', label: 'ROAD APC', health: 220, pos: [-6, 0, 40], route: [[-6, 40], [-6, -120], [180, -120]], speed: 4.2, loop: true },
         ],
-        startMessage: 'KAVUN — THE GROUND IS THE INSTRUCTOR NOW. STAY MASKED AND STAY ALIVE.',
+        startMessage: 'KAVUN — RADIO CONTROL. NO CABLE AND NO TRAINING CORRIDOR; NOW THE MAST CAN TAKE THE LINK.',
         result: 'NAP-OF-THE-EARTH CERTIFIED',
       })]),
-    ], { curriculum: ['low-level route flying', 'obstacle discipline'], geo: { jammers: [[0, 60], [-170, -80], [120, -270]] } }),
+    ], { curriculum: ['fibre route management', 'radio terrain masking'], geo: { jammers: [[0, 60], [-170, -80], [120, -270]] } }),
 
   droneLevel(17, 'THE HUNT',
     'The report is stale and targets are using farm structures for concealment. Search likely hides, hold the picture long enough to identify, enter through a real opening and refuse the wrong strike.',

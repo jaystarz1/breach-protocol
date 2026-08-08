@@ -140,6 +140,11 @@ def main():
             s.type === 'drone' && (s.lessons?.length || 0) > 0),
           unassisted: level.objectives.flatMap(p => p.steps || [p]).some(s =>
             s.type === 'drone' && (s.lessons?.length || 0) === 0),
+          controlLinks: level.objectives.flatMap(p => p.steps || [p])
+            .filter(s => s.type === 'drone').map(s => s.controlLink || 'radio'),
+          guided: level.objectives.flatMap(p => p.steps || [p]).some(s =>
+            s.type === 'drone' && ((s.lessons?.length || 0) > 0
+              || (s.training?.fiberRoute?.length || 0) > 1)),
         }))""")
         assert [entry["name"] for entry in catalogue] == EXPECTED, catalogue
         assert [entry["id"] for entry in catalogue] == list(range(11, 21)), catalogue
@@ -148,8 +153,10 @@ def main():
         assert all(entry["concepts"] <= 2 for entry in catalogue), catalogue
         assert all(entry["targetDuration"] == [600, 720] for entry in catalogue), catalogue
         assert all(not entry["oldDrain"] and entry["timedBattery"] for entry in catalogue), catalogue
-        assert all(entry["coached"] and entry["unassisted"] for entry in catalogue), catalogue
+        assert all((entry["coached"] or entry["guided"])
+                   and entry["unassisted"] for entry in catalogue), catalogue
         assert catalogue[1]["droneSteps"] == 10, catalogue
+        assert catalogue[5]["controlLinks"] == ["fiber", "radio"], catalogue[5]
 
         # The operator view is a 4:3 camera, while the map is an explicit simulation aid:
         # it carries assigned-area/search intelligence and never claims a live target track.
@@ -175,6 +182,62 @@ def main():
         assert operator_view["searchMarked"] and operator_view["feed"]["active"], operator_view
         if args.output:
             page.screenshot(path=args.output / "operator-day.png")
+
+        # Fibre coaching happens in flight: the video/control link remains clean under RF
+        # jamming, while the paid-out cable, reserve and marked snag zones carry the lesson.
+        page.evaluate("() => BP.startLevel(16)")
+        page.wait_for_function("() => BP.world?.level?.id === 16 && !!BP.world.drone")
+        fiber = page.evaluate("""() => {
+          const d = BP.world.drone;
+          d.skipLessons?.();
+          d.attemptStateTime = 1;
+          d.updateAttemptState(.1, { firePressed: true });
+          for (const [x, z] of d.training.fiberRoute.slice(1, 4)) {
+            d.pos.set(x, 10, z);
+            d.updateFiberControl(.05);
+          }
+          d.updateFpvOsd(0);
+          return {
+            controlled: d.fiberControlled,
+            lessons: d.definition.lessons?.length || 0,
+            routePoints: d.training.fiberRoute.length,
+            hazards: d.training.fiberHazards.length,
+            payout: d.fiberPayout,
+            cablePoints: d.fiberPoints.length,
+            cableVisible: d.fiberCable.visible,
+            courseVisible: d.fiberCourse.visible,
+            courseMarkers: d.fiberCourse.children.length,
+            osd: d.osd.fiber.textContent,
+          };
+        }""")
+        assert fiber["controlled"] and fiber["lessons"] == 0, fiber
+        assert fiber["routePoints"] >= 5 and fiber["hazards"] >= 3, fiber
+        assert fiber["payout"] > 0 and fiber["cablePoints"] >= 4, fiber
+        assert fiber["cableVisible"] and fiber["courseVisible"], fiber
+        assert fiber["courseMarkers"] >= 18, fiber
+        assert "CTRL FIBRE" in fiber["osd"] and "RES" in fiber["osd"], fiber
+        if args.output:
+            page.screenshot(path=args.output / "fiber-guided-flight.png")
+        immunity = page.evaluate("""() => {
+          const d = BP.world.drone;
+          d.pos.set(0, 10, 60);
+          d.vel.set(0, 0, 0);
+          d.update(.01, {
+            lookDelta: { x: 0, y: 0 }, move: { x: 0, y: 0 },
+            ads: false, crouch: false, firePressed: false, nadePressed: false,
+            breachPressed: false, reloadPressed: false,
+          }, BP.world.solids);
+          return { signal: d.signal, jamFactor: d.jamFactor };
+        }""")
+        assert immunity["signal"] == 1 and immunity["jamFactor"] == 1, immunity
+        fiber_break = page.evaluate("""() => {
+          const d = BP.world.drone;
+          d.fiberPayout = d.training.fiberMaxLength;
+          d.updateFiberControl(.1);
+          return { state: d.attemptState, reason: d.review?.reason || '' };
+        }""")
+        assert fiber_break["state"] == "impact_hold", fiber_break
+        assert "SPOOL EXHAUSTED" in fiber_break["reason"], fiber_break
 
         # A long drone phase can always be bypassed from pause, and a failure in the next
         # phase retries that phase rather than sending the operator back through phase one.

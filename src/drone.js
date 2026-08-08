@@ -757,6 +757,7 @@ export class DroneController {
     // are authored per mission; metersPerUnit converts compressed map units into the real
     // distances the OSD reports, so a 1400-unit leg reads as the ~5 km sortie it represents.
     this.isFpvFamily = this.mode === 'fpv' || this.mode === 'bomber';
+    this.fiberControlled = definition.controlLink === 'fiber';
     this.metersPerUnit = definition.metersPerUnit ?? 1;
     this.airframes = definition.airframes ?? 1;
     this.airframesLost = 0;
@@ -790,6 +791,12 @@ export class DroneController {
     this.failedOut = false;
     this.detonated = false;
     this.training = definition.training || {};
+    this.fiberCourse = null;
+    this.fiberCable = null;
+    this.fiberPoints = [];
+    this.fiberPayout = 0;
+    this.fiberTension = 0;
+    this.fiberWarning = '';
     this.attemptState = this.isFpvFamily ? FPV_ATTEMPT.FLYING : null;
     this.attemptStateTime = 0;
     this.attempts = [];
@@ -937,6 +944,7 @@ export class DroneController {
         this.thermalSignatures.push(signature);
       }
       if (this.training.requireReturn) this.buildLaunchMarker();
+      if (this.fiberControlled) this.buildFiberCourse();
     }
 
     if (this.isFpvFamily) {
@@ -1009,6 +1017,7 @@ export class DroneController {
         <div class="fpv-dist"></div>
         <div class="fpv-batt"></div>
         <div class="fpv-link"></div>
+        <div class="fpv-fiber"></div>
         <div class="fpv-warn"></div>
         <div class="fpv-map-panel">
           <div class="fpv-map-label">MISSION NAV-AID // AO + SEARCH // NOT LIVE TRACK</div>
@@ -1072,6 +1081,7 @@ export class DroneController {
       .fpv-dist{position:absolute;left:50%;top:5%;transform:translateX(-50%);text-align:center;white-space:pre}
       .fpv-batt{position:absolute;left:6%;bottom:7%;white-space:pre;font-size:17px}
       .fpv-link{position:absolute;right:6%;bottom:7%;text-align:right;white-space:pre}
+      .fpv-fiber{position:absolute;left:6%;bottom:calc(7% + 49px);color:#9fe9ff;font-size:11px;white-space:pre}
       .fpv-warn{position:absolute;left:50%;top:63%;transform:translateX(-50%);color:#ffd8b0;font-size:18px;letter-spacing:3px;animation:fpvblink 0.6s steps(2) infinite}
       .fpv-map-panel{position:absolute;right:5.5%;bottom:calc(7% + 82px);padding:5px 5px 4px;border:1px solid rgba(233,239,233,.45);background:rgba(6,8,6,.78);text-shadow:none}
       .fpv-map-label{padding:0 1px 4px;color:#dbe5db;font-size:8px;font-weight:700;letter-spacing:.55px;white-space:nowrap}
@@ -1114,7 +1124,7 @@ export class DroneController {
     this.flightHudElements = [
       '.fpv-noise', '.fpv-tear', '.fpv-tear-secondary', '.fpv-cross', '.fpv-name',
       '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt', '.fpv-link', '.fpv-warn',
-      '.fpv-map-panel', '.fpv-help',
+      '.fpv-fiber', '.fpv-map-panel', '.fpv-help',
     ].map(selector => this.overlay.querySelector(selector)).filter(Boolean);
     this.osd = {
       timer: this.overlay.querySelector('.fpv-timer'),
@@ -1123,6 +1133,7 @@ export class DroneController {
       batt: this.overlay.querySelector('.fpv-batt'),
       link: this.overlay.querySelector('.fpv-link'),
       warn: this.overlay.querySelector('.fpv-warn'),
+      fiber: this.overlay.querySelector('.fpv-fiber'),
       tears: [...this.overlay.querySelectorAll('.fpv-tear')],
     };
     // Analog snow: a tiny noise canvas stretched over the screen, redrawn at television
@@ -1150,7 +1161,7 @@ export class DroneController {
     this.lessonDelay = this.lessonQueue.length ? 1.4 : 0;
     this.lessonCard = this.overlay.querySelector('.fpv-lesson');
     this.lessonDim = ['.fpv-name', '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt',
-      '.fpv-link', '.fpv-map-panel', '.fpv-help']
+      '.fpv-link', '.fpv-fiber', '.fpv-map-panel', '.fpv-help']
       .map(sel => this.overlay.querySelector(sel)).filter(Boolean);
     // The analog cameras strike crews fly are colour-thin and contrast-hot.
     if (this.canvas) {
@@ -1364,6 +1375,155 @@ export class DroneController {
     ctx.fillText('E', W - 8, H / 2 + 3);
     this.mapStatic = stat;
     this.mapCtx = mapCanvas.getContext('2d');
+  }
+
+  buildFiberCourse() {
+    const route = this.training.fiberRoute || [];
+    const hazards = this.training.fiberHazards || [];
+    const root = new THREE.Group();
+    root.name = 'fiber-training-course';
+    const laneMaterial = new THREE.MeshBasicMaterial({
+      color: 0x5ce1ff, transparent: true, opacity: 0.58,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    const hazardMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff4c36, transparent: true, opacity: 0.72,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    // Ground rings keep the player flying through terrain rather than reading another card.
+    // Cyan is the suggested broad corridor; crossed red rings are cable snag/wrap zones.
+    for (let index = 1; index < route.length; index++) {
+      const [ax, az] = route[index - 1], [bx, bz] = route[index];
+      const length = Math.hypot(bx - ax, bz - az);
+      const steps = Math.max(1, Math.ceil(length / 28));
+      for (let step = index === 1 ? 0 : 1; step <= steps; step++) {
+        const t = step / steps;
+        const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+        const y = (droneTerrain ? droneTerrain(x, z) : 0) + 0.22;
+        const ring = new THREE.Mesh(new THREE.RingGeometry(7.4, 8.2, 28), laneMaterial);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(x, y, z);
+        root.add(ring);
+      }
+    }
+    for (const hazard of hazards) {
+      const radius = hazard.r ?? 18;
+      const y = (droneTerrain ? droneTerrain(hazard.x, hazard.z) : 0) + 0.25;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(Math.max(2, radius - 1), radius, 32), hazardMaterial);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(hazard.x, y, hazard.z);
+      root.add(ring);
+      for (const angle of [Math.PI / 4, -Math.PI / 4]) {
+        const bar = new THREE.Mesh(
+          new THREE.BoxGeometry(radius * 1.55, 0.12, 0.7), hazardMaterial);
+        bar.position.set(hazard.x, y + 0.03, hazard.z);
+        bar.rotation.y = angle;
+        root.add(bar);
+      }
+    }
+    this.scene.add(root);
+    this.fiberCourse = root;
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(768 * 3);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setDrawRange(0, 0);
+    const cable = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+      color: 0xf5d98d, transparent: true, opacity: 0.82,
+      depthTest: true, depthWrite: false,
+    }));
+    cable.name = 'fiber-payout-line';
+    cable.frustumCulled = false;
+    this.scene.add(cable);
+    this.fiberCable = cable;
+    this.resetFiberCable();
+  }
+
+  resetFiberCable() {
+    if (!this.fiberControlled) return;
+    const ground = (droneTerrain ? droneTerrain(this.launch.x, this.launch.z) : 0) + 0.2;
+    this.fiberPoints = [new THREE.Vector3(this.launch.x, ground, this.launch.z)];
+    this.fiberPayout = 0;
+    this.fiberTension = 0;
+    this.fiberWarning = 'CYAN CORRIDOR // RED RINGS SNAG OR WRAP THE LINE';
+    this.updateFiberGeometry();
+  }
+
+  updateFiberGeometry() {
+    if (!this.fiberCable) return;
+    const attribute = this.fiberCable.geometry.getAttribute('position');
+    const count = Math.min(this.fiberPoints.length, attribute.count);
+    for (let index = 0; index < count; index++) {
+      const point = this.fiberPoints[index];
+      attribute.setXYZ(index, point.x, point.y, point.z);
+    }
+    attribute.needsUpdate = true;
+    this.fiberCable.geometry.setDrawRange(0, count);
+  }
+
+  pointToFiberSegmentDistance(x, z, a, b) {
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const t = Math.max(0, Math.min(1,
+      ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1)));
+    return Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t));
+  }
+
+  fiberRouteDistance(x, z) {
+    const route = this.training.fiberRoute || [];
+    let nearest = Infinity;
+    for (let index = 1; index < route.length; index++) {
+      const a = { x: route[index - 1][0], z: route[index - 1][1] };
+      const b = { x: route[index][0], z: route[index][1] };
+      nearest = Math.min(nearest, this.pointToFiberSegmentDistance(x, z, a, b));
+    }
+    return nearest;
+  }
+
+  updateFiberControl(dt) {
+    if (!this.fiberControlled || !this.fiberCable) return false;
+    const last = this.fiberPoints[this.fiberPoints.length - 1];
+    const horizontal = Math.hypot(this.pos.x - last.x, this.pos.z - last.z);
+    if (horizontal >= 5.5 && this.fiberPoints.length < 768) {
+      const next = new THREE.Vector3(
+        this.pos.x,
+        (droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : 0) + 0.2,
+        this.pos.z,
+      );
+      this.fiberPayout += last.distanceTo(next);
+      let snagged = false;
+      for (const hazard of this.training.fiberHazards || []) {
+        if (this.pointToFiberSegmentDistance(hazard.x, hazard.z, last, next)
+          < (hazard.r ?? 18)) snagged = true;
+      }
+      if (snagged) this.fiberTension += dt * 2.8 + 0.32;
+      if (this.fiberPoints.length > 2) {
+        const previous = this.fiberPoints[this.fiberPoints.length - 2];
+        const into = last.clone().sub(previous).setY(0).normalize();
+        const out = next.clone().sub(last).setY(0).normalize();
+        const turn = Math.acos(Math.max(-1, Math.min(1, into.dot(out)))) * 180 / Math.PI;
+        if (turn > 105) this.fiberTension += (turn - 105) / 110;
+      }
+      this.fiberPoints.push(next);
+      this.updateFiberGeometry();
+    }
+    this.fiberTension = Math.max(0, this.fiberTension - dt * 0.07);
+    const maxLength = this.training.fiberMaxLength ?? 650;
+    const reserve = Math.max(0, maxLength - this.fiberPayout);
+    const offRoute = this.fiberRouteDistance(this.pos.x, this.pos.z);
+    this.fiberWarning = this.fiberTension > 0.68
+      ? 'FIBRE TENSION — WIDEN TURN / CLEAR RED'
+      : reserve < maxLength * 0.18
+        ? 'FIBRE RESERVE LOW — COMMIT OR ABORT'
+        : offRoute > (this.training.fiberCorridor ?? 62)
+          ? 'OFF ROUTE — CHECK TERRAIN / CABLE'
+          : '';
+    if (reserve <= 0 || this.fiberTension >= 1) {
+      this.loseAirframe(reserve <= 0
+        ? 'FIBRE SPOOL EXHAUSTED' : 'FIBRE BROKEN — LINE WRAPPED OR SNAGGED');
+      return true;
+    }
+    return false;
   }
 
   buildLaunchMarker() {
@@ -2016,6 +2176,7 @@ export class DroneController {
     this.armTimer = 1.2;
     this.camera.position.copy(this.pos);
     this.camera.rotation.set(this.pitch, this.yaw, 0);
+    this.resetFiberCable();
     this.resetAttemptTelemetry();
     this.debriefPanel.style.display = 'none';
     for (const element of this.flightHudElements) element.style.display = '';
@@ -2175,6 +2336,7 @@ export class DroneController {
     // Ceiling rides the ground under the aircraft: service height is above terrain, so a
     // rise does not silently eat the drone's working band.
     this.pos.y = Math.max(floor, Math.min(this.ceiling + Math.max(0, terrainY), this.pos.y));
+    if (this.updateFiberControl(dt)) return;
 
     const fromLaunch = this.pos.distanceTo(this.launch);
     const base = Math.max(0, Math.min(1, 1 - fromLaunch / this.maxRange));
@@ -2208,7 +2370,11 @@ export class DroneController {
         this.jamFactor = Math.min(this.jamFactor, factor);
       }
     }
-    this.signal = base * this.jamFactor;
+    // Fibre carries video and control over the paid-out line. RF jammers therefore do not
+    // soften the sticks or picture; cable route, reserve and physical integrity replace
+    // radio link quality as the failure problem.
+    if (this.fiberControlled) this.jamFactor = 1;
+    this.signal = this.fiberControlled ? 1 : base * this.jamFactor;
     if (this.definition.videoDegrade) {
       const degrade = this.definition.videoDegrade;
       const cycle = Math.max(1, degrade.cycle ?? 24);
@@ -2632,10 +2798,21 @@ export class DroneController {
     const requiredTargets = this.combatVehicles.filter(vehicle =>
       !vehicle.decoy && !vehicle.protected && !vehicle.optional);
     const requiredLive = requiredTargets.filter(vehicle => !vehicle.dead).length;
-    osd.link.textContent = `LQ ${lq}\nRSSI ${rssi}DBM`
-      + (this.mode === 'bomber'
-        ? `\nBOMBS ${this.bombs}/${this.bombsTotal}  TGT ${requiredLive}/${requiredTargets.length}\n${this.thermalEnabled ? 'THERM' : 'EO'}`
-        : '');
+    osd.link.textContent = this.fiberControlled
+      ? 'VIDEO OPTICAL\nCTRL OPTICAL'
+      : `LQ ${lq}\nRSSI ${rssi}DBM`
+        + (this.mode === 'bomber'
+          ? `\nBOMBS ${this.bombs}/${this.bombsTotal}  TGT ${requiredLive}/${requiredTargets.length}\n${this.thermalEnabled ? 'THERM' : 'EO'}`
+          : '');
+    if (osd.fiber) {
+      if (this.fiberControlled) {
+        const max = this.training.fiberMaxLength ?? 650;
+        const payout = Math.round(this.fiberPayout * this.metersPerUnit);
+        const reserve = Math.round(Math.max(0, max - this.fiberPayout) * this.metersPerUnit);
+        osd.fiber.textContent = `CTRL FIBRE  OUT ${payout}M  RES ${reserve}M\nTENSION ${Math.round(this.fiberTension * 100)}%`;
+        osd.fiber.style.display = '';
+      } else osd.fiber.style.display = 'none';
+    }
     const meters = this.pos.distanceTo(this.launch) * this.metersPerUnit;
     const yawHome = Math.atan2(-(this.launch.x - this.pos.x), -(this.launch.z - this.pos.z));
     let rel = yawHome - this.yaw;
@@ -2672,6 +2849,7 @@ export class DroneController {
       ctx.fill();
     }
     osd.warn.textContent = this.frozen ? ''
+      : this.fiberWarning ? this.fiberWarning
       : this.egressRequired ? `RTB — ${this.training.homeLabel || 'LZ'} // BLUE RING / HOT BEACON`
       : this.linkLowTimer > 0.3 ? 'SIGNAL CRITICAL — TURN OUT'
         : signal < 0.3 ? 'JAMMING — BREAK LINE OF SIGHT'
@@ -3283,6 +3461,16 @@ export class DroneController {
       this.scene.remove(this.launchMarker);
       disposeObject(this.launchMarker);
       this.launchMarker = null;
+    }
+    if (this.fiberCourse) {
+      this.scene.remove(this.fiberCourse);
+      disposeObject(this.fiberCourse);
+      this.fiberCourse = null;
+    }
+    if (this.fiberCable) {
+      this.scene.remove(this.fiberCable);
+      disposeObject(this.fiberCable);
+      this.fiberCable = null;
     }
     this.munitions.length = 0;
     this.effects.length = 0;
