@@ -158,6 +158,138 @@ def main():
         assert catalogue[1]["droneSteps"] == 10, catalogue
         assert catalogue[5]["controlLinks"] == ["fiber", "radio"], catalogue[5]
 
+        moving_profiles = page.evaluate("""() => {
+          const level = BP.LEVELS.find(entry => entry.id === 12);
+          return level.objectives.map((objective, index) => {
+            const step = (objective.steps || [objective]).find(entry => entry.type === 'drone');
+            const assigned = step.vehicles.find(vehicle =>
+              !vehicle.optional && !vehicle.decoy && !vehicle.protected);
+            return {
+              run: index + 1, title: objective.text, kind: assigned.kind,
+              label: assigned.label, team: assigned.team || 0,
+              speed: assigned.speed || 0,
+              routePoints: assigned.route?.length || 0,
+              loop: assigned.loop, variants: assigned.variants?.length || 0,
+              lessons: step.lessons?.length || 0,
+              evasion: assigned.evasion?.style || null,
+              shelter: assigned.shelter?.kind || null,
+              supportVehicles: step.vehicles.filter(vehicle =>
+                vehicle.optional && vehicle.kind !== 'infantry').length,
+            };
+          });
+        }""")
+        runners = [profile for profile in moving_profiles if profile["kind"] == "infantry"]
+        assert [profile["run"] for profile in runners] == [6, 7, 9], moving_profiles
+        assert all(profile["team"] == 1 and profile["routePoints"] >= 5
+                   and profile["loop"] and profile["variants"] == 3
+                   for profile in runners), runners
+        assert all(profile["speed"] >= 8 and profile["evasion"] for profile in runners), runners
+        assert runners[1]["shelter"] == "barn" and runners[1]["supportVehicles"] == 1, runners
+        assert runners[2]["shelter"] == "barn", runners
+        assert all("RUNNER" in profile["label"] for profile in runners), runners
+        assert runners[0]["lessons"] == 1, runners
+
+        # The player-facing briefing exposes the same direct phase start that retries and
+        # QA use. Selecting the sixth card must boot the sixth run, not merely relabel DEPLOY.
+        page.locator("#menu-levels").click()
+        page.locator("#level-list .menu-btn", has_text="MOVING RANGE").click()
+        run_picker = page.evaluate("""() => ({
+          visible: !document.querySelector('#brief-run-picker').hidden,
+          count: document.querySelectorAll('#brief-run-grid .run-pill').length,
+          labels: [...document.querySelectorAll('#brief-run-grid .run-meta')]
+            .map(node => node.textContent),
+        })""")
+        assert run_picker["visible"] and run_picker["count"] == 10, run_picker
+        assert "PERSON · WOODED COVER" in run_picker["labels"], run_picker
+        page.locator("#brief-run-grid .run-pill").nth(5).dispatch_event("touchend")
+        assert "RUN 06" in page.locator("#brief-go").inner_text()
+        page.locator("#brief-go").click()
+        page.wait_for_function("""() => BP.world?.level?.id === 12
+          && BP.world?.objectiveIdx === 5 && !!BP.world.drone""")
+        accelerate_review(page)
+        runner_runtime = page.evaluate("""() => {
+          const d = BP.world.drone;
+          d.skipLessons?.();
+          const runner = d.combatVehicles.find(vehicle =>
+            !vehicle.optional && vehicle.kind === 'infantry');
+          const before = runner.pos.clone();
+          runner.update(.05, BP.world.solids);
+          runner.update(1, BP.world.solids);
+          const threat = runner.pos.clone(); threat.x += 4;
+          const headings = [];
+          for (let index = 0; index < 80; index++) {
+            runner.update(.1, BP.world.solids, threat);
+            if (runner.velocity.lengthSq() > .01) headings.push(
+              Math.atan2(runner.velocity.x, runner.velocity.z));
+          }
+          let hardTurns = 0;
+          for (let index = 1; index < headings.length; index++) {
+            const delta = Math.atan2(Math.sin(headings[index] - headings[index - 1]),
+              Math.cos(headings[index] - headings[index - 1]));
+            if (Math.abs(delta) > Math.PI / 3) hardTurns++;
+          }
+          const figure = runner.mesh.userData.crew?.[0];
+          return {
+            crew: runner.mesh.userData.crew?.length || 0,
+            moved: runner.pos.distanceTo(before),
+            physicalSpeed: runner.speed * 3.5,
+            decisions: runner.evasionDecisions,
+            hardTurns,
+            routePoints: runner.route.length,
+            thermalFigures: d.thermalSignatures.filter(signature =>
+              !!signature.userData.figure).length,
+            action: figure?.userData.rig?.currentAction?.getClip?.().name || '',
+          };
+        }""")
+        assert runner_runtime["crew"] == 1 and runner_runtime["routePoints"] >= 5, runner_runtime
+        assert runner_runtime["moved"] > 1 and runner_runtime["thermalFigures"] >= 1, runner_runtime
+        assert runner_runtime["physicalSpeed"] >= 8, runner_runtime
+        assert runner_runtime["decisions"] >= 5 and runner_runtime["hardTurns"] >= 2, runner_runtime
+        assert any(word in runner_runtime["action"].lower()
+                   for word in ("run", "walk")), runner_runtime
+
+        page.evaluate("() => BP.startLevelAt(12, 6)")
+        page.wait_for_function("""() => BP.world?.level?.id === 12
+          && BP.world?.objectiveIdx === 6 && !!BP.world.drone""")
+        building_runner = page.evaluate("""() => {
+          const d = BP.world.drone;
+          const runner = d.combatVehicles.find(vehicle =>
+            !vehicle.optional && vehicle.kind === 'infantry');
+          const truck = d.combatVehicles.find(vehicle => vehicle.label === 'PARKED FARM TRUCK');
+          const s = runner.shelter;
+          const local = point => {
+            const dx = point.x - s.x, dz = point.z - s.z;
+            return { u: dx * Math.cos(s.yaw) + dz * Math.sin(s.yaw),
+              v: -dx * Math.sin(s.yaw) + dz * Math.cos(s.yaw) };
+          };
+          const inside = point => {
+            const p = local(point);
+            return Math.abs(p.u) < s.L / 2 - .15 && Math.abs(p.v) < s.D / 2 - .15;
+          };
+          const startedInside = inside(runner.pos);
+          const insideNodes = runner.route.filter(inside).length;
+          const outsideNodes = runner.route.length - insideNodes;
+          let wentOutside = false, returnedInside = false;
+          for (let index = 0; index < 500; index++) {
+            runner.update(.16, BP.world.solids);
+            if (!inside(runner.pos)) wentOutside = true;
+            if (wentOutside && inside(runner.pos)) { returnedInside = true; break; }
+          }
+          const truckOrbitDistance = Math.min(...runner.route.map(point =>
+            Math.hypot(point.x - truck.pos.x, point.z - truck.pos.z)));
+          return {
+            startedInside, insideNodes, outsideNodes, wentOutside, returnedInside,
+            routePoints: runner.route.length, truckOrbitDistance,
+            truckStatic: !truck.route.length && truck.hostile === false,
+            shelterState: s.state,
+          };
+        }""")
+        assert building_runner["startedInside"], building_runner
+        assert building_runner["insideNodes"] >= 3 and building_runner["outsideNodes"] >= 8, building_runner
+        assert building_runner["wentOutside"] and building_runner["returnedInside"], building_runner
+        assert building_runner["routePoints"] >= 12 and building_runner["truckStatic"], building_runner
+        assert building_runner["truckOrbitDistance"] < 3.5, building_runner
+
         # The operator view fills the display as a curved optic. The map is deliberately a
         # sibling rather than a child of that optic: an external simulation aid, not video.
         page.evaluate("() => BP.startLevel(11)")
@@ -168,6 +300,21 @@ def main():
           d.attemptStateTime = 1;
           d.updateAttemptState(.1, { firePressed: true });
           d.updateFpvOsd(0);
+          const thermalBefore = d.thermalEnabled;
+          const eoDrain = d.currentBatteryDrainRate();
+          d.updateThermalBurst(0, { nvgPressed: true });
+          d.updateThermalSignatures();
+          d.updateFpvOsd(0);
+          const thermalOn = {
+            enabled: d.thermalEnabled,
+            visible: d.thermalSignatures.filter(signature => signature.visible).length,
+            filter: d.canvas.style.filter,
+            osd: d.osd.link.textContent,
+            drain: d.currentBatteryDrainRate(),
+            multiplier: d.thermalBatteryMultiplier,
+          };
+          d.updateThermalBurst(0, { nvgPressed: true });
+          d.updateThermalSignatures();
           const optic = document.querySelector('.fpv-optic').getBoundingClientRect();
           const mapPanel = document.querySelector('.fpv-map-panel');
           const navLabel = document.querySelector('.fpv-map-label')?.textContent || '';
@@ -180,6 +327,14 @@ def main():
             whiskers: document.querySelectorAll('.fpv-whiskers path').length,
             navLabel,
             searchMarked: !!d.mapStatic,
+            thermalPersistent: d.thermalPersistent,
+            thermalBefore,
+            eoDrain,
+            thermalOn,
+            thermalOff: !d.thermalEnabled
+              && d.thermalSignatures.every(signature => !signature.visible),
+            thermalHelp: d.help.textContent,
+            cameraVibration: d.cameraVibration,
             feed: d.feedVisualState(),
           };
         }""")
@@ -189,6 +344,15 @@ def main():
         assert operator_view["whiskers"] == 4, operator_view
         assert "NAV-AID" in operator_view["navLabel"] and "NOT CAMERA" in operator_view["navLabel"], operator_view
         assert operator_view["searchMarked"] and operator_view["feed"]["active"], operator_view
+        assert operator_view["thermalPersistent"] and not operator_view["thermalBefore"], operator_view
+        assert operator_view["thermalOn"]["enabled"] and operator_view["thermalOn"]["visible"] > 0, operator_view
+        assert "grayscale" in operator_view["thermalOn"]["filter"], operator_view
+        assert "SENSOR THERMAL" in operator_view["thermalOn"]["osd"], operator_view
+        assert "LOAD +22%" in operator_view["thermalOn"]["osd"], operator_view
+        assert 1.21 < operator_view["thermalOn"]["multiplier"] < 1.23, operator_view
+        assert abs(operator_view["thermalOn"]["drain"] / operator_view["eoDrain"] - 1.22) < 0.001, operator_view
+        assert operator_view["thermalOff"] and "N EO/THERMAL" in operator_view["thermalHelp"], operator_view
+        assert abs(operator_view["cameraVibration"] - 0.00152) < 0.000001, operator_view
         if args.output:
             page.screenshot(path=args.output / "operator-day.png")
 
@@ -450,6 +614,65 @@ def main():
         assert repeat_after["objective"] == repeat_before["objective"] == 0, (repeat_before, repeat_after)
         assert repeat_after["fresh"] and repeat_after["alive"], repeat_after
         assert (repeat_after["x"], repeat_after["z"]) != (repeat_before["x"], repeat_before["z"]), (repeat_before, repeat_after)
+
+        # Trench teams are targets of opportunity: they score a kill and expend the FPV,
+        # but the assigned moving vehicle remains alive and the phase cannot advance.
+        page.evaluate("() => BP.startLevel(12)")
+        page.wait_for_function("() => BP.world?.level?.id === 12 && !!BP.world.drone")
+        accelerate_review(page)
+        opportunity = page.evaluate("""() => {
+          const d = BP.world.drone;
+          const target = d.combatVehicles.find(v => v.optional && v.kind === 'infantry');
+          const required = d.combatVehicles.find(v => !v.optional && !v.decoy && !v.protected);
+          const kills = BP.world.stats.kills;
+          d.fpvDetonate(target.pos.clone());
+          return {
+            optionalCount: d.combatVehicles.filter(v => v.optional && v.kind === 'infantry').length,
+            targetDead: target.dead, requiredAlive: !required.dead,
+            killAdded: BP.world.stats.kills - kills,
+            pendingComplete: d.pendingMissionComplete,
+            objective: BP.world.objectiveIdx,
+            result: d.review.reason,
+          };
+        }""")
+        assert opportunity["optionalCount"] >= 2 and opportunity["targetDead"], opportunity
+        assert opportunity["killAdded"] == 1 and opportunity["requiredAlive"], opportunity
+        assert not opportunity["pendingComplete"] and opportunity["objective"] == 0, opportunity
+        assert "TARGET OF OPPORTUNITY" in opportunity["result"], opportunity
+
+        # Once an aircraft has left the launch ring, returning with the task still live is
+        # an immediate neutral battery swap: no attempt, pass or failure is recorded, and
+        # the moving target is recreated at the beginning of a fresh presentation.
+        page.evaluate("() => BP.startLevel(12)")
+        page.wait_for_function("() => BP.world?.level?.id === 12 && !!BP.world.drone")
+        accelerate_review(page)
+        battery_change = page.evaluate("""() => {
+          const d = BP.world.drone;
+          const required = d.combatVehicles.find(v => !v.optional && !v.decoy && !v.protected);
+          const kills = BP.world.stats.kills;
+          const objective = BP.world.objectiveIdx;
+          const attempts = d.attempts.length;
+          d.pos.copy(d.launch); d.pos.x += (d.training.returnRadius ?? 14) * 2;
+          d.updateFpvFamily(.1, { firePressed: false, nadePressed: false }, BP.world.solids);
+          d.battery = 7;
+          d.pos.copy(d.launch);
+          d.updateFpvFamily(.1, { firePressed: false, nadePressed: false }, BP.world.solids);
+          const freshRequired = d.combatVehicles.find(v => !v.optional && !v.decoy && !v.protected);
+          return {
+            state: d.attemptState, battery: d.battery,
+            freshTarget: freshRequired !== required, targetAlive: !freshRequired.dead,
+            attemptsAdded: d.attempts.length - attempts,
+            killsAdded: BP.world.stats.kills - kills,
+            objectiveStayed: BP.world.objectiveIdx === objective,
+            complete: d.complete, failed: d.failedOut,
+            title: d.readyPanel.querySelector('.fpv-ready-title').textContent,
+          };
+        }""")
+        assert battery_change["state"] == "ready" and battery_change["battery"] == 100, battery_change
+        assert battery_change["freshTarget"] and battery_change["targetAlive"], battery_change
+        assert battery_change["attemptsAdded"] == 0 and battery_change["killsAdded"] == 0, battery_change
+        assert battery_change["objectiveStayed"] and not battery_change["complete"] and not battery_change["failed"], battery_change
+        assert "FULL BATTERY" in battery_change["title"], battery_change
 
         # Heavy Hands regression: exhausting the reusable Heron's payload with targets still
         # alive must offer a fresh run, restore bombs and avoid an immediate debrief loop.

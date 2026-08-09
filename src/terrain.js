@@ -316,6 +316,48 @@ export function carveRailGrade(def, runs) {
   }
 }
 
+// Field fortifications cut into the DEM the way the railway was: permanently, at module
+// load, so every sampler consumer agrees on the ground. A 10m cell cannot represent a
+// 1.5m-wide slot, so the carve digs the broad excavation depression a trench line leaves
+// in the land (spoil working, collapsed edges); the timber-and-spoil works the level
+// drapes on top supply the narrow full profile. Corner nodes shared by two segments of a
+// zigzag trace take the strongest single weight, never a double dip.
+export function carveTrenchLine(def, traces) {
+  const grid = gridOf(def);
+  const { x0, z0, cell, nx, nz } = def;
+  for (const trace of traces) {
+    const depth = trace.depth ?? 0.85;
+    const HALF = trace.half ?? 1.6;
+    const BLEND = trace.blend ?? 8;
+    const reach = HALF + BLEND;
+    const pts = trace.points;
+    const weights = new Map();
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s], [bx, bz] = pts[s + 1];
+      const abx = bx - ax, abz = bz - az;
+      const ab2 = abx * abx + abz * abz || 1;
+      const ix0 = Math.max(0, Math.floor((Math.min(ax, bx) - reach - x0) / cell));
+      const ix1 = Math.min(nx - 1, Math.ceil((Math.max(ax, bx) + reach - x0) / cell));
+      const iz0 = Math.max(0, Math.floor((z0 - Math.max(az, bz) - reach) / cell));
+      const iz1 = Math.min(nz - 1, Math.ceil((z0 - Math.min(az, bz) + reach) / cell));
+      for (let iz = iz0; iz <= iz1; iz++) {
+        const wz = z0 - iz * cell;
+        for (let ix = ix0; ix <= ix1; ix++) {
+          const wx = x0 + ix * cell;
+          const t = Math.min(1, Math.max(0, ((wx - ax) * abx + (wz - az) * abz) / ab2));
+          const d = Math.hypot(wx - (ax + abx * t), wz - (az + abz * t));
+          if (d >= reach) continue;
+          const u = Math.max(0, (d - HALF) / BLEND);
+          const w = 1 - u * u * (3 - 2 * u);
+          const i = iz * nx + ix;
+          weights.set(i, Math.max(weights.get(i) || 0, w));
+        }
+      }
+    }
+    for (const [i, w] of weights) grid[i] -= depth * w;
+  }
+}
+
 // Track furniture heights, shared with the level authors: a wagon's wheels touch the
 // railhead when its authored y offset is RAIL_TOP minus the wheel-bottom height.
 export const RAIL_TOP = 0.05 + 0.3 + 0.13 + 0.17;   // lift + ballast + tie + rail

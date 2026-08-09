@@ -74,15 +74,30 @@ const DRONE_TRACER_MAT = new THREE.LineBasicMaterial({
 // the drone-war record: rifle fire almost never downs an FPV (which is why both sides
 // issue shotguns for the last 30-50m), a quad presents ~0.05-0.1 m² of lethal
 // cross-section moving 10-20 m/s with jink, and a stressed standing shooter's dispersion
-// plus lead error dominates everything past pistol range. The curve lands ~7% at 5m,
-// ~3% at 20m, ~0.5% at 50m, ~0.06% at 100m before the speed factor: a hovering aircraft
-// is ~3x easier to hit than one crossing at full tilt. Any connecting rifle round kills
-// a quad outright — there is no such thing as a wounded FPV. (Halved from the first
-// tuning pass after playtest: the lucky shot was landing too often.)
+// plus lead error dominates everything past pistol range. Tuned to Jay's spec from
+// range experience (aircraft-mounted .50s burning dozens of boxes to hit two flares):
+// the CEILING is 1-in-250 per round, point blank against a hovering aircraft, decaying
+// from there. A crossing aircraft at full tilt is ~3x harder again. Any connecting
+// round kills a quad outright — there is no such thing as a wounded FPV.
 export function groundFireHitChance(distance, speedFraction = 0) {
-  const base = 0.09 * Math.exp(-distance / 16) + 0.004 * Math.exp(-distance / 45);
+  const base = 0.004 * Math.exp(-distance / 18);
   const speedFactor = 1 - 0.65 * Math.min(1, Math.max(0, speedFraction));
-  return Math.min(0.35, base * speedFactor);
+  return Math.min(0.004, base * speedFactor);
+}
+// Ground can't be shot through. `solids` carries the built world but the DEM itself is
+// a heightfield, not AABBs, so every ground-fire line-of-sight check also walks the
+// terrain sampler along the shot line: any ridge, gully lip or carve crest standing
+// proud of the line masks the aircraft completely.
+export function terrainBlocksLine(ax, ay, az, bx, by, bz) {
+  if (!droneTerrain) return false;
+  const dx = bx - ax, dy = by - ay, dz = bz - az;
+  const run = Math.hypot(dx, dz);
+  const steps = Math.max(2, Math.ceil(run / 2.5));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    if (droneTerrain(ax + dx * t, az + dz * t) > ay + dy * t - 0.1) return true;
+  }
+  return false;
 }
 const DRONE_HEAT_CORE_MAT = new THREE.MeshBasicMaterial({
   name: 'drone-thermal-core', color: 0xd8d4bb,
@@ -3423,9 +3438,9 @@ export class DroneController {
       origin.y += 1.12;
       const aim = this.pos.clone();
       const distance = origin.distanceTo(aim);
-      if (distance > 86 || !hasLOS(
+      if (distance > 50 || !hasLOS(
         solids, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z,
-      )) continue;
+      ) || terrainBlocksLine(origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)) continue;
       gunner.rotation.y = Math.atan2(aim.x - origin.x, aim.z - origin.z)
         - (this.targetModels[index]?.rotation.y || 0);
       this.receiveEnemyFire(origin, solids, 1.45);
@@ -3434,7 +3449,8 @@ export class DroneController {
 
   // Dismounted pickets and trench garrisons defend themselves the way the artillery
   // crews always have: aimed rifle fire cycling through the living figures whenever the
-  // aircraft presses inside ~110m with line of sight. Static teams only — a runner
+  // aircraft presses inside 50m with line of sight — beyond that a small quad simply
+  // isn't noticed or engaged. Static teams only — a runner
   // being intercepted keeps running; a man standing a fire bay shoots back. Lethality
   // per shot is groundFireHitChance; a trench's own parapets block low approaches, so
   // hugging the dirt on the way in denies them the shot.
@@ -3460,8 +3476,10 @@ export class DroneController {
         const gunner = crew[vehicle.defenceCrewIndex];
         gunner.getWorldPosition(origin);
         origin.y += 1.12;
-        if (origin.distanceTo(aim) > 110 || !hasLOS(
+        if (origin.distanceTo(aim) > 50 || !hasLOS(
           solids, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z,
+        ) || terrainBlocksLine(
+          origin.x, origin.y, origin.z, aim.x, aim.y, aim.z,
         )) continue;
         gunner.rotation.y = Math.atan2(aim.x - origin.x, aim.z - origin.z)
           - (vehicle.mesh?.rotation.y || 0);
@@ -3482,6 +3500,9 @@ export class DroneController {
       direction.x, direction.y, direction.z, distance,
     );
     if (blocked < distance - 0.12) return false;
+    if (terrainBlocksLine(
+      origin.x, origin.y, origin.z, this.pos.x, this.pos.y, this.pos.z,
+    )) return false;
     // One aimed shot. Almost all of them miss — see groundFireHitChance — but every
     // unblocked round still reads as a live threat: a tracer streak, a pressure shove
     // and the KEEP MOVING call. The streak of a miss cracks PAST the airframe with a
@@ -3646,9 +3667,11 @@ export class DroneController {
       const origin = actor.pos.clone();
       origin.y += 1.2;
       const distanceToDrone = origin.distanceTo(this.pos);
-      if (distanceToDrone < 82 && hasLOS(
+      if (distanceToDrone < 50 && hasLOS(
         solids, origin.x, origin.y, origin.z,
         this.pos.x, this.pos.y, this.pos.z,
+      ) && !terrainBlocksLine(
+        origin.x, origin.y, origin.z, this.pos.x, this.pos.y, this.pos.z,
       )) {
         this.receiveEnemyFire(origin, solids, 1.12);
         actor.fireTimer = 1.55 + (actor.routeIndex % 3) * 0.3;

@@ -74,9 +74,9 @@ export const CAMPAIGN_MISSIONS = [
   {
     id: 12,
     node: 'MOVING RANGE',
-    sitrep: 'The straight range is running ten target profiles at different speeds, directions and approach geometries.',
-    purpose: 'Practice crossing, approaching, receding, turning and concealed targets until first-pass interception replaces tail chasing.',
-    target: 'No enemy contact. Every vehicle route is a geometry problem with an airframe attached.',
+    sitrep: 'The range is running ten target profiles: vehicles at different speeds and approach geometries, plus individual runners using farm buildings and wooded cover.',
+    purpose: 'Practice crossing, approaching, receding, turning and reacquiring people through occlusion until first-pass interception replaces tail chasing.',
+    target: 'No enemy contact. Vehicles and individual runners are live range targets; solve the route before committing the airframe.',
     intel: 'KAVUN: “Fly where it will be. The debrief will tell you whether the hit was planned or lucky.”',
     result: 'Ten intercept profiles complete. First-pass setup is now part of the operator’s card.',
     nextLead: 'HEAVY HANDS — gravity, drift and a bomber that must come home.',

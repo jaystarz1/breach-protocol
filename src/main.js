@@ -101,6 +101,9 @@ const missionRuns = {};
 // Death in a merged act restarts at the current segment checkpoint, not the act start.
 // Set right before a startLevel that should resume; consumed (and cleared) by startLevel.
 let resumePhase = 0;
+// Briefing selection for drone school. This is deliberately separate from resumePhase:
+// looking around the briefing must not alter a live retry checkpoint until DEPLOY is pressed.
+let selectedBriefPhase = 0;
 let levelLoadId = 0;
 let flashlight = null;
 let lastTime = performance.now();
@@ -149,10 +152,73 @@ function renderBriefTime() {
   $('brief-num').textContent = `MISSION ${String(missionNumber).padStart(2, '0')} · ${currentTimeOfDay.toUpperCase()} · ${DIFFICULTIES[S.difficulty].name}`;
   const selectedBest = S.bestByTime?.[currentLevel]?.[currentTimeOfDay]
     || (currentTimeOfDay === levelTimeOfDay(L) ? S.best?.[currentLevel] : null);
+  const runPicker = $('brief-run-picker');
+  const runSuffix = (L?.objectives?.length || 0) > 1
+    && runPicker && !runPicker.hidden
+    ? ` RUN ${String(selectedBriefPhase + 1).padStart(2, '0')}` : '';
   $('brief-go').textContent = selectedBest
-    ? `DEPLOY · BEST ${selectedBest.grade} ${selectedBest.score}` : 'DEPLOY';
+    ? `DEPLOY${runSuffix} · BEST ${selectedBest.grade} ${selectedBest.score}`
+    : `DEPLOY${runSuffix}`;
   // The level lookup keeps this helper honest when QA opens a 100-series source mission.
   if (!L) $('brief-go').textContent = 'DEPLOY';
+}
+
+function dronePhaseSummary(phaseDef) {
+  const droneSteps = phaseSteps(phaseDef).filter(step => step.type === 'drone');
+  const targets = droneSteps.flatMap(step => step.vehicles || []).filter(target => !target.optional);
+  const kinds = new Set(targets.map(target => target.kind));
+  const subject = kinds.size === 1 && kinds.has('infantry')
+    ? 'PERSON'
+      : kinds.has('tank') ? 'TANK'
+      : droneSteps.some(step => step.mode === 'bomber') ? 'BOMBER'
+        : 'VEHICLE';
+  const title = String(phaseDef.text || phaseDef.id || '').toUpperCase();
+  let approach = 'AUTHORED RUN';
+  if (title.includes('CROSSING')) approach = 'SIDE CROSSING';
+  else if (title.includes('APPROACHING')) approach = 'FRONT APPROACH';
+  else if (title.includes('RECEDING')) approach = 'REAR PURSUIT';
+  else if (title.includes('FLANK')) approach = 'FLANK INTERCEPT';
+  else if (title.includes('WOOD')) approach = 'WOODED COVER';
+  else if (title.includes('FARM') || title.includes('BUILDING')) approach = 'BUILDING COVER';
+  else if (title.includes('JUNCTION') || title.includes('TURN')) approach = 'TURNING TARGET';
+  else if (title.includes('RANDOM')) approach = 'MIXED ASPECT';
+  return `${subject} · ${approach}`;
+}
+
+function renderBriefRunPicker(L) {
+  const picker = $('brief-run-picker');
+  const grid = $('brief-run-grid');
+  // A service worker may briefly serve an older shell while activating an update. Never let
+  // that transient HTML/JS mismatch make the ordinary level list stop responding.
+  if (!picker || !grid) return;
+  const objectives = L?.objectives || [];
+  // Every drone-school phase is self-contained. Ground-combat phases may depend on an
+  // earlier act's state, so they continue to use their authored checkpoint flow.
+  const directRuns = objectives.length > 1
+    && objectives.every(phaseDef => phaseSteps(phaseDef).some(step => step.type === 'drone'));
+  picker.hidden = !directRuns;
+  grid.innerHTML = '';
+  if (!directRuns) return;
+
+  objectives.forEach((phaseDef, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `run-pill${index === selectedBriefPhase ? ' sel' : ''}`;
+    button.innerHTML = `${String(index + 1).padStart(2, '0')} — ${phaseDef.text || phaseDef.id || 'AUTHORED RUN'}`
+      + `<span class="run-meta">${dronePhaseSummary(phaseDef)}</span>`;
+    button.onclick = () => {
+      selectedBriefPhase = index;
+      renderBriefRunPicker(L);
+      renderBriefTime();
+    };
+    // These cards are created after the one-time touch-hardening pass at startup. Bind the
+    // same immediate touch behavior here so a tap cannot be swallowed by the scroll panel.
+    button.addEventListener('touchend', event => {
+      event.preventDefault();
+      button.click();
+    }, { passive: false });
+    grid.appendChild(button);
+  });
 }
 
 function selectBriefTime(timeOfDay) {
@@ -165,6 +231,7 @@ function selectBriefTime(timeOfDay) {
 function showBrief(id) {
   currentLevel = id;
   resumePhase = 0;   // launching from the menu is always a fresh start
+  selectedBriefPhase = 0;
   const L = levelById(id);
   currentTimeOfDay = levelTimeOfDay(L, S.timeOfDayByLevel?.[id]);
   const mission = campaignMission(id);
@@ -172,9 +239,13 @@ function showBrief(id) {
   $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/${LEVELS.length} NODES SECURED`;
   $('brief-target-status').textContent = mission.target;
   $('brief-evidence').textContent = `CURRENT INTELLIGENCE — ${mission.intel}`;
+  const directRuns = (L.objectives || []).length > 1
+    && L.objectives.every(phaseDef => phaseSteps(phaseDef).some(step => step.type === 'drone'));
   const phasePlan = (L.objectives || []).map((phaseDef, index) =>
     `${index + 1}. ${phaseDef.text || phaseDef.id || 'AUTHORED PHASE'}`).join('\n');
-  $('brief-text').textContent = `${briefingText(id, L.brief)}\n\nOPERATION PLAN\n${phasePlan}`;
+  $('brief-text').textContent = briefingText(id, L.brief)
+    + (directRuns ? '' : `\n\nOPERATION PLAN\n${phasePlan}`);
+  renderBriefRunPicker(L);
   renderBriefTime();
   hud.screen('brief');
 }
@@ -191,7 +262,11 @@ $('menu-settings').onclick = () => hud.screen('settings');
 $('levels-back').onclick = () => hud.screen('menu');
 $('settings-back').onclick = () => hud.screen('menu');
 $('brief-back').onclick = () => { buildDiffRow(); buildLevelList(); hud.screen('levels'); };
-$('brief-go').onclick = () => { audioUnlock(); startLevel(currentLevel); };
+$('brief-go').onclick = () => {
+  audioUnlock();
+  resumePhase = selectedBriefPhase;
+  startLevel(currentLevel);
+};
 $('pause-resume').onclick = () => { mode = 'playing'; hud.screen(null); };
 $('pause-restart').onclick = () => {
   resumePhase = currentCheckpointPhase();
@@ -1788,9 +1863,12 @@ function setObjective() {
         world.combatHeat = Math.max(world.combatHeat, 5);
       },
       onVehicleKilled(vehicle) {
-        world.stats.score += 250;
+        const points = vehicle.optional ? 100 : 250;
+        world.stats.score += points;
         world.stats.kills++;
-        hud.feed(`${vehicle.label || 'VEHICLE'} DESTROYED +250`, '#ffd54f');
+        hud.feed(vehicle.optional
+          ? `TARGET OF OPPORTUNITY // ${vehicle.label || 'DISMOUNTS'} +${points}`
+          : `${vehicle.label || 'VEHICLE'} DESTROYED +${points}`, '#ffd54f');
         if (vehicle.killMessage) hud.feed(vehicle.killMessage, '#8cecff');
       },
       onAttemptReviewed(report) {
