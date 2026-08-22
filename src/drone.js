@@ -1422,7 +1422,12 @@ export class DroneController {
     this.roll = 0;
     this.payloadNadir = false;
     this.horizontalForward = new THREE.Vector3();
-    this.battery = 100;
+    // An air-start sortie may hand the pilot an aircraft that already "flew" its
+    // approach: battery down by the notional ingress, airspeed already on the nose
+    // at the launch yaw. Both apply to every replacement airframe too.
+    this.startBattery = Math.max(20, Math.min(100, definition.startBattery ?? 100));
+    this.startSpeed = definition.startSpeed ?? 0;
+    this.battery = this.startBattery;
     this.signal = 1;
     // Long-range overwatch sorties can be authored per mission without changing the
     // compact rooftop drone envelope used by the street and tower rounds.
@@ -2940,12 +2945,14 @@ export class DroneController {
     this.detonated = false;
     this.pos.copy(this.launch);
     this.pos.y += 1.7;
-    this.vel.set(0, 0, 0);
     this.yaw = this.launchYaw;
+    const startSpeed = this.isFpvFamily
+      ? this.startSpeed / this.metersPerUnit : this.startSpeed;
+    this.vel.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).multiplyScalar(startSpeed);
     this.pitch = -0.05;
     this.roll = 0;
     this.payloadNadir = false;
-    this.battery = 100;
+    this.battery = this.startBattery;
     this.signal = 1;
     this.setThermalEnabled(false);
     this.thermalBurstRemaining = 0;

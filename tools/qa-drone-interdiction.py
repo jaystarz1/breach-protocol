@@ -129,6 +129,8 @@ def main():
             engagementBounds: steps.some(s => !!s.training?.engagementBounds),
             ceilings: steps.map(s => s.ceiling),
             launchAlts: steps.map(s => (s.launch || [0, 0, 0])[1]),
+            startBatteries: steps.map(s => s.startBattery ?? 100),
+            startSpeeds: steps.map(s => s.startSpeed ?? 0),
             evasive: steps.flatMap(s => s.vehicles || [])
               .filter(v => v.airborne && v.evasion).length,
             lessons: steps.reduce((n, s) => n + (s.lessons?.length || 0), 0),
@@ -150,6 +152,17 @@ def main():
         # night war launch from the pad. FIRST CONTACT's targets never manoeuvre.
         assert all(alt > 30 for entry in catalogue[:2] for alt in entry["launchAlts"]), catalogue
         assert all(alt == 0 for entry in catalogue[2:] for alt in entry["launchAlts"]), catalogue
+        # The drill perch stands in for an approach that was never flown: battery
+        # degrades down the ladder, and the later drills hand over the aircraft
+        # already at speed. The pad missions start with a full pack from a standstill.
+        assert catalogue[0]["startBatteries"] == [92, 90, 88], catalogue
+        assert catalogue[1]["startBatteries"] == [86, 83, 78], catalogue
+        assert catalogue[0]["startSpeeds"] == [0, 8, 10], catalogue
+        assert catalogue[1]["startSpeeds"] == [10, 12, 14], catalogue
+        assert all(entry["startBatteries"] == [100] * len(entry["startBatteries"])
+                   for entry in catalogue[2:]), catalogue
+        assert all(entry["startSpeeds"] == [0] * len(entry["startSpeeds"])
+                   for entry in catalogue[2:]), catalogue
         assert catalogue[0]["evasive"] == 0, catalogue
         assert all(entry["evasive"] == entry["airborneTargets"]
                    for entry in catalogue[1:]), catalogue
@@ -174,12 +187,17 @@ def main():
             offBore: Math.abs(wrap(d.yaw - bearing)),
             hover: target.speed === 0 && target.route.length === 0,
             evasion: !!target.evasion,
+            battery: d.battery,
+            groundSpeedMs: d.vel.length() * d.metersPerUnit,
           };
         }""")
         assert air_start["agl"] > 30, air_start
         assert air_start["distance"] < air_start["acquireRange"], air_start
         assert air_start["offBore"] < 0.2, air_start
         assert air_start["hover"] and not air_start["evasion"], air_start
+        # Degraded pack from the notional approach; the first drill starts from a hover.
+        assert 85 < air_start["battery"] <= 92, air_start
+        assert air_start["groundSpeedMs"] < 1, air_start
 
         # The critical regression: an airborne target holds authored AGL across terrain
         # instead of taking the ground snap, weaves and climbs under threat, settles when
@@ -188,6 +206,22 @@ def main():
         page.evaluate("() => BP.startLevel(22)")
         page.wait_for_function("() => BP.world?.level?.id === 22 && !!BP.world.drone")
         accelerate_review(page)
+        # Hot handover: the first evasion drill starts with a degraded pack and the
+        # aircraft already moving on the launch yaw. The live sim damps the entry
+        # speed and drains the pack from the moment the gate opens, so bound loosely.
+        handover = page.evaluate("""() => {
+          const d = BP.world.drone;
+          d.skipLessons?.();
+          return {
+            startBattery: d.startBattery, battery: d.battery,
+            startSpeed: d.startSpeed,
+            groundSpeedMs: d.vel.length() * d.metersPerUnit,
+          };
+        }""")
+        assert handover["startBattery"] == 86, handover
+        assert 80 < handover["battery"] <= 86, handover
+        assert handover["startSpeed"] == 10, handover
+        assert handover["groundSpeedMs"] > 2, handover
         flight = page.evaluate("""async () => {
           const { droneTerrainHeight } = await import('./src/drone.js');
           const d = BP.world.drone;
@@ -340,6 +374,7 @@ def main():
         result = {
             "catalogue": catalogue,
             "airStart": air_start,
+            "handover": handover,
             "flight": flight,
             "radar": radar,
             "escape": escape,

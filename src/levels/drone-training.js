@@ -1349,11 +1349,17 @@ function airborneTarget(kind, label, definition = {}) {
 // A drill starts on an airborne perch with the target already in the camera, so the
 // sortie IS the attack — no pad, no transit, no search. The controller uses `launch`
 // verbatim (and respawns every replacement airframe there), which is all an air start
-// needs; `facing` aims the first frame at the target's [x, z].
-function airStart(pos, facing) {
+// needs; `facing` aims the first frame at the target's [x, z]. The perch stands in
+// for an approach the pilot did not have to fly, and the pack remembers it anyway:
+// `approachMeters` is the notional ingress, burned at Kestrel cruise (18 m/s) against
+// the Kestrel drain (660 battery-seconds over the 1.3 drain divisor). `speed` (m/s)
+// hands over the aircraft already on the run-in instead of hanging on a hover.
+function airStart(pos, facing, { approachMeters = 0, speed = 0 } = {}) {
   return {
     launch: pos,
     yaw: Math.atan2(-(facing[0] - pos[0]), -(facing[1] - pos[2])),
+    startBattery: Math.round(100 - (approachMeters / 18) * (100 / 660 / 1.3)),
+    startSpeed: speed,
   };
 }
 
@@ -1369,7 +1375,8 @@ export const DRONE_INTERDICTION_LEVELS = [
     [
       phase('contact-hover', 'HIT A HOVERING TARGET', [fpv({
         text: 'HOVERING QUAD 400 METRES AHEAD — FLY INTO IT.',
-        airframes: 3, ceiling: 95, ...airStart([6, 64, 270], [0, 150]),
+        airframes: 3, ceiling: 95,
+        ...airStart([6, 64, 270], [0, 150], { approachMeters: 1200 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('THE WEAPON IS THE AIRCRAFT', 'There is no trigger. You kill another drone by flying into it, and a quad is a metre of plastic in an empty sky. Centre it, close at full speed, and hold it centred until the frame fills. Small, early corrections — at closure speed a late stick input is a miss.'),
@@ -1378,12 +1385,13 @@ export const DRONE_INTERDICTION_LEVELS = [
         vehicles: [
           airborneTarget('mavic', 'HOVERING QUAD', { pos: [0, 55, 150], speed: 0 }),
         ],
-        startMessage: 'RANGE CONTROL — TARGET QUAD HOLDING A HOVER 400 METRES AHEAD, YOUR ALTITUDE. IT WILL NOT MOVE. FLY THROUGH IT.',
+        startMessage: 'RANGE CONTROL — TARGET QUAD HOLDING A HOVER 400 METRES AHEAD, YOUR ALTITUDE. THE PACK HAS ALREADY PAID FOR YOUR APPROACH. IT WILL NOT MOVE. FLY THROUGH IT.',
         result: 'FIRST AIR-TO-AIR CONTACT',
       })]),
       phase('contact-crossing', 'HIT A CROSSING TARGET', [fpv({
         text: 'QUAD SHUTTLING LEFT-RIGHT — AIM AHEAD OF IT, NOT AT IT.',
-        airframes: 3, ceiling: 95, ...airStart([6, 66, 300], [0, 170]),
+        airframes: 3, ceiling: 95,
+        ...airStart([6, 66, 300], [0, 170], { approachMeters: 1500, speed: 8 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('LEAD THE CROSSING', 'Point at a moving target and you arrive where it was. Aim at empty air AHEAD of it and let the target fly into your path — the same lead you learned on trucks, flown in three dimensions.'),
@@ -1399,7 +1407,8 @@ export const DRONE_INTERDICTION_LEVELS = [
       })]),
       phase('contact-orbit', 'HIT AN ORBITING TARGET', [fpv({
         text: 'QUAD FLYING AN ORBIT — ATTACK FROM ABOVE AND BEHIND.',
-        airframes: 3, ceiling: 95, ...airStart([6, 74, 330], [0, 190]),
+        airframes: 3, ceiling: 95,
+        ...airStart([6, 74, 330], [0, 190], { approachMeters: 1800, speed: 10 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('THE BLIND SPOT IS ABOVE', 'A camera quad looks down and out, never up. Hold your height advantage, settle onto the orbit from above and behind, and spend the height on one committed run. The first recorded drone-on-drone kill was exactly this — one quad dropped through another’s rotors.'),
@@ -1423,7 +1432,8 @@ export const DRONE_INTERDICTION_LEVELS = [
     [
       phase('evade-jink', 'BEAT THE JINK', [fpv({
         text: 'ORBITING QUAD — IT WILL JINK WHEN IT SEES YOU INSIDE 110 METRES.',
-        airframes: 3, ceiling: 95, ...airStart([6, 74, 330], [0, 190]),
+        airframes: 3, ceiling: 95,
+        ...airStart([6, 74, 330], [0, 190], { approachMeters: 2200, speed: 10 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('DO NOT MIRROR THE JINK', 'The weave is a sine wave: it crosses its own track twice a cycle. Chase every swing and you amplify your own error; hold the middle of the weave and commit where the crossings converge.'),
@@ -1440,7 +1450,8 @@ export const DRONE_INTERDICTION_LEVELS = [
       })]),
       phase('evade-weave', 'BEAT THE FULL WEAVE', [fpv({
         text: 'ALERTED QUAD — FULL WEAVE AND CLIMB FROM 160 METRES OUT.',
-        airframes: 3, ceiling: 95, ...airStart([6, 74, 330], [0, 190]),
+        airframes: 3, ceiling: 95,
+        ...airStart([6, 74, 330], [0, 190], { approachMeters: 2600, speed: 12 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('EVASION TRADES SPEED FOR HEIGHT', 'A weaving target climbs. Arrive with more altitude than you think you need, or the fight migrates above you and your dive becomes a stern chase. Height in the bank is the only currency that buys a second pass.'),
@@ -1457,7 +1468,8 @@ export const DRONE_INTERDICTION_LEVELS = [
       })]),
       phase('evade-fixedwing', 'BEAT A FIXED-WING', [fpv({
         text: 'FIXED-WING ON THE RADAR PLOT — CUT THE ORBIT, MEET IT HEAD-ON.',
-        airframes: 3, ceiling: 135, ...airStart([6, 108, 160], [0, 10]),
+        airframes: 3, ceiling: 135,
+        ...airStart([6, 108, 160], [0, 10], { approachMeters: 3400, speed: 14 }),
         training: { acquireRange: 420, radarBearing: true },
         lessons: [
           lesson('FLY THE PLOT, NOT THE DOT', 'The TRK line is the radar operator reading you the picture: bearing arrow, range, target altitude. A fixed-wing never stops, so fly to where the orbit will be, not where the readout was.'),
@@ -1473,7 +1485,7 @@ export const DRONE_INTERDICTION_LEVELS = [
             evasion: { triggerRadius: 240, jinkRadius: 26, jinkPeriod: 2.6, climbRate: 3.5, climbMax: 25 },
           }),
         ],
-        startMessage: 'RANGE CONTROL — FIXED-WING TARGET ON A RACETRACK ORBIT, PLOT ON YOUR OSD. GET AHEAD OF IT AND TAKE THE MERGE.',
+        startMessage: 'RANGE CONTROL — FIXED-WING TARGET ON A RACETRACK ORBIT, PLOT ON YOUR OSD. YOU ARE HANDED THE AIRCRAFT ON THE RUN-IN AT 78 PERCENT. GET AHEAD OF IT AND TAKE THE MERGE.',
         result: 'EVASION DRILLS COMPLETE',
       })]),
     ], {
