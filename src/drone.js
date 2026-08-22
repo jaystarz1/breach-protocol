@@ -710,9 +710,13 @@ export function strikeTargetModel(target) {
   } else if (target.kind === 'mavic') {
     // A commercial-class recon quad. Slightly oversized against its real 0.4 m footprint
     // so it reads against sky at acquire range; the spinning discs are the tell a pilot
-    // actually keys on. Nose is local -X like every other target hull.
+    // actually keys on. Nose is local -X like every other target hull. `highViz` paints
+    // the shell range-target orange — a gunnery drill target has to be seen from the
+    // perch, and looking DOWN at a gray quad over steppe is camouflage, not a drill.
     const gray = new THREE.MeshStandardMaterial({
-      name: 'drone-strike-quad-gray', color: 0x9aa0a3, roughness: 0.6, metalness: 0.32,
+      name: 'drone-strike-quad-gray',
+      color: target.highViz ? 0xe06a24 : 0x9aa0a3,
+      roughness: target.highViz ? 0.5 : 0.6, metalness: target.highViz ? 0.12 : 0.32,
     });
     add(new THREE.BoxGeometry(0.92, 0.3, 0.52), gray, [0, 0, 0]);
     add(new THREE.SphereGeometry(0.14, 10, 8), glass, [-0.5, -0.08, 0]);
@@ -848,7 +852,7 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
   const mesh = strikeTargetModel({
     pos, kind: definition.kind || 'technical', yaw: definition.yaw || 0,
     label: definition.label, team: definition.team, figures: definition.figures,
-    cover: definition.cover, procedural: definition.procedural,
+    cover: definition.cover, procedural: definition.procedural, highViz: definition.highViz,
     moving: definition.kind === 'infantry' && (definition.route?.length || 0) > 0,
   });
   mesh.name = 'drone-assault-technical';

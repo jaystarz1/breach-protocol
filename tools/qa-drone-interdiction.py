@@ -131,6 +131,8 @@ def main():
             launchAlts: steps.map(s => (s.launch || [0, 0, 0])[1]),
             startBatteries: steps.map(s => s.startBattery ?? 100),
             startSpeeds: steps.map(s => s.startSpeed ?? 0),
+            highVizQuads: steps.flatMap(s => s.vehicles || [])
+              .filter(v => v.airborne && v.highViz).length,
             evasive: steps.flatMap(s => s.vehicles || [])
               .filter(v => v.airborne && v.evasion).length,
             lessons: steps.reduce((n, s) => n + (s.lessons?.length || 0), 0),
@@ -163,6 +165,8 @@ def main():
                    for entry in catalogue[2:]), catalogue
         assert all(entry["startSpeeds"] == [0] * len(entry["startSpeeds"])
                    for entry in catalogue[2:]), catalogue
+        # Range-target quads fly high-viz orange; operational targets keep camouflage.
+        assert [entry["highVizQuads"] for entry in catalogue] == [3, 2, 0, 0], catalogue
         assert catalogue[0]["evasive"] == 0, catalogue
         assert all(entry["evasive"] == entry["airborneTargets"]
                    for entry in catalogue[1:]), catalogue
@@ -192,6 +196,8 @@ def main():
           };
         }""")
         assert air_start["agl"] > 30, air_start
+        # close enough that the orange range quad reads as pixels, not a rumor
+        assert air_start["distance"] < 100, air_start
         assert air_start["distance"] < air_start["acquireRange"], air_start
         assert air_start["offBore"] < 0.2, air_start
         assert air_start["hover"] and not air_start["evasion"], air_start

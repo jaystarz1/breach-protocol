@@ -1374,30 +1374,32 @@ export const DRONE_INTERDICTION_LEVELS = [
     'Air-to-air gunnery, first period. You start each drill already at altitude with the target in view — no transit, no search. Three targets, none of them evade: a hover, a slow crossing, an orbit. Learn what it takes to put your airframe through another aircraft.',
     [
       phase('contact-hover', 'HIT A HOVERING TARGET', [fpv({
-        text: 'HOVERING QUAD 400 METRES AHEAD — FLY INTO IT.',
+        text: 'HOVERING QUAD 250 METRES AHEAD — FLY INTO IT.',
         airframes: 3, ceiling: 95,
-        ...airStart([6, 64, 270], [0, 150], { approachMeters: 1200 }),
+        ...airStart([6, 64, 220], [0, 150], { approachMeters: 1200 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('THE WEAPON IS THE AIRCRAFT', 'There is no trigger. You kill another drone by flying into it, and a quad is a metre of plastic in an empty sky. Centre it, close at full speed, and hold it centred until the frame fills. Small, early corrections — at closure speed a late stick input is a miss.'),
           lesson('MISSES ARE FREE, PANIC IS NOT', 'If the picture is wrong in the last hundred metres, fly THROUGH level and come around for another pass. A miss costs seconds; a desperate last-second dive costs the airframe into the dirt below the target.'),
         ],
         vehicles: [
-          airborneTarget('mavic', 'HOVERING QUAD', { pos: [0, 55, 150], speed: 0 }),
+          airborneTarget('mavic', 'HOVERING QUAD', {
+            highViz: true, pos: [0, 55, 150], speed: 0 }),
         ],
-        startMessage: 'RANGE CONTROL — TARGET QUAD HOLDING A HOVER 400 METRES AHEAD, YOUR ALTITUDE. THE PACK HAS ALREADY PAID FOR YOUR APPROACH. IT WILL NOT MOVE. FLY THROUGH IT.',
+        startMessage: 'RANGE CONTROL — TARGET QUAD HOLDING A HOVER 250 METRES AHEAD, YOUR ALTITUDE. THE PACK HAS ALREADY PAID FOR YOUR APPROACH. IT WILL NOT MOVE. FLY THROUGH IT.',
         result: 'FIRST AIR-TO-AIR CONTACT',
       })]),
       phase('contact-crossing', 'HIT A CROSSING TARGET', [fpv({
         text: 'QUAD SHUTTLING LEFT-RIGHT — AIM AHEAD OF IT, NOT AT IT.',
         airframes: 3, ceiling: 95,
-        ...airStart([6, 66, 300], [0, 170], { approachMeters: 1500, speed: 8 }),
+        ...airStart([6, 66, 250], [0, 170], { approachMeters: 1500, speed: 8 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('LEAD THE CROSSING', 'Point at a moving target and you arrive where it was. Aim at empty air AHEAD of it and let the target fly into your path — the same lead you learned on trucks, flown in three dimensions.'),
         ],
         vehicles: [
           airborneTarget('mavic', 'CROSSING QUAD', {
+            highViz: true,
             pos: [-90, 55, 170], speed: 6,
             route: [[-90, 55, 170], [90, 55, 170]], loop: true,
           }),
@@ -1408,13 +1410,14 @@ export const DRONE_INTERDICTION_LEVELS = [
       phase('contact-orbit', 'HIT AN ORBITING TARGET', [fpv({
         text: 'QUAD FLYING AN ORBIT — ATTACK FROM ABOVE AND BEHIND.',
         airframes: 3, ceiling: 95,
-        ...airStart([6, 74, 330], [0, 190], { approachMeters: 1800, speed: 10 }),
+        ...airStart([6, 74, 300], [0, 190], { approachMeters: 1800, speed: 10 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('THE BLIND SPOT IS ABOVE', 'A camera quad looks down and out, never up. Hold your height advantage, settle onto the orbit from above and behind, and spend the height on one committed run. The first recorded drone-on-drone kill was exactly this — one quad dropped through another’s rotors.'),
         ],
         vehicles: [
           airborneTarget('mavic', 'ORBITING QUAD', {
+            highViz: true,
             pos: [0, 55, 255], speed: 8,
             route: [[-70, 55, 190], [0, 52, 120], [70, 55, 190], [0, 58, 255]], loop: true,
           }),
@@ -1433,13 +1436,14 @@ export const DRONE_INTERDICTION_LEVELS = [
       phase('evade-jink', 'BEAT THE JINK', [fpv({
         text: 'ORBITING QUAD — IT WILL JINK WHEN IT SEES YOU INSIDE 110 METRES.',
         airframes: 3, ceiling: 95,
-        ...airStart([6, 74, 330], [0, 190], { approachMeters: 2200, speed: 10 }),
+        ...airStart([6, 74, 300], [0, 190], { approachMeters: 2200, speed: 10 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('DO NOT MIRROR THE JINK', 'The weave is a sine wave: it crosses its own track twice a cycle. Chase every swing and you amplify your own error; hold the middle of the weave and commit where the crossings converge.'),
         ],
         vehicles: [
           airborneTarget('mavic', 'JINKING QUAD', {
+            highViz: true,
             pos: [0, 55, 255], speed: 6,
             route: [[-70, 55, 190], [0, 52, 120], [70, 55, 190], [0, 58, 255]], loop: true,
             evasion: { triggerRadius: 110, jinkRadius: 8, jinkPeriod: 2.4, climbRate: 1.5, climbMax: 8 },
@@ -1451,13 +1455,14 @@ export const DRONE_INTERDICTION_LEVELS = [
       phase('evade-weave', 'BEAT THE FULL WEAVE', [fpv({
         text: 'ALERTED QUAD — FULL WEAVE AND CLIMB FROM 160 METRES OUT.',
         airframes: 3, ceiling: 95,
-        ...airStart([6, 74, 330], [0, 190], { approachMeters: 2600, speed: 12 }),
+        ...airStart([6, 74, 300], [0, 190], { approachMeters: 2600, speed: 12 }),
         training: { acquireRange: 320 },
         lessons: [
           lesson('EVASION TRADES SPEED FOR HEIGHT', 'A weaving target climbs. Arrive with more altitude than you think you need, or the fight migrates above you and your dive becomes a stern chase. Height in the bank is the only currency that buys a second pass.'),
         ],
         vehicles: [
           airborneTarget('mavic', 'ALERTED QUAD', {
+            highViz: true,
             pos: [0, 55, 255], speed: 7,
             route: [[-70, 55, 190], [0, 52, 120], [70, 55, 190], [0, 58, 255]], loop: true,
             evasion: { triggerRadius: 160, jinkRadius: 14, jinkPeriod: 2.2, climbRate: 2.5, climbMax: 14 },
