@@ -28,8 +28,11 @@ def main():
 
         def capture(level):
             page.evaluate("(level) => BP.startLevel(level)", level)
+            # 100-series ids are QA boots of source levels; the world resolves them to
+            # the source id (103 boots as level 3).
+            resolved = level - 100 if level > 100 else level
             page.wait_for_function(
-                f"() => BP.mode === 'playing' && BP.world.level.id === {level}",
+                f"() => BP.mode === 'playing' && BP.world.level.id === {resolved}",
                 timeout=90000,
             )
             page.wait_for_timeout(120)
@@ -136,24 +139,26 @@ def main():
                     };
                   }),
                 }));
-              const defenseWaves = BP.world.level.objectives
-                .filter(objective => objective.type === 'defend')
-                .flatMap(objective => objective.waves || [])
+              // Objectives are phases carrying steps since the acts merge; walk both
+              // shapes so the wave definitions are actually found.
+              const allSteps = BP.world.level.objectives
+                .flatMap(objective => objective.steps || [objective]);
+              const defenseWaves = allSteps
+                .filter(step => step.type === 'defend')
+                .flatMap(step => step.waves || [])
                 .flatMap(wave => wave.enemies || [])
                 .map(definition => resolveActorVariant(
                   definition, BP.world.missionVariant));
-              const droneCombatants = BP.world.level.objectives
-                .filter(objective => objective.type === 'drone'
-                  && objective.mode === 'combat')
-                .flatMap(objective => objective.combatWave?.enemies || [])
+              const droneSteps = allSteps.filter(step =>
+                step.type === 'drone' && step.mode === 'combat');
+              const droneCombatants = droneSteps
+                .flatMap(step => step.combatWave?.enemies || [])
                 .map(definition => resolveActorVariant(
                   definition, BP.world.missionVariant));
-              const droneVehicles = BP.world.level.objectives
-                .filter(objective => objective.type === 'drone'
-                  && objective.mode === 'combat'
-                  && objective.combatWave?.vehicle)
-                .map(objective => resolveActorVariant(
-                  objective.combatWave.vehicle, BP.world.missionVariant));
+              const droneVehicles = droneSteps
+                .filter(step => step.combatWave?.vehicle)
+                .map(step => resolveActorVariant(
+                  step.combatWave.vehicle, BP.world.missionVariant));
               const waveEnemies = defenseWaves.map(enemy => {
                 const target = nearest(...enemy.pos);
                 return {
@@ -219,7 +224,12 @@ def main():
 
         results = {}
         for level in selected_levels:
-            results[str(level)] = [capture(level) for _ in range(4)]
+            # Key results by SOURCE id: the exemption sets below ("7" is authored
+            # islands, "6" locked reinforcements...) are written against source levels,
+            # which now boot through their 100-series QA ids.
+            results[str(level - 100 if level > 100 else level)] = [
+                capture(level) for _ in range(4)
+            ]
 
         output = {"levels": results, "errors": errors[:8]}
         assert not errors
@@ -271,7 +281,7 @@ def main():
                 assert all(
                     socket["node"] >= 0
                     and socket["distance"] < 2.8
-                    and (socket["reachable"] or level == "6")
+                    and (socket["reachable"] or level in {"6", "7"})
                     for socket in row["nav"]["reinforcements"]
                 ), (level, row)
                 assert all(
@@ -289,7 +299,9 @@ def main():
                 assert all(
                     enemy["node"] >= 0
                     and enemy["distance"] < 2.8
-                    and enemy["reachable"]
+                    # OP BRAVO (7) starts on the rooftop above closed breach doors: the
+                    # drone wave below is authored unreachable on foot until the descent.
+                    and (enemy["reachable"] or level == "7")
                     for enemy in row["nav"]["droneEnemies"]
                 ), (level, row)
 

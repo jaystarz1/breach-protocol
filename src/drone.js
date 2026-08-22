@@ -95,6 +95,9 @@ export function terrainBlocksLine(ax, ay, az, bx, by, bz) {
   const steps = Math.max(2, Math.ceil(run / 2.5));
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
+    // The first few metres are the shooter's own hole: a man in a trench shoulders
+    // over his own lip, so his carve can't mask his own muzzle.
+    if (run * t < 3.5) continue;
     if (droneTerrain(ax + dx * t, az + dz * t) > ay + dy * t - 0.1) return true;
   }
   return false;
@@ -593,6 +596,7 @@ export function strikeTargetModel(target) {
     // target's local frame — how a trench garrison stands one man per fire bay.
     const authoredSpots = target.figures || null;
     const count = authoredSpots ? authoredSpots.length : team;
+    const soloRunner = target.moving && !authoredSpots && count === 1;
     const rootYaw = target.yaw || 0;
     const cosYaw = Math.cos(rootYaw), sinYaw = Math.sin(rootYaw);
     for (let i = 0; i < count; i++) {
@@ -601,6 +605,7 @@ export function strikeTargetModel(target) {
       const scatterYaw = angle + Math.PI + (rand() - 0.5) * 0.8;
       const [px, pz, facing] = authoredSpots
         ? [authoredSpots[i][0], authoredSpots[i][1], authoredSpots[i][2] ?? scatterYaw]
+        : soloRunner ? [0, 0, scatterYaw]
         : [Math.cos(angle) * radius, Math.sin(angle) * radius, scatterYaw];
       // Authored spots can sit metres from the root on carved ground; re-ground each
       // man on the terrain under his own feet instead of the team centre's height.
@@ -673,7 +678,10 @@ export function strikeTargetModel(target) {
       // Live men breathe and scan; killed men bake the ground game's death sprawl and
       // tip over through this same hook (createDroneAssaultVehicle ticks it per frame).
       let clock = rand() * 8;
-      root.userData.update = (dt, moving = false) => {
+      // `gait` lets a routed team WALK its line ('patrol') when nothing presses it and
+      // sprint ('flee') when something does; a man moving on his own initiative (the
+      // dugout dash) always sprints.
+      root.userData.update = (dt, moving = false, gait = 'flee') => {
         clock += dt;
         for (const soldier of soldiers) {
           const fall = soldier.userData.fall;
@@ -686,12 +694,81 @@ export function strikeTargetModel(target) {
             continue;
           }
           if (root.userData.destroyed) continue;
-          animateAuthoredCharacter(soldier, moving, 0,
-            moving ? 'flee' : soldier.userData.kneel ? 'engage' : 'patrol', clock);
-          if (!moving && soldier.userData.kneel) kneelAuthoredCharacter(soldier, 1);
+          // A man can be on the move on his own (running the trench for the dugout,
+          // updateTrenchCover) while the rest of his team stands fast.
+          const run = moving || soldier.userData.moving;
+          animateAuthoredCharacter(soldier, run, 0,
+            run ? (soldier.userData.moving ? 'flee' : gait)
+              : soldier.userData.kneel ? 'engage' : 'patrol', clock);
+          if (!run && soldier.userData.kneel) kneelAuthoredCharacter(soldier, 1);
         }
       };
+      root.userData.setHiding = () => {
+        for (const soldier of soldiers) soldier.userData.kneel = true;
+      };
     }
+  } else if (target.kind === 'mavic') {
+    // A commercial-class recon quad. Slightly oversized against its real 0.4 m footprint
+    // so it reads against sky at acquire range; the spinning discs are the tell a pilot
+    // actually keys on. Nose is local -X like every other target hull.
+    const gray = new THREE.MeshStandardMaterial({
+      name: 'drone-strike-quad-gray', color: 0x9aa0a3, roughness: 0.6, metalness: 0.32,
+    });
+    add(new THREE.BoxGeometry(0.92, 0.3, 0.52), gray, [0, 0, 0]);
+    add(new THREE.SphereGeometry(0.14, 10, 8), glass, [-0.5, -0.08, 0]);
+    const rotors = [];
+    for (const x of [-1, 1]) for (const z of [-1, 1]) {
+      add(new THREE.BoxGeometry(0.6, 0.07, 0.09), gray,
+        [x * 0.42, 0.06, z * 0.34], [0, x * z * 0.62, 0]);
+      const rotor = add(new THREE.CylinderGeometry(0.42, 0.42, 0.025, 3), dark,
+        [x * 0.66, 0.15, z * 0.55]);
+      rotors.push(rotor);
+    }
+    root.userData.update = dt => {
+      if (root.userData.destroyed) return;
+      for (const [index, rotor] of rotors.entries()) {
+        rotor.rotation.y += dt * (index % 2 ? 46 : -46);
+      }
+    };
+    root.userData.extraWreckMaterials = [gray];
+  } else if (target.kind === 'recon') {
+    // An Orlan/ZALA-class fixed-wing: long straight wing, twin tail booms, tractor prop.
+    // Sky gray so it hides against overcast the way the real article does.
+    const skyGray = new THREE.MeshStandardMaterial({
+      name: 'drone-strike-recon-gray', color: 0xaab3b8, roughness: 0.68, metalness: 0.18,
+    });
+    add(new THREE.BoxGeometry(2.5, 0.42, 0.44), skyGray, [0, 0, 0]);
+    add(new THREE.SphereGeometry(0.2, 8, 6), skyGray, [-1.3, 0, 0]);
+    add(new THREE.BoxGeometry(0.62, 0.06, 4.4), skyGray, [0.1, 0.24, 0]);
+    for (const z of [-1, 1]) {
+      add(new THREE.BoxGeometry(1.9, 0.07, 0.1), skyGray, [1.35, 0.22, z * 1.15]);
+      add(new THREE.BoxGeometry(0.34, 0.6, 0.07), skyGray, [2.25, 0.42, z * 1.15]);
+    }
+    add(new THREE.BoxGeometry(0.34, 0.06, 2.44), skyGray, [2.25, 0.7, 0]);
+    const prop = add(new THREE.BoxGeometry(0.04, 1.1, 0.1), dark, [-1.52, 0, 0]);
+    root.userData.update = dt => {
+      if (!root.userData.destroyed) prop.rotation.x += dt * 52;
+    };
+    root.userData.extraWreckMaterials = [skyGray];
+  } else if (target.kind === 'shahed') {
+    // A Shahed/Gerbera-class delta: cropped triangular wing, wingtip fins, pusher prop.
+    // Charcoal — the night raider's paint.
+    const charcoal = new THREE.MeshStandardMaterial({
+      name: 'drone-strike-shahed-dark', color: 0x3a3f42, roughness: 0.76, metalness: 0.22,
+    });
+    add(new THREE.BoxGeometry(2.9, 0.34, 0.58), charcoal, [0, 0, 0]);
+    add(new THREE.SphereGeometry(0.24, 8, 6), charcoal, [-1.5, 0, 0]);
+    for (const z of [-1, 1]) {
+      // Swept delta panel: a thin box yawed back from the nose toward the wingtip.
+      add(new THREE.BoxGeometry(2.5, 0.07, 1.1), charcoal,
+        [0.45, 0.05, z * 0.95], [0, z * 0.5, 0]);
+      add(new THREE.BoxGeometry(0.5, 0.52, 0.07), charcoal, [1.32, 0.24, z * 1.62]);
+    }
+    const prop = add(new THREE.BoxGeometry(0.04, 1.0, 0.1), dark, [1.6, 0, 0]);
+    root.userData.update = dt => {
+      if (!root.userData.destroyed) prop.rotation.x += dt * 48;
+    };
+    root.userData.extraWreckMaterials = [charcoal];
   } else if (!authored) {
     // An IFV-like silhouette: sloped hull, continuous tracks, turret and cannon. At drone
     // altitude the outline and moving shadow matter more than tiny vehicle trim.
@@ -717,7 +794,8 @@ export function strikeTargetModel(target) {
     // Every target owns these four materials, so mutate them in place. Cloning a fresh wreck
     // material at impact made Three release/compile programs in live play and produced a hitch
     // on every strike even though the shader flags were otherwise identical.
-    for (const wreck of [olive, dark, steel, glass, crewUniform, crewSkin]) {
+    for (const wreck of [olive, dark, steel, glass, crewUniform, crewSkin,
+      ...(root.userData.extraWreckMaterials || [])]) {
       wreck.color.multiplyScalar(0.22);
       wreck.roughness = 0.98;
       wreck.metalness *= 0.5;
@@ -782,8 +860,24 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
   const evasion = definition.kind === 'infantry' && definition.evasion ? {
     ...definition.evasion,
     triggerRadius: (definition.evasion.triggerRadius ?? 140) / metersPerUnit,
+    activationRadius: definition.evasion.activationRadius !== undefined
+      ? definition.evasion.activationRadius / metersPerUnit : null,
     decisionMin: definition.evasion.decisionMin ?? 0.45,
     decisionMax: definition.evasion.decisionMax ?? 0.9,
+    // The war-footage close-range behavior, all authored in metres: inside freezeRadius
+    // running is pointless and the man goes still; a hide pressed inside flushRadius is
+    // blown and he breaks for the next cover; freezeRelease is the reopen hysteresis.
+    freezeRadius: (definition.evasion.freezeRadius ?? 25) / metersPerUnit,
+    freezeRelease: (definition.evasion.freezeRelease ?? 40) / metersPerUnit,
+    flushRadius: (definition.evasion.flushRadius ?? 45) / metersPerUnit,
+  } : definition.airborne && definition.evasion ? {
+    // An aerial target's defence is geometry, not cover: weave off the track line and
+    // trade speed for altitude when the interceptor closes. All authored in metres.
+    triggerRadius: (definition.evasion.triggerRadius ?? 260) / metersPerUnit,
+    jinkRadius: (definition.evasion.jinkRadius ?? 26) / metersPerUnit,
+    jinkPeriod: definition.evasion.jinkPeriod ?? 2.8,
+    climbRate: (definition.evasion.climbRate ?? 4.5) / metersPerUnit,
+    climbMax: (definition.evasion.climbMax ?? 30) / metersPerUnit,
   } : null;
   const vehicle = {
     pos,
@@ -811,12 +905,30 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     stopsConsist: !!definition.stopsConsist,
     stopMessage: definition.stopMessage || null,
     shelter: definition.shelter || null,
+    // Trench garrisons carry the dug slot as a local polyline into the dugout: the
+    // route the crew runs when the aircraft presses the position (updateTrenchCover).
+    bunker: definition.bunker || null,
     evasion,
     evasionTimer: 0.18,
     evasionDirection: 1,
     evasionDecisions: 0,
+    activated: evasion?.activationRadius == null,
+    hiding: false,
+    // Runner (loop-route infantry) state: patrol direction when unpressed, the committed
+    // cover node and travel direction when pressed, hold-in-cover, and the terminal freeze.
+    threatened: false,
+    freezeHold: false,
+    coverCommit: null,
+    coverDir: 1,
+    coverHold: false,
+    patrolDir: 1,
+    coverNodes: null,
     // Optional instructor line delivered when this target dies (the flight-school voice).
     killMessage: definition.killMessage || null,
+    // An airborne target flies its route at authored AGL instead of taking the ground
+    // snap; `exited` latches once it leaves the engagement box (the escape loss path).
+    airborne: !!definition.airborne,
+    exited: false,
     dead: false,
     route: (definition.route || []).map(point => ({
       x: point[0],
@@ -840,45 +952,42 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
       return true;
     },
     update(dt, solids, threatPos = null) {
+      if (this.airborne) { this.updateAirborne(dt, threatPos); return; }
+      if (!this.activated && threatPos && this.evasion?.activationRadius != null) {
+        const threatDistance = Math.hypot(threatPos.x - this.pos.x, threatPos.z - this.pos.z);
+        if (threatDistance <= this.evasion.activationRadius) this.activated = true;
+      }
+      // Loop-route infantry are the field runners: they get the cover-commit state
+      // machine instead of the vehicle waypoint march.
+      if (this.kind === 'infantry' && this.evasion && !this.evasion.oneWay
+        && this.route.length > 1) {
+        this.updateRunner(dt, solids, threatPos);
+        return;
+      }
       // The model's own animation hook follows target motion: routed infantry run instead
       // of sliding in an idle firing pose; parked teams still breathe and scan.
-      this.mesh.userData.update?.(dt, !this.dead && this.route.length > 0);
-      if (this.dead || !this.route.length) return;
+      const moving = !this.dead && this.activated && !this.hiding && this.route.length > 0;
+      this.mesh.userData.update?.(dt, moving);
+      if (this.dead || !this.activated || this.hiding || !this.route.length) {
+        this.velocity.set(0, 0, 0);
+        return;
+      }
       const previousX = this.pos.x;
       const previousZ = this.pos.z;
-      if (this.evasion && threatPos) {
-        this.evasionTimer -= dt;
-        const threatDistance = Math.hypot(threatPos.x - this.pos.x, threatPos.z - this.pos.z);
-        if (threatDistance <= this.evasion.triggerRadius && this.evasionTimer <= 0
-          && this.route.length > 2) {
-          const count = this.route.length;
-          const current = this.routeIdx;
-          const reverse = (current - this.evasionDirection + count) % count;
-          const forwardPoint = this.route[current];
-          const reversePoint = this.route[reverse];
-          const forwardSpace = Math.hypot(forwardPoint.x - threatPos.x, forwardPoint.z - threatPos.z);
-          const reverseSpace = Math.hypot(reversePoint.x - threatPos.x, reversePoint.z - threatPos.z);
-          // Prefer the adjacent node that opens distance from the aircraft. A deterministic
-          // feint every third decision prevents a pilot from solving the runner as a simple
-          // "always go away" vector while keeping every turn on the authored safe path.
-          const feint = this.evasionDecisions % 3 === 2;
-          if ((reverseSpace > forwardSpace + 0.35) !== feint) {
-            this.routeIdx = reverse;
-            this.evasionDirection *= -1;
-          }
-          this.evasionDecisions++;
-          const span = Math.max(0, this.evasion.decisionMax - this.evasion.decisionMin);
-          const pulse = Math.abs(Math.sin(
-            this.evasionDecisions * 2.399963 + this.pos.x * 0.17 + this.pos.z * 0.11));
-          this.evasionTimer = this.evasion.decisionMin + span * pulse;
-        }
-      }
       const waypoint = this.route[Math.min(this.routeIdx, this.route.length - 1)];
       const dx = waypoint.x - this.pos.x;
       const dz = waypoint.z - this.pos.z;
       const distance = Math.hypot(dx, dz);
       if (distance < 0.7) {
         if (this.evasion) {
+          if (this.evasion.settleAtEnd && this.evasionDirection > 0
+            && this.routeIdx === this.route.length - 1) {
+            this.hiding = true;
+            this.velocity.set(0, 0, 0);
+            this.mesh.userData.setHiding?.();
+            this.mesh.userData.update?.(0, false);
+            return;
+          }
           this.routeIdx = (this.routeIdx + this.evasionDirection + this.route.length)
             % this.route.length;
           return;
@@ -904,6 +1013,291 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
       );
       this.mesh.position.copy(this.pos);
       this.mesh.position.y += 0.02;
+    },
+    // ---- field runner ----------------------------------------------------------------
+    // How dismounts move under drone attack in the war footage: walk the line until an
+    // aircraft presses, sprint for cover AWAY from it, hold small under the canopy,
+    // break for the next tree only when the hide is blown — and once the aircraft is
+    // inside ~25 m (3D, so a high orbit doesn't pin the map) running is pointless: the
+    // man stops and goes still. No route ping-pong, so a runner never looks boxed in.
+    crewKneel(kneel) {
+      for (const soldier of this.mesh?.userData.crew || []) {
+        if (soldier.userData.fall) continue;
+        if (kneel) {
+          soldier.userData.kneel = true;
+        } else if (soldier.userData.kneel) {
+          soldier.userData.kneel = false;
+          kneelAuthoredCharacter(soldier, 0);
+        }
+      }
+    },
+    routeCoverNodes() {
+      if (this.coverNodes) return this.coverNodes;
+      // A node is cover when a canopy AABB roofs it. Falls back to every node on a map
+      // with no foliage data so the commit logic still has somewhere to run to.
+      const margin = 0.8;
+      const nodes = [];
+      for (const [index, node] of this.route.entries()) {
+        for (const box of droneFoliage) {
+          if (node.x >= box.min.x - margin && node.x <= box.max.x + margin
+            && node.z >= box.min.z - margin && node.z <= box.max.z + margin) {
+            nodes.push(index);
+            break;
+          }
+        }
+      }
+      this.coverNodes = nodes.length ? nodes : this.route.map((_, index) => index);
+      return this.coverNodes;
+    },
+    commitToCover(threatPos, threatXZ) {
+      // The NEAREST cover that (a) is not toward the aircraft and (b) sits far enough
+      // out that the hold won't be flushed the moment he reaches it. On the first press
+      // that is usually the canopy he is already under; on a flush his own tree fails
+      // test (b) and the pick becomes the next tree down the line.
+      const floor = Math.max(threatXZ - 1.5, this.evasion.flushRadius + 2);
+      // How close the straight dash line to a node passes by the aircraft. A dash that
+      // crosses the drone's shadow is a last resort, not a plan.
+      const pathClearance = node => {
+        const dx = node.x - this.pos.x;
+        const dz = node.z - this.pos.z;
+        const lengthSq = dx * dx + dz * dz || 1;
+        const t = Math.max(0, Math.min(1,
+          ((threatPos.x - this.pos.x) * dx + (threatPos.z - this.pos.z) * dz) / lengthSq));
+        return Math.hypot(
+          threatPos.x - (this.pos.x + dx * t), threatPos.z - (this.pos.z + dz * t));
+      };
+      let best = null;
+      let bestRun = Infinity;
+      for (const clear of [true, false]) {
+        for (const index of this.routeCoverNodes()) {
+          const node = this.route[index];
+          const nodeThreat = Math.hypot(node.x - threatPos.x, node.z - threatPos.z);
+          if (nodeThreat < floor) continue;
+          if (clear && pathClearance(node) < this.evasion.freezeRelease) continue;
+          const run = Math.hypot(node.x - this.pos.x, node.z - this.pos.z);
+          if (run < bestRun) { bestRun = run; best = index; }
+        }
+        if (best !== null) break;
+      }
+      if (best === null) {
+        // Everything qualifies as "toward" (the aircraft owns the whole line): take
+        // whatever cover lies farthest from it.
+        let bestThreat = -Infinity;
+        for (const index of this.routeCoverNodes()) {
+          const node = this.route[index];
+          const nodeThreat = Math.hypot(node.x - threatPos.x, node.z - threatPos.z);
+          if (nodeThreat > bestThreat) { bestThreat = nodeThreat; best = index; }
+        }
+      }
+      this.coverCommit = best ?? this.routeIdx;
+      // Re-aim the very next stride: the old waypoint may sit toward the aircraft, and a
+      // man who has just decided on cover does not finish a 50 m leg the wrong way first.
+      let nearestIdx = this.routeIdx;
+      let nearestDistance = Infinity;
+      for (const [index, node] of this.route.entries()) {
+        const nodeDistance = Math.hypot(node.x - this.pos.x, node.z - this.pos.z);
+        if (nodeDistance < nearestDistance) {
+          nearestDistance = nodeDistance;
+          nearestIdx = index;
+        }
+      }
+      this.routeIdx = nearestDistance < 0.7 && nearestIdx !== this.coverCommit
+        ? nearestIdx + Math.sign(this.coverCommit - nearestIdx)
+        : nearestIdx;
+      this.coverDir = Math.sign(this.coverCommit - this.routeIdx) || 1;
+      this.coverHold = false;
+    },
+    updateRunner(dt, solids, threatPos) {
+      if (this.dead || !this.activated || !threatPos) {
+        this.velocity.set(0, 0, 0);
+        this.mesh.userData.update?.(dt, false);
+        return;
+      }
+      const cfg = this.evasion;
+      const threatXZ = Math.hypot(threatPos.x - this.pos.x, threatPos.z - this.pos.z);
+      const threat3D = Math.hypot(threatXZ, (threatPos.y ?? this.pos.y) - this.pos.y);
+      if (this.freezeHold) {
+        if (threat3D > cfg.freezeRelease) {
+          this.freezeHold = false;
+          this.crewKneel(false);
+        } else {
+          this.velocity.set(0, 0, 0);
+          this.mesh.userData.update?.(dt, false);
+          return;
+        }
+      } else if (threat3D < cfg.freezeRadius) {
+        this.freezeHold = true;
+        this.crewKneel(true);
+        this.velocity.set(0, 0, 0);
+        this.mesh.userData.update?.(dt, false);
+        return;
+      }
+      if (!this.threatened && threatXZ < cfg.triggerRadius) {
+        this.threatened = true;
+        this.commitToCover(threatPos, threatXZ);
+      } else if (this.threatened && threatXZ > cfg.triggerRadius * 1.3) {
+        // The press is off — but a dash already committed gets FINISHED. Safety is
+        // reaching the cover, not a radius; a man does not stop mid-field because the
+        // aircraft's range ticked over a number.
+        this.threatened = false;
+      }
+      if (this.coverHold) {
+        if (this.threatened && threatXZ < cfg.flushRadius) {
+          // The hide is blown: break for the next cover.
+          this.crewKneel(false);
+          this.commitToCover(threatPos, threatXZ);
+        } else if (!this.threatened) {
+          // The aircraft is gone. He waits a human beat under the canopy, then stands
+          // and takes his line back up.
+          this.coverRelax = (this.coverRelax ?? 3 + ((this.pos.x * 7 + this.pos.z * 3) % 3 + 3) % 3) - dt;
+          if (this.coverRelax <= 0) {
+            this.coverHold = false;
+            this.coverCommit = null;
+            this.coverRelax = null;
+            this.crewKneel(false);
+          } else {
+            this.velocity.set(0, 0, 0);
+            this.mesh.userData.update?.(dt, false);
+            return;
+          }
+        } else {
+          this.velocity.set(0, 0, 0);
+          this.mesh.userData.update?.(dt, false);
+          return;
+        }
+      }
+      const previousX = this.pos.x;
+      const previousZ = this.pos.z;
+      const dashing = this.coverCommit != null;
+      const speed = dashing ? this.speed : this.speed * 0.4;
+      const waypoint = this.route[Math.min(this.routeIdx, this.route.length - 1)];
+      const dx = waypoint.x - this.pos.x;
+      const dz = waypoint.z - this.pos.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance < 0.7) {
+        if (dashing) {
+          if (this.routeIdx === this.coverCommit) {
+            this.coverHold = true;
+            this.coverRelax = null;
+            this.crewKneel(true);
+            this.velocity.set(0, 0, 0);
+            this.mesh.userData.update?.(dt, false);
+            return;
+          }
+          this.routeIdx += this.routeIdx < this.coverCommit ? 1 : -1;
+        } else {
+          // Unpressed: walk the line and turn around at its ends — never the long wrap
+          // sprint across open ground the loop index used to imply.
+          if (this.routeIdx + this.patrolDir < 0
+            || this.routeIdx + this.patrolDir >= this.route.length) this.patrolDir *= -1;
+          this.routeIdx += this.patrolDir;
+        }
+        return;
+      }
+      if (distance > 0.001) {
+        const travel = Math.min(distance, speed * dt);
+        this.pos.x += dx / distance * travel;
+        this.pos.z += dz / distance * travel;
+        this.mesh.rotation.y = Math.atan2(dz, -dx);
+      }
+      const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.2, this.pos.y + 2);
+      const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : -Infinity;
+      const surface = Math.max(ground, terrainY);
+      if (surface !== -Infinity) this.pos.y = surface + this.surfaceLift;
+      this.velocity.set(
+        dt > 0 ? (this.pos.x - previousX) / dt : 0,
+        0,
+        dt > 0 ? (this.pos.z - previousZ) / dt : 0,
+      );
+      this.mesh.position.copy(this.pos);
+      this.mesh.position.y += 0.02;
+      this.mesh.userData.update?.(dt, true, dashing ? 'flee' : 'patrol');
+    },
+    // Aerial flight: waypoint altitudes instead of the ground snap, a weave-and-climb
+    // defence instead of cover, and a transit that keeps flying its last heading past
+    // the final waypoint — that straight-out overrun is exactly how a track escapes.
+    updateAirborne(dt, threatPos = null) {
+      this.mesh.userData.update?.(dt, !this.dead);
+      if (this.dead) {
+        // The wreck falls with the forward way it still carried, tumbling, until the
+        // ground takes it. The charred hull on the dirt is the scoreboard.
+        const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : 0;
+        if (this.pos.y > terrainY + 0.28) {
+          this.fallSpeed = Math.min(24, (this.fallSpeed ?? 1.5) + 20 * dt);
+          this.pos.y = Math.max(terrainY + 0.28, this.pos.y - this.fallSpeed * dt);
+          this.pos.x += this.velocity.x * 0.35 * dt;
+          this.pos.z += this.velocity.z * 0.35 * dt;
+          this.mesh.rotation.z += dt * 2.2;
+          this.mesh.rotation.x += dt * 0.7;
+          this.mesh.position.copy(this.pos);
+        }
+        return;
+      }
+      const previousX = this.pos.x, previousY = this.pos.y, previousZ = this.pos.z;
+      const waypoint = this.route.length
+        ? this.route[Math.min(this.routeIdx, this.route.length - 1)] : null;
+      if (waypoint && !this.overrun) {
+        const dx = waypoint.x - this.pos.x;
+        const dz = waypoint.z - this.pos.z;
+        const distance = Math.hypot(dx, dz);
+        if (distance < 3) {
+          if (this.routeIdx < this.route.length - 1) this.routeIdx++;
+          else if (this.loop) this.routeIdx = 0;
+          else this.overrun = true;
+        } else if (distance > 0.001) {
+          this.headingX = dx / distance;
+          this.headingZ = dz / distance;
+        }
+      }
+      const hx = this.headingX ?? 1;
+      const hz = this.headingZ ?? 0;
+      // Threat response with hysteresis: commit to the weave when the interceptor is
+      // inside the trigger, settle back to the track only once it has fallen well off.
+      if (this.evasion && threatPos) {
+        const threatDistance = Math.sqrt(
+          (threatPos.x - this.pos.x) ** 2 + ((threatPos.y ?? this.pos.y) - this.pos.y) ** 2
+          + (threatPos.z - this.pos.z) ** 2);
+        if (!this.evading && threatDistance <= this.evasion.triggerRadius) this.evading = true;
+        else if (this.evading && threatDistance > this.evasion.triggerRadius * 1.35) {
+          this.evading = false;
+        }
+      }
+      let lateral = 0;
+      if (this.evading) {
+        const omega = Math.PI * 2 / (this.evasion.jinkPeriod ?? 2.8);
+        this.jinkPhase = (this.jinkPhase ?? 0) + dt * omega;
+        // The weave is flown as a lateral velocity (the derivative of the sine offset),
+        // so the target holds its base track while it snakes across it.
+        lateral = Math.cos(this.jinkPhase) * (this.evasion.jinkRadius ?? 7) * omega;
+        this.evadeClimb = Math.min(this.evasion.climbMax ?? 9,
+          (this.evadeClimb ?? 0) + (this.evasion.climbRate ?? 1.3) * dt);
+      } else if (this.evadeClimb) {
+        this.evadeClimb = Math.max(0, this.evadeClimb - dt * 1.1);
+      }
+      const travel = this.speed * dt;
+      this.pos.x += hx * travel - hz * lateral * dt;
+      this.pos.z += hz * travel + hx * lateral * dt;
+      // Cruise height is the waypoint's authored AGL over the terrain under the aircraft,
+      // approached at a capped vertical rate so leg-to-leg altitude changes fly smooth.
+      const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : 0;
+      const cruiseAgl = waypoint && waypoint.y > 0 ? waypoint.y : this.surfaceLift;
+      const targetY = terrainY + cruiseAgl + (this.evadeClimb ?? 0);
+      const verticalRate = this.evading ? (this.evasion?.climbRate ?? 1.3) + 1.2 : 2.4;
+      this.pos.y += Math.max(-verticalRate * dt,
+        Math.min(verticalRate * dt, targetY - this.pos.y));
+      this.velocity.set(
+        dt > 0 ? (this.pos.x - previousX) / dt : 0,
+        dt > 0 ? (this.pos.y - previousY) / dt : 0,
+        dt > 0 ? (this.pos.z - previousZ) / dt : 0,
+      );
+      if (this.velocity.lengthSq() > 0.001) {
+        this.mesh.rotation.y = Math.atan2(this.velocity.z, -this.velocity.x);
+      }
+      // Roll into the weave — the visual tell a pilot reads as "he's seen me".
+      const targetRoll = this.evading
+        ? -Math.sin(this.jinkPhase ?? 0) * 0.3 : 0;
+      this.mesh.rotation.z += (targetRoll - this.mesh.rotation.z) * Math.min(1, dt * 5);
+      this.mesh.position.copy(this.pos);
     },
   };
   return vehicle;
@@ -1194,6 +1588,7 @@ export class DroneController {
     this.next = new THREE.Vector3();
     this.move = new THREE.Vector3();
     this.to = new THREE.Vector3();
+    this.contactBounds = new THREE.Box3();
     this.targetMeshes = [];
     this.targetModels = [];
     this.routeModels = [];
@@ -2714,7 +3109,14 @@ export class DroneController {
         this.vel.set(0, 0, 0);
       } else this.vel.multiplyScalar(-0.18);
     }
-    const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.12, this.pos.y + 1);
+    // The probe ceiling sits a hair above the airframe: only a solid whose top is
+    // genuinely below the aircraft is ground under it — anything taller is a WALL or
+    // a ROOF beside/over it. The old +1 margin (and even +0.25) let the floor clamp
+    // ratchet the drone up the staggered trench parapets onto a blindage roof,
+    // teleporting it out of the slot on top of its own target. Walls and ceilings
+    // are the movement raycast's problem — an armed FPV that touches one detonates
+    // there, which is the correct outcome.
+    const ground = groundHeight(solids, this.pos.x, this.pos.z, 0.12, this.pos.y + 0.05);
     const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : 0;
     // Without terrain the old flat-world datum (0) stands in; with it, the gully floor is
     // genuinely below datum and the drone may descend into it.
@@ -2817,7 +3219,10 @@ export class DroneController {
     if (this.mode === 'strike' && !this.strikeCleanup) {
       this.updateArtilleryDefence(dt, solids);
     }
-    if (this.isFpvFamily) this.updateInfantryDefence(dt, solids);
+    if (this.isFpvFamily) {
+      this.updateTrenchCover(dt);
+      this.updateInfantryDefence(dt, solids);
+    }
     if (this.mode === 'strike' && this.strikeCleanup) this.updateStrikeSquirters(dt, solids);
     this.updateThermalSignatures();
     this.updateTargetBoxes();
@@ -2986,6 +3391,25 @@ export class DroneController {
 
   updateFpvFamily(dt, input, solids) {
     for (const vehicle of this.combatVehicles) vehicle.update?.(dt, solids, this.pos);
+    // Interdiction loss path: a required airborne track that crosses out of the
+    // engagement box has beaten the crew — it is through to whatever it came for.
+    const box = this.training.engagementBounds;
+    if (box) {
+      for (const vehicle of this.combatVehicles) {
+        if (!vehicle.airborne || vehicle.dead || vehicle.exited) continue;
+        const out = vehicle.pos.x < box[0] - 2 || vehicle.pos.x > box[2] + 2
+          || vehicle.pos.z > box[1] + 2 || vehicle.pos.z < box[3] - 2;
+        if (!out) continue;
+        vehicle.exited = true;
+        if (!vehicle.optional && !vehicle.decoy && !vehicle.protected && vehicle.hostile) {
+          this.loseAirframe(
+            `${vehicle.label || 'TRACK'} EXITED THE ENGAGEMENT AREA — TARGET THROUGH`,
+            { effect: 'TARGET ESCAPED', expended: false,
+              missionComplete: false, criticalFailure: true });
+          return;
+        }
+      }
+    }
     const returnRadius = this.training.returnRadius ?? 14;
     const launchDistance = this.pos.distanceTo(this.launch);
     if (launchDistance > returnRadius * 1.35) this.departedLaunchArea = true;
@@ -3001,10 +3425,12 @@ export class DroneController {
     if (this.mode === 'fpv') {
       for (const vehicle of this.combatVehicles) {
         if (vehicle.dead) continue;
-        const dx = vehicle.pos.x - this.pos.x;
-        const dy = (vehicle.pos.y + 1.3) - this.pos.y;
-        const dz = vehicle.pos.z - this.pos.z;
-        if (dx * dx + dy * dy + dz * dz < 2.4 * 2.4) {
+        // Contact follows the visible target, not a universal 8.4 m centre sphere. The old
+        // sphere detonated beside a person, in front of a small truck and at a doorway while
+        // the runner was still several metres inside. A small margin represents the quad's
+        // own frame around the camera point; the model bounds supply the target's real size.
+        this.contactBounds.setFromObject(vehicle.mesh).expandByScalar(0.12);
+        if (this.contactBounds.containsPoint(this.pos)) {
           this.fpvDetonate(this.pos.clone());
           return;
         }
@@ -3065,8 +3491,27 @@ export class DroneController {
     let struckDistance = Infinity;
     for (const candidate of this.combatVehicles) {
       if (candidate.dead) continue;
-      const distance = candidate.pos.distanceTo(position);
+      let distance = candidate.pos.distanceTo(position);
       const effectRadius = candidate.kind === 'infantry' ? 3.2 : 7;
+      // A fire team dies where the MEN are, not at the team's map centre — a charge
+      // into an empty fire bay while the crew is under the dugout's log roll wastes
+      // the airframe. Fragments have to reach a live figure: near him, with no roof
+      // or berm on the line between them.
+      const crew = candidate.kind === 'infantry'
+        ? candidate.mesh?.userData.crew : null;
+      if (crew?.length) {
+        distance = Infinity;
+        const spot = new THREE.Vector3();
+        for (const man of crew) {
+          if (man.userData.fall) continue;
+          man.getWorldPosition(spot);
+          const reach = spot.distanceTo(position);
+          if (reach >= distance || reach > effectRadius) continue;
+          if (this.frameSolids?.length && !hasLOS(this.frameSolids,
+            position.x, position.y, position.z, spot.x, spot.y + 0.9, spot.z)) continue;
+          distance = reach;
+        }
+      }
       if (distance <= effectRadius && distance < struckDistance) {
         struck = candidate;
         struckDistance = distance;
@@ -3246,7 +3691,32 @@ export class DroneController {
       ? `DIST ${(meters / 1000).toFixed(1)}KM   HOME ${arrow}`
       : `DIST ${Math.round(meters)}M   HOME ${arrow}`;
     const speedKmh = Math.round(this.vel.length() * this.metersPerUnit * 3.6);
-    osd.dist.textContent = `HDG ${String(hdg).padStart(3, '0')} ${cardinal}   SPD ${speedKmh}KM/H\n${distText}`;
+    // Radar cueing: the ground station's track plot read onto the pilot's OSD — bearing,
+    // relative arrow, slant range and target altitude. This is the real interceptor-crew
+    // loop: the radar finds it, the pilot flies the geometry.
+    let radarLine = '';
+    let radarTarget = null;
+    if (this.training.radarBearing) {
+      radarTarget = this.nearestLiveVehicle().vehicle;
+      if (radarTarget && !radarTarget.exited) {
+        const toTrack = radarTarget.pos.clone().sub(this.pos);
+        const trackRange = toTrack.length() * this.metersPerUnit;
+        const trackBearing = Math.atan2(-toTrack.x, -toTrack.z);
+        let relTrack = trackBearing - this.yaw;
+        relTrack = ((relTrack % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+        const trackArrow = '↑↗→↘↓↙←↖'[((Math.round(-relTrack / (Math.PI / 4)) % 8) + 8) % 8];
+        const trackHdg = Math.round((((-trackBearing * 180 / Math.PI) % 360) + 360) % 360) % 360;
+        const terrainAtTrack = droneTerrain
+          ? droneTerrain(radarTarget.pos.x, radarTarget.pos.z) : 0;
+        const trackAlt = Math.round((radarTarget.pos.y - terrainAtTrack) * this.metersPerUnit);
+        const rangeText = trackRange >= 1000
+          ? `${(trackRange / 1000).toFixed(1)}KM` : `${Math.round(trackRange)}M`;
+        radarLine = `\nTRK ${String(trackHdg).padStart(3, '0')} ${trackArrow} ${rangeText}  ALT ${trackAlt}M`;
+      } else {
+        radarLine = '\nTRK — NO CONTACT';
+      }
+    }
+    osd.dist.textContent = `HDG ${String(hdg).padStart(3, '0')} ${cardinal}   SPD ${speedKmh}KM/H\n${distText}${radarLine}`;
     if (this.mapCtx) {
       const ctx = this.mapCtx;
       ctx.clearRect(0, 0, this.mapW, this.mapH);
@@ -3256,6 +3726,25 @@ export class DroneController {
       ctx.fillRect(lx - 2, lz - 2, 4, 4);
       ctx.font = '700 8px ui-monospace, Menlo, monospace';
       ctx.fillText(this.training.homeLabel || 'LZ', lx + 4, lz - 3);
+      if (radarTarget && !radarTarget.dead && !radarTarget.exited) {
+        // The hostile track on the pilot's map: a red blip with its motion vector, the
+        // same plot the radar operator is reading out.
+        const [tx, tz] = this.mapPoint(radarTarget.pos.x, radarTarget.pos.z);
+        ctx.fillStyle = '#ff5a4e';
+        ctx.beginPath();
+        ctx.arc(tx, tz, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        const trackVel = radarTarget.velocity;
+        if (trackVel && trackVel.lengthSq() > 0.02) {
+          const speed = Math.hypot(trackVel.x, trackVel.z) || 1;
+          ctx.strokeStyle = '#ff5a4e';
+          ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          ctx.moveTo(tx, tz);
+          ctx.lineTo(tx + trackVel.x / speed * 7, tz + trackVel.z / speed * 7);
+          ctx.stroke();
+        }
+      }
       const [dx, dz] = this.mapPoint(this.pos.x, this.pos.z);
       ctx.strokeStyle = '#e9efe9';
       ctx.lineWidth = 1.4;
@@ -3310,6 +3799,11 @@ export class DroneController {
           posts: group.posts || null,
           postIndex: group.posts
             ? Math.floor(rand() * group.posts.length) : 0,
+          // [x, z] of the dugout: unarmed trench walkers run for it when a drone
+          // presses inside 50m, and stay under the log roof until it leaves.
+          shelter: group.shelter || null,
+          hiding: false,
+          hidden: false,
           dead: false,
           fall: null,
           walking: false,
@@ -3337,6 +3831,18 @@ export class DroneController {
   // an ordered polyline down the slot, so nobody cuts a corner through a parapet. Free
   // groups pick points inside their own radius. Nobody leaves their area.
   pickPopulationWaypoint(actor) {
+    if (actor.hiding && actor.shelter) {
+      // Run the ordered slot back to post 0 (the sap), then dive into the dugout —
+      // never a straight cut across a parapet.
+      if (actor.posts && actor.postIndex > 0) {
+        actor.postIndex -= 1;
+        const post = actor.posts[actor.postIndex];
+        actor.waypoint.set(post[0], 0, post[1]);
+      } else {
+        actor.waypoint.set(actor.shelter[0], 0, actor.shelter[1]);
+      }
+      return;
+    }
     if (actor.posts) {
       actor.postIndex = Math.min(actor.posts.length - 1, Math.max(0,
         actor.postIndex + (actor.rand() < 0.5 ? -1 : 1)));
@@ -3366,25 +3872,53 @@ export class DroneController {
         continue;
       }
       actor.clock += dt;
+      if (actor.shelter && this.isFpvFamily && !this.frozen) {
+        const threat = this.pos.distanceTo(actor.pos);
+        if (!actor.hiding && threat < 50) {
+          actor.hiding = true;
+          this.pickPopulationWaypoint(actor);
+          actor.walking = true;
+        } else if (actor.hiding && threat > 65) {
+          actor.hiding = false;
+          if (actor.hidden) {
+            actor.hidden = false;
+            kneelAuthoredCharacter(actor.root, 0);
+          }
+          actor.timer = 1 + actor.rand() * 2;
+        }
+      }
       if (actor.walking) {
         const dx = actor.waypoint.x - actor.pos.x;
         const dz = actor.waypoint.z - actor.pos.z;
         const distance = Math.hypot(dx, dz);
         if (distance < 0.4) {
-          actor.walking = false;
-          actor.timer = 2.5 + actor.rand() * 7;
+          if (actor.hiding) {
+            const atShelter = actor.shelter && Math.hypot(
+              actor.pos.x - actor.shelter[0], actor.pos.z - actor.shelter[1]) < 0.7;
+            if (atShelter) {
+              actor.walking = false;
+              actor.hidden = true;
+            } else {
+              this.pickPopulationWaypoint(actor);
+            }
+          } else {
+            actor.walking = false;
+            actor.timer = 2.5 + actor.rand() * 7;
+          }
         } else {
-          const step = Math.min(distance, actor.speed * dt);
+          const step = Math.min(distance, (actor.hiding ? 2.6 : actor.speed) * dt);
           actor.pos.x += dx / distance * step;
           actor.pos.z += dz / distance * step;
           actor.root.rotation.y = Math.atan2(dx, dz);
         }
-      } else if ((actor.timer -= dt) <= 0) {
+      } else if (!actor.hidden && (actor.timer -= dt) <= 0) {
         this.pickPopulationWaypoint(actor);
         actor.walking = true;
       }
       actor.pos.y = droneTerrainHeight(actor.pos.x, actor.pos.z);
-      animateAuthoredCharacter(actor.root, actor.walking, 0, 'patrol', actor.clock);
+      animateAuthoredCharacter(actor.root, actor.walking, 0,
+        actor.hiding && actor.walking ? 'flee' : 'patrol', actor.clock);
+      if (actor.hidden) kneelAuthoredCharacter(actor.root, 1);
     }
   }
 
@@ -3454,6 +3988,82 @@ export class DroneController {
   // being intercepted keeps running; a man standing a fire bay shoots back. Lethality
   // per shot is groundFireHitChance; a trench's own parapets block low approaches, so
   // hugging the dirt on the way in denies them the shot.
+  // A garrison under terminal attack doesn't stand its bay and trade — when the
+  // aircraft presses inside ~22m the men break down the slot for the dugout, firing
+  // stops as each man goes under the nakat, and the team files back to its bays once
+  // the aircraft opens back past ~35m. The run follows the bunker path (the dug slot
+  // itself), so nobody cuts across a parapet.
+  updateTrenchCover(dt) {
+    if (this.frozen) return;
+    for (const vehicle of this.combatVehicles) {
+      if (!vehicle.bunker?.path?.length || vehicle.kind !== 'infantry'
+        || vehicle.dead || vehicle.surrendered) continue;
+      const crew = vehicle.mesh?.userData.crew || [];
+      if (!crew.length) continue;
+      const distance = vehicle.pos.distanceTo(this.pos);
+      if (distance < 22) vehicle.takingCover = true;
+      else if (distance > 35) vehicle.takingCover = false;
+      const path = vehicle.bunker.path;
+      const base = vehicle.mesh.position;
+      for (const soldier of crew) {
+        const ud = soldier.userData;
+        if (ud.fall) continue;
+        if (!ud.post) {
+          ud.post = { x: soldier.position.x, z: soldier.position.z,
+            yaw: soldier.rotation.y, kneel: !!ud.kneel };
+          let best = 0, bestD = Infinity;
+          for (const [index, [px, pz]] of path.entries()) {
+            const d = Math.hypot(px - ud.post.x, pz - ud.post.z);
+            if (d < bestD) { bestD = d; best = index; }
+          }
+          ud.homeIdx = best;
+        }
+        let target = null, terminal = null;
+        if (vehicle.takingCover) {
+          if (ud.sheltered) continue;
+          if (ud.coverIdx == null) ud.coverIdx = ud.homeIdx;
+          target = path[ud.coverIdx];
+          terminal = () => {
+            if (ud.coverIdx < path.length - 1) { ud.coverIdx += 1; return; }
+            ud.sheltered = true;
+            ud.moving = false;
+            ud.kneel = true;
+          };
+        } else {
+          if (ud.coverIdx == null) continue;
+          ud.sheltered = false;
+          if (ud.coverIdx > ud.homeIdx) {
+            target = path[ud.coverIdx - 1];
+            terminal = () => { ud.coverIdx -= 1; };
+          } else {
+            target = [ud.post.x, ud.post.z];
+            terminal = () => {
+              ud.coverIdx = null;
+              ud.moving = false;
+              ud.kneel = ud.post.kneel;
+              soldier.rotation.y = ud.post.yaw;
+            };
+          }
+        }
+        const dx = target[0] - soldier.position.x;
+        const dz = target[1] - soldier.position.z;
+        const gap = Math.hypot(dx, dz);
+        if (gap < 0.3) { terminal(); continue; }
+        ud.moving = true;
+        if (ud.kneel) { ud.kneel = false; kneelAuthoredCharacter(soldier, 0); }
+        const step = Math.min(gap, 2.7 * dt);
+        soldier.position.x += dx / gap * step;
+        soldier.position.z += dz / gap * step;
+        soldier.rotation.y = Math.atan2(dx, dz);
+        if (droneTerrain) {
+          soldier.position.y = droneTerrain(
+            base.x + soldier.position.x, base.z + soldier.position.z,
+          ) - base.y + 0.02;
+        }
+      }
+    }
+  }
+
   updateInfantryDefence(dt, solids) {
     if (this.frozen) return;
     for (const vehicle of this.combatVehicles) {
@@ -3474,6 +4084,9 @@ export class DroneController {
       for (let attempt = 0; attempt < crew.length; attempt++) {
         vehicle.defenceCrewIndex = ((vehicle.defenceCrewIndex ?? -1) + 1) % crew.length;
         const gunner = crew[vehicle.defenceCrewIndex];
+        // Fallen men, men running for the dugout and men already under it don't shoot.
+        if (gunner.userData.fall || gunner.userData.moving
+          || gunner.userData.sheltered) continue;
         gunner.getWorldPosition(origin);
         origin.y += 1.12;
         if (origin.distanceTo(aim) > 50 || !hasLOS(
@@ -3504,7 +4117,7 @@ export class DroneController {
       origin.x, origin.y, origin.z, this.pos.x, this.pos.y, this.pos.z,
     )) return false;
     // One aimed shot. Almost all of them miss — see groundFireHitChance — but every
-    // unblocked round still reads as a live threat: a tracer streak, a pressure shove
+    // unblocked round still reads as a live threat: a tracer streak, camera flinch
     // and the KEEP MOVING call. The streak of a miss cracks PAST the airframe with a
     // small lateral offset; the rare connecting round ends the tracer on the hull and
     // kills the airframe outright.
@@ -3525,7 +4138,9 @@ export class DroneController {
     tracer.name = 'drone-incoming-tracer';
     this.scene.add(tracer);
     this.effects.push({ type: 'tracer', root: tracer, life: 0.16, age: 0 });
-    this.vel.addScaledVector(direction, impulse);
+    // Incoming fire is not a flight-control input. The former velocity impulse pushed the
+    // aircraft away from every shooter—including rounds that visibly missed—forcing the
+    // pilot to fight an invisible hand near trench lines.
     this.roll += (origin.x < this.pos.x ? 1 : -1) * 0.045;
     this.incomingPressure = Math.min(1, this.incomingPressure + 0.48);
     this.onIncomingFire?.(origin);

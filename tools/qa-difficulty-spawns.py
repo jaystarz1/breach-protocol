@@ -63,6 +63,16 @@ def main():
               for (const definition of level.civilians) {
                 if (definition.window) allowedCivilian.add(roundKey(definition.window));
               }
+              const nearAllowed = (allowed, entry) => {
+                if (allowed.has(key(entry))) return true;
+                const [ex, ey, ez] = entry.p;
+                for (const spot of allowed) {
+                  const [sx, sy, sz] = spot.split(',').map(Number);
+                  if (Math.abs(sy - ey) < 1.2
+                    && Math.hypot(sx - ex, sz - ez) <= 4.3) return true;
+                }
+                return false;
+              };
               const rosterEnemies = [
                 ...BP.world.enemies.map(actor => ({
                   p: actor.perch || actor.spawnPos.toArray(),
@@ -144,13 +154,16 @@ def main():
                 mixedDuplicates: Object.entries(occupied)
                   .filter(([, roles]) => new Set(roles).size > 1)
                   .map(([position, roles]) => ({ position, roles })),
+                // declipActor (main.js) nudges an actor whose authored socket sits
+                // inside a solid up to 4.2 to the nearest clear stand; an actor within
+                // that radius of an allowed socket still traces to authored data.
                 unsafeEnemies: rosterEnemies
                   .filter(entry => entry.droneTarget
-                    ? !allowedDrone.has(key(entry))
-                    : !allowedEnemy.has(key(entry)))
+                    ? !nearAllowed(allowedDrone, entry)
+                    : !nearAllowed(allowedEnemy, entry))
                   .map(key),
                 unsafeCivilians: rosterCivilians
-                  .filter(entry => !allowedCivilian.has(key(entry)))
+                  .filter(entry => !nearAllowed(allowedCivilian, entry))
                   .map(key),
                 offNavEnemies: rosterEnemies
                   .filter(entry => !entry.perches && navDistance(entry) > 2.8)

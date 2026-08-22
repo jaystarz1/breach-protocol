@@ -8,7 +8,7 @@ import { DoorSystem } from './breach.js';
 import { buildStaticGeometry } from './levelgen.js';
 import { makeBox, raycastSolids, raySphere, rayVerticalCapsule, groundHeight, hasLOS } from './physics.js';
 import { LEVELS, LEGACY_LEVELS } from './levels/index.js';
-import { buildNavGrid } from './navgrid.js';
+import { buildNavGrid, nearestNode } from './navgrid.js';
 import { DIFFICULTIES } from './difficulty.js';
 import { hud } from './hud.js';
 import * as save from './save.js';
@@ -38,7 +38,7 @@ import {
   createDroneAssaultVehicle, DroneController, dronePrewarmGroup, setDroneTerrain,
   setDroneFoliage,
 } from './drone.js';
-import { terrainSampler, terrainMin, buildTerrainMesh, buildTerrainApron, buildRoadRibbons, buildRailLine } from './terrain.js';
+import { terrainSampler, terrainMin, buildTerrainMesh, buildTerrainApron, buildRoadRibbons, buildRailLine, buildGroundScars } from './terrain.js';
 import { buildTreeStands, treeFoliageColliders } from './trees.js';
 import { buildHamlet } from './hamlet.js';
 import {
@@ -599,6 +599,9 @@ function startLevel(id, requestedTimeOfDay = null) {
     terrainGroup.add(buildTerrainApron(L.terrainDef));
     // Roads are ribbons draped onto the sampled surface, not boxes floating over it.
     if (L.roadPaint) terrainGroup.add(buildRoadRibbons(L.terrainDef, L.roadPaint));
+    // Shell craters and churned staging ground around the dug lines — painted decals,
+    // the height grid is untouched.
+    if (L.groundScars) terrainGroup.add(buildGroundScars(L.terrainDef, L.groundScars));
     if (L.railLines) terrainGroup.add(buildRailLine(L.terrainDef, L.railLines));
     // Shelterbelts, hedgerows and verge scrub: one merged mesh, every plant stamped onto
     // its own sampled ground (see trees.js).
@@ -820,6 +823,28 @@ function startLevel(id, requestedTimeOfDay = null) {
   // Built BEFORE doors are added as solids, so a doorway stays routable once breached —
   // a closed door still physically blocks movement, it just isn't baked into the graph.
   const nav = buildNavGrid(solids);
+  // Stitch the graph across authored doorways. A narrow frame can defeat the grid's
+  // clearance sampling between two cell centres even though the doorway is the designed
+  // route — which left a whole wing of the joined block walkable on foot but unroutable,
+  // so pursuit AI stopped at the seam. Link the nearest node on each side of every door.
+  for (const d of L.doors || []) {
+    const along = ((d.rot ?? 0) % 180 === 0);   // leaf along x -> crossing axis is z
+    const doorY = d.pos[1] ?? 0;
+    const pick = side => {
+      const px = d.pos[0] + (along ? 0 : side * 1.1);
+      const pz = d.pos[2] + (along ? side * 1.1 : 0);
+      const n = nearestNode(nav, px, doorY, pz);
+      if (n < 0) return -1;
+      if (Math.hypot(nav.nodeX[n] - px, nav.nodeZ[n] - pz) > 1.9
+        || Math.abs(nav.nodeY[n] - doorY) > 1.2) return -1;
+      return n;
+    };
+    const a = pick(-1), b = pick(1);
+    if (a >= 0 && b >= 0 && a !== b && !nav.neighbors[a].includes(b)) {
+      nav.neighbors[a].push(b);
+      nav.neighbors[b].push(a);
+    }
+  }
 
   const doors = new DoorSystem(scene, L.doors || []);
   doors.addSolids(solids);
@@ -861,7 +886,7 @@ function startLevel(id, requestedTimeOfDay = null) {
     playerPos: player.pos, playerYaw: player.yaw, playerSpeed: 0, playerAds: false, playerCrouched: false,
     combatHeat: 0, slowmo: 0, blind: 0,
     droneHandoff: null,
-    hostageCommand: 'follow',
+    hostageCommand: 'shelter',
     objectiveIdx: resume, objectiveStepIdx: 0, objectiveDevices,
     sniperActive: !!L.sniper,
     won: false, over: false,
@@ -1067,8 +1092,11 @@ function startLevel(id, requestedTimeOfDay = null) {
     };
     const sp = definition.spawnPhase ?? 0;
     if (sp < resume) return;
-    if (sp <= resume) world.enemies.push(new Enemy(scene, definition, diff));
-    else world.pendingActors.enemies.push(definition);
+    if (sp <= resume) {
+      const enemy = new Enemy(scene, definition, diff);
+      declipActor(enemy);
+      world.enemies.push(enemy);
+    } else world.pendingActors.enemies.push(definition);
   });
 
   // Reinforcements. The clock is the pressure: dawdle and more men arrive, so a fast clean
@@ -1152,8 +1180,11 @@ function startLevel(id, requestedTimeOfDay = null) {
     };
     const sp = definition.spawnPhase ?? 0;
     if (sp < resume) return;
-    if (sp <= resume) world.civilians.push(new Civilian(scene, definition));
-    else world.pendingActors.civilians.push(definition);
+    if (sp <= resume) {
+      const civilian = new Civilian(scene, definition);
+      declipActor(civilian);
+      world.civilians.push(civilian);
+    } else world.pendingActors.civilians.push(definition);
   });
 
   // Squad. Not on the sniper mission: the player is a single man locked to a parapet and the
@@ -1619,6 +1650,39 @@ function useObjectiveDevice(device, obj) {
   return true;
 }
 
+// A spawn socket authored before the scenery grew around it can end up INSIDE a solid —
+// mission 4's phase-7 sockets landed inside parked motor-pool hulls on two of three
+// variants, leaving an unhittable, immobile enemy that made the clear unwinnable. Any
+// embedded actor is nudged to the nearest clear stand instead.
+function actorEmbedded(x, y, z) {
+  return world.solids.some(s =>
+    s.min.x < x + 0.28 && s.max.x > x - 0.28
+    && s.min.z < z + 0.28 && s.max.z > z - 0.28
+    && s.min.y < y + 1.5 && s.max.y > y + 0.45);
+}
+
+function declipActor(actor) {
+  // Authored set pieces stay exactly where they were put: a window shooter lives inside
+  // his bay's geometry, a bastion post hugs its parapet, a bound hostage sits in a chair.
+  if (actor.perches || actor.perch || actor.bastion || actor.hostage) return;
+  const p = actor.pos;
+  if (!p || !actorEmbedded(p.x, p.y, p.z)) return;
+  for (let r = 0.6; r <= 4.2; r += 0.6) {
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + r;
+      const x = p.x + Math.cos(a) * r;
+      const z = p.z + Math.sin(a) * r;
+      if (!actorEmbedded(x, p.y, z)) {
+        p.x = x;
+        p.z = z;
+        actor.spawnPos?.copy?.(p);
+        actor.mesh?.position?.copy?.(p);
+        return;
+      }
+    }
+  }
+}
+
 // Deferred segment actors: a merged act's later segments spawn their roster when their
 // first phase begins, so earlier fights never leak forward and the runner/HVT clocks only
 // start once the player is actually at that segment's doorstep.
@@ -1637,12 +1701,15 @@ function spawnDeferredActors() {
     const definition = pending.enemies.splice(i, 1)[0];
     const enemy = new Enemy(scene, definition, world.diff);
     capRange(enemy);
+    declipActor(enemy);
     world.enemies.push(enemy);
   }
   for (let i = pending.civilians.length - 1; i >= 0; i--) {
     if ((pending.civilians[i].spawnPhase ?? 0) > idx) continue;
     const definition = pending.civilians.splice(i, 1)[0];
-    world.civilians.push(new Civilian(scene, definition));
+    const civilian = new Civilian(scene, definition);
+    declipActor(civilian);
+    world.civilians.push(civilian);
   }
   if (pending.ctTeam && pending.ctTeam.phase <= idx) {
     const L = world.level;
@@ -1676,6 +1743,7 @@ function setObjective() {
   world.objectiveState = null;
   world.objStuckTime = 0;
   world.lastIntelCallout = 0;
+  world.objLiveCount = undefined;
   if (world.markers) { for (const { m } of world.markers) scene.remove(m); world.markers = null; }
   if (world.objMarkers) { for (const m of world.objMarkers) scene.remove(m); world.objMarkers = []; }
   // Reach points use a grounded, depth-tested locator plus the HUD distance. A forty-metre
@@ -2211,8 +2279,18 @@ function objectiveWatchdog(dt) {
   if (!obj) return;
   world.objStuckTime = (world.objStuckTime || 0) + dt;
   if (obj.type !== 'clear') return;
+  // The blocker set is exactly what checkObjectives counts against a clear: surrendered men
+  // and excluded HVTs never block, so they must not keep the stall clock honest either.
   const live = world.enemies.filter(e =>
-    !e.dead && (!e.surrendered || !e.secured));
+    !e.dead && !e.surrendered && !(obj.excludeHvt && e.hvt));
+  // A kill or surrender is progress. The stall clock measures time with NOTHING advancing
+  // the clear, so it restarts whenever the blocker set shrinks; reinforcements growing it
+  // do not reset anything.
+  if (world.objLiveCount === undefined || live.length < world.objLiveCount) {
+    world.objStuckTime = 0;
+    world.lastIntelCallout = 0;
+  }
+  world.objLiveCount = live.length;
   // A stalled clear gets a coarse radio callout, never an x-ray marker. The direction is
   // relative and the range is deliberately broad: command can report a sector, not a head.
   if (world.objStuckTime > 60 && live.length
@@ -2234,6 +2312,19 @@ function objectiveWatchdog(dt) {
   if (world.objStuckTime > 90) {
     for (const e of live) {
       if ((e.inactiveTime || 0) > 90) {
+        e.damage(99999, world);
+        hud.feed('TARGET NEUTRALIZED BY OVERWATCH', '#ffd54f');
+      }
+    }
+  }
+  // Last-resort tier: a straggler wedged on geometry can oscillate with `moving` true and
+  // never accrue inactiveTime. After 150s with zero clear progress, any blocker who has not
+  // fired a shot in 30s is by definition out of the fight — command takes him. Killing (not
+  // skipping) is deliberate: death runs the normal tag hooks (blackout triggers, scoring),
+  // so no authored beat is silently bypassed the way a threshold auto-advance would.
+  if (world.objStuckTime > 150) {
+    for (const e of live) {
+      if ((e.sinceFired ?? 9999) > 30) {
         e.damage(99999, world);
         hud.feed('TARGET NEUTRALIZED BY OVERWATCH', '#ffd54f');
       }
@@ -2475,8 +2566,11 @@ function civilianKilled(civ) {
   }
 }
 
-const HOSTAGE_COMMANDS = ['follow', 'stay', 'down'];
+// SHELTER is the default: a freed hostage clears the player's space, finds cover and
+// stays there. FOLLOW (the escort train) is an explicit choice, not the standing tax.
+const HOSTAGE_COMMANDS = ['shelter', 'follow', 'stay', 'down'];
 const HOSTAGE_COMMAND_LABEL = {
+  shelter: 'SHELTER',
   follow: 'FOLLOW',
   stay: 'STAY',
   down: 'GET DOWN',

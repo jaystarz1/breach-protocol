@@ -19,29 +19,24 @@ const DEEP_RAIL = [{ points: [[245, -60], [272, -118], [300, -180], [330, -250],
 carveRailGrade(DEEP_FENCE_TERRAIN, [...TRAINING_RAIL, ...DEEP_RAIL]);
 
 // ----------------------------------------------------------------- field fortifications
-// Traversed fire trenches dug into the shelterbelt wood lines, on the pattern the drone
-// war actually photographs: straight fire bays of a few metres broken by perpendicular
-// traverse doglegs (never a long straight run an attacker could enfilade or one blast
-// could sweep), a ~1.4m-wide revetted slot between spoil parapets, and a 3x3m dugout
-// cut behind the line — entrance shielded by the traverse — under a roll of tree-trunk
-// logs, half a metre of soil and cut branches. The DEM carve supplies the excavation
-// depression; the works on top complete the 1.5m+ floor-to-crest profile.
+// Russian invasion-pattern battle trenches dug into the shelterbelt wood lines, as
+// the Zaporizhzhia-line satellite passes and the FPV footage show them: ONE
+// continuous linear fire trench of ~7m legs bending ~45° at each apex (no bullet or
+// blast sweeps past a bend), OPEN TO THE SKY down its whole length, with discrete
+// log-and-earth blindage bunkers mounded along the line — men under attack run the
+// open slot and duck in through the blindage mouths, and an FPV follows them in.
+// The DEM carve supplies the excavation depression; parapets complete a 1.6m+
+// floor-to-crest profile.
 function trenchLayout(at, axis = 'x', side = 1, label = 'TRENCH') {
-  // u runs along the frontage, v across it; `side` flips which way the middle bay jogs
-  // and puts the dugout on the opposite (sheltered) side.
-  const bays = [
-    { u0: -9, u1: -2.6, v: 0 },
-    { u0: -2.6, u1: 3.6, v: 2.3 * side },
-    { u0: 3.6, u1: 9, v: 0 },
+  // u runs along the frontage, v across it; `side` flips which way the zigzag bows.
+  // Legs 0 and 2 each carry a blindage over their middle ~3.6m; the rest is open.
+  const verts = [
+    [-13, 0], [-6.5, 2.6 * side], [0, 0], [6.5, 2.6 * side], [13, 0],
   ];
-  const traverses = [
-    { u: -2.6, v0: 0, v1: 2.3 * side },
-    { u: 3.6, v0: 0, v1: 2.3 * side },
-  ];
-  const dugout = { u: -6.2, v: -3.4 * side, sap: { u: -6.2, v0: 0, v1: -3.4 * side } };
+  const covered = [0, 2];
   const toWorld = (u, v) => (axis === 'x'
     ? [at[0] + u, at[1] + v] : [at[0] + v, at[1] + u]);
-  return { at, axis, side, label, bays, traverses, dugout, toWorld };
+  return { at, axis, side, label, verts, covered, toWorld };
 }
 
 // Every trench sits ON a shelterbelt line (BASE_BELTS/DEEP_BELTS below), dug along the
@@ -65,101 +60,109 @@ const DEEP_TRENCHES = [
 ];
 
 function trenchTrace(layout) {
-  const { bays, dugout, toWorld } = layout;
-  const points = [
-    toWorld(bays[0].u0, bays[0].v), toWorld(bays[0].u1, bays[0].v),
-    toWorld(bays[1].u0, bays[1].v), toWorld(bays[1].u1, bays[1].v),
-    toWorld(bays[2].u0, bays[2].v), toWorld(bays[2].u1, bays[2].v),
-  ];
-  return [
-    { points, depth: 0.85 },
-    { points: [toWorld(dugout.sap.u, dugout.sap.v0), toWorld(dugout.u, dugout.v)],
-      depth: 1.05, half: 2.2, blend: 7 },
-  ];
+  return [{
+    points: layout.verts.map(([u, v]) => layout.toWorld(u, v)),
+    depth: 1.3,
+  }];
 }
 
-// One channel piece of trench works: dark excavated floor, plank revetments on both
-// walls, pale fresh-spoil parapets outside them (solid — an airframe that clips a berm
-// detonates in the dirt). Runs along `dir` ('u' = the frontage axis, 'v' = a traverse).
-function trenchChannel(g, terrain, layout, uc, vc, length, dir) {
-  const along = (layout.axis === 'x') === (dir === 'u');
-  // Short sub-pieces, each grounded on its own terrain sample: a single 7m box on the
-  // carved slope leaves one end floating and buries the other.
-  const pieces = Math.max(1, Math.ceil(length / 3));
-  const step = length / pieces;
+// One zigzag leg: dark excavated floor and pale fresh-spoil parapets stepped along
+// the diagonal in short axis-aligned pieces (the box world can't rotate a solid, and
+// a stagger of spoil heaps is what fresh digging looks like from the air anyway).
+// The slot is OPEN TO THE SKY down its whole length — that's why an FPV can fly the
+// trench — except where a leg carries its blindage: a ~3.6m log-and-earth bunker
+// mounded over the middle of the slot, Russian invasion pattern. Solid overhead,
+// both mouths open onto the trench, flyable underneath: the drone can chase a man
+// down the slot and in through the doorway, exactly like the war footage.
+function trenchLeg(g, terrain, layout, a, b, blindage) {
+  const [ax, az] = layout.toWorld(a[0], a[1]);
+  const [bx, bz] = layout.toWorld(b[0], b[1]);
+  const dx = bx - ax, dz = bz - az;
+  const length = Math.hypot(dx, dz);
+  const ux = dx / length, uz = dz / length;
+  const px = -uz, pz = ux;
+  const alongX = Math.abs(ux) >= Math.abs(uz);
+  const pieces = Math.max(2, Math.round(length / 1.1));
+  const step = length / pieces + 0.55;   // overlap so the diagonal stagger never gaps
   for (let p = 0; p < pieces; p++) {
-    const c = uc - length / 2 + step * (p + 0.5);
-    const [wx, wz] = dir === 'u' ? layout.toWorld(c, vc) : layout.toWorld(uc, vc - length / 2 + step * (p + 0.5));
+    const t = (p + 0.5) / pieces;
+    const wx = ax + dx * t, wz = az + dz * t;
     const y0 = terrain(wx, wz);
-    const B = (dy, sy, off, thickness, color, solid = false) => {
-      g.push(along
-        ? [wx, y0 + dy, wz + off, step + 0.25, sy, thickness, color, solid]
-        : [wx + off, y0 + dy, wz, thickness, sy, step + 0.25, color, solid]);
+    const covered = blindage && Math.abs(t * length - length / 2) < 1.8;
+    const B = (off, dy, sy, wide, color, solid = false) => {
+      g.push([wx + px * off, y0 + dy, wz + pz * off,
+        alongX ? step : wide, sy, alongX ? wide : step, color, solid]);
     };
-    B(0.03, 0.07, 0, 1.4, 0x282b20);                      // excavated floor
+    B(0, 0.03, 0.07, 1.5, 0x282b20);                    // excavated floor
     for (const s of [-1, 1]) {
-      B(0.4, 0.72, s * 0.74, 0.09, 0x4a3d2a);             // plank revetment
-      B(0.32, 0.62, s * 1.32, 1.0, 0x5a523d, true);       // spoil parapet
+      if (covered) B(s * 1.32, 0.75, 1.5, 1.2, 0x5a523d, true);  // blindage shoulder
+      else B(s * 1.32, 0.45, 0.9, 1.0, 0x5a523d, true);          // open-trench parapet
+    }
+    if (covered) {
+      B(0, 1.64, 0.26, 3.7, p % 2 ? 0x4a3b28 : 0x423424, true);  // log roll
+      B(0, 1.9, 0.26, 3.3, 0x50483a, true);                      // earth mound
+      B((p % 2 ? 1 : -1) * 0.4, 2.08, 0.12, 2.6, 0x36402a);      // cut branches
     }
   }
 }
 
 function trenchWorks(terrain, layout) {
   const g = [];
-  for (const bay of layout.bays) {
-    trenchChannel(g, terrain, layout,
-      (bay.u0 + bay.u1) / 2, bay.v, Math.abs(bay.u1 - bay.u0) + 0.4, 'u');
+  const { verts, covered } = layout;
+  for (let leg = 0; leg < verts.length - 1; leg++) {
+    trenchLeg(g, terrain, layout, verts[leg], verts[leg + 1], covered.includes(leg));
   }
-  for (const traverse of layout.traverses) {
-    trenchChannel(g, terrain, layout,
-      traverse.u, (traverse.v0 + traverse.v1) / 2,
-      Math.abs(traverse.v1 - traverse.v0) + 1.4, 'v');
-  }
-  const { dugout } = layout;
-  trenchChannel(g, terrain, layout,
-    dugout.sap.u, (dugout.sap.v0 + dugout.sap.v1) / 2,
-    Math.abs(dugout.sap.v1 - dugout.sap.v0), 'v');
-  // The dugout: a 3x3 chamber under a roll of tree-trunk logs, soil, and cut branches.
-  // The roof is solid — a drone cannot reach whoever is under the nakat, only whoever
-  // is standing in an open bay. Same lesson as the barn, dug into the ground.
-  const [dx, dz] = layout.toWorld(dugout.u, dugout.v);
-  const dy = terrain(dx, dz);
-  const logAlong = layout.axis === 'x';
-  for (let log = 0; log < 6; log++) {
-    const off = (log - 2.5) * 0.56;
-    const tone = log % 2 ? 0x4a3b28 : 0x423424;
-    g.push(logAlong
-      ? [dx + off, dy + 0.62, dz, 0.52, 0.3, 3.5, tone, true]
-      : [dx, dy + 0.62, dz + off, 3.5, 0.3, 0.52, tone, true]);
-  }
-  g.push([dx, dy + 0.92, dz, 3.2, 0.32, 3.2, 0x50483a, true]);   // soil cover
-  g.push([dx + 0.4, dy + 1.12, dz - 0.3, 2.6, 0.14, 2.2, 0x36402a, false]); // branches
-  g.push([dx - 0.7, dy + 1.1, dz + 0.8, 1.8, 0.12, 1.6, 0x3d4630, false]);
-  // Sandbagged fire steps at the outer bay ends.
-  const ends = [layout.toWorld(layout.bays[0].u0 + 1, layout.bays[0].v - 2.1 * layout.side),
-    layout.toWorld(layout.bays[2].u1 - 1, layout.bays[2].v - 2.1 * layout.side)];
+  // Sandbagged fire steps forward of both line ends.
+  const last = verts.length - 1;
+  const ends = [
+    layout.toWorld(verts[0][0] + 0.8, verts[0][1] - 1.9 * layout.side),
+    layout.toWorld(verts[last][0] - 0.8, verts[last][1] - 1.9 * layout.side),
+  ];
   for (const [sx, sz] of ends) {
     g.push(...lift(sandbags(sx, sz, 4, 2, layout.axis === 'z', 5), terrain(sx, sz)));
+  }
+  // Cut brush banked over both parapet lips down the whole line. A dug position is
+  // spotted by its fresh spoil, so no garrison leaves the lips bare — and the brush
+  // breaks up the men standing in the slot. Non-solid: fire and airframes pass
+  // through it; it only has to hide the line. Seeded per trench so builds replay.
+  let leaf = ((Math.abs(Math.round(layout.at[0] * 31 + layout.at[1] * 17)) + 7)
+    * 2654435761) >>> 0;
+  const frand = () => ((leaf = (leaf * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  const greens = [0x36402a, 0x3d4630, 0x2f3a26, 0x44502e];
+  for (let leg = 0; leg < verts.length - 1; leg++) {
+    const [au, av] = verts[leg];
+    const [bu, bv] = verts[leg + 1];
+    const run = Math.hypot(bu - au, bv - av);
+    for (let d = 0.7; d < run; d += 1.5) {
+      const t = d / run;
+      const cu = au + (bu - au) * t, cv = av + (bv - av) * t;
+      const perpU = -(bv - av) / run, perpV = (bu - au) / run;
+      for (const s of [-1, 1]) {
+        if (frand() < 0.2) continue;
+        const off = s * (1.9 + frand() * 1.2);
+        const [fx, fz] = layout.toWorld(cu + perpU * off, cv + perpV * off);
+        const fy = terrain(fx, fz);
+        const w = 1.1 + frand() * 1.4;
+        const h = 0.7 + frand() * 0.6;
+        g.push([fx, fy + h / 2 + 0.08, fz, w, h,
+          w * (0.7 + frand() * 0.6), greens[(leaf >>> 8) % greens.length], false]);
+      }
+    }
   }
   return g;
 }
 
-// Garrison walk path for the ambient population: an ORDERED polyline down the slot —
-// dugout mouth, bay, traverse corners, bay — so a man moving between posts follows the
-// dug line instead of clipping through a parapet corner.
+// Garrison walk path for the ambient population: the zigzag's own vertices, ordered
+// from the western covered leg east, so a man moving between posts follows the dug
+// line instead of cutting across a bend's parapet. Post 0 sits at the mouth of the
+// western bunker stretch — the hiding walk runs down to it and then under the logs.
 function trenchPosts(layout) {
-  const [b0, b1, b2] = layout.bays;
-  return [
-    layout.toWorld(layout.dugout.sap.u, layout.dugout.sap.v1 * 0.55),
-    layout.toWorld(layout.dugout.sap.u, 0),
-    layout.toWorld((b0.u0 + b0.u1) / 2, b0.v),
-    layout.toWorld(b0.u1, b0.v),
-    layout.toWorld(b1.u0, b1.v),
-    layout.toWorld((b1.u0 + b1.u1) / 2, b1.v),
-    layout.toWorld(b1.u1, b1.v),
-    layout.toWorld(b2.u0, b2.v),
-    layout.toWorld((b2.u0 + b2.u1) / 2, b2.v),
-  ];
+  return layout.verts.map(([u, v]) => layout.toWorld(u, v));
+}
+// Midpoint of the western covered leg: where a man under the logs actually stands.
+function trenchShelterSpot(layout) {
+  const [a, b] = layout.verts;
+  return layout.toWorld((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
 }
 
 // People behind the launch line remain scenery. Hostile trench occupants never satisfy
@@ -169,16 +172,29 @@ const FARM_SCENERY = [
   { at: [-190, 395], r: 13, count: 2, faction: 'friendly' },
 ];
 
+// The dug line as an ordered local-frame polyline ending under the western bunker
+// stretch: the route a man under drone attack runs — down his own leg, around the
+// bends, under the logs. drone.js walks crew figures along it (nearest vertex, then
+// ascending index) so nobody cuts across a parapet on the way to cover.
+function trenchShelterPath(layout) {
+  const local = ([wx, wz]) => [wx - layout.at[0], wz - layout.at[1]];
+  const verts = [...layout.verts].reverse().slice(0, -1)
+    .map(([u, v]) => local(layout.toWorld(u, v)));
+  return [...verts, local(trenchShelterSpot(layout))];
+}
+
 const trenchOpportunity = (layout, label, team = 3, yaw = 0) => ({
   kind: 'infantry', label, optional: true, team, yaw: 0,
   pos: [layout.at[0], 0, layout.at[1]],
-  // Explicit figure offsets: one man per fire bay, standing in the dug slot instead of
-  // scattered across his own parapet. `yaw` seeds the facing variety only.
-  figures: layout.bays.slice(0, team).map((bay, index) => [
-    (bay.u0 + bay.u1) / 2 + (index - 1) * 0.6, bay.v, yaw + index * 2.3,
-  ]).map(([u, v, facing]) => {
+  bunker: { path: trenchShelterPath(layout) },
+  // Explicit figure offsets: the open fire-bay midpoints and the centre apex —
+  // nobody loiters under the bunker logs until the position is actually pressed.
+  // `yaw` seeds the facing variety only.
+  figures: [
+    [-3.25, 1.3 * layout.side], [9.75, 1.3 * layout.side], [0, 0],
+  ].slice(0, team).map(([u, v], index) => {
     const [wx, wz] = layout.toWorld(u, v);
-    return [wx - layout.at[0], wz - layout.at[1], facing];
+    return [wx - layout.at[0], wz - layout.at[1], yaw + index * 2.3];
   }),
   killMessage: `${label} WAS A TARGET OF OPPORTUNITY — ASSIGNED TASK STILL ACTIVE.`,
 });
@@ -207,7 +223,8 @@ function trenchRoster(deep) {
   if (deep) ensureGarrisons(BASE_TRENCHES.length, layouts.length, 2);
   return {
     population: layouts.flatMap((layout, index) => (states[index] === 'ambient'
-      ? [{ posts: trenchPosts(layout), count: 1 + (Math.random() < 0.5 ? 1 : 0) }]
+      ? [{ posts: trenchPosts(layout), count: 1 + (Math.random() < 0.5 ? 1 : 0),
+        shelter: trenchShelterSpot(layout) }]
       : [])),
     opportunities: layouts.flatMap((layout, index) => (states[index] === 'garrison'
       ? [trenchOpportunity(layout, `${layout.label} FIRE TEAM`,
@@ -375,6 +392,8 @@ function vehicleClearways(objectives) {
   for (const phaseDef of objectives) {
     for (const step of phaseDef.steps || [phaseDef]) {
       for (const vehicle of step.vehicles || []) {
+        // A flight path needs no clearway: the canopy is scenery a hundred metres below.
+        if (vehicle.airborne) continue;
         const routes = [vehicle.route, vehicle.reaction?.route,
           ...(vehicle.variants || []).map(variant => variant.route)];
         for (const route of routes) {
@@ -399,14 +418,13 @@ function treePlanFor(roadPaint, railLines, deep, hamletPlan, routeAvoid = []) {
     ...(hamletPlan?.farms || []).map(f => ({ at: f.at, r: 26 })),
   ];
   // The digging kept the trunks out of the works themselves and nothing more: the
-  // avoid footprint hugs the dug slot, parapets and dugout, so the belt's surviving
+  // avoid footprint hugs the zigzag slot and its parapets, so the belt's surviving
   // row stands right at the lip and its canopy closes over the trench. Finding the
   // line means looking through trees, and striking it means flying down through them.
   const trenchAvoid = (deep ? [...BASE_TRENCHES, ...DEEP_TRENCHES] : BASE_TRENCHES)
     .flatMap(layout => [
-      { points: [layout.toWorld(-10.5, layout.side * 1.15),
-        layout.toWorld(10.5, layout.side * 1.15)], half: 4.6 },
-      { at: layout.toWorld(layout.dugout.u, layout.dugout.v), r: 3.6 },
+      { points: [layout.toWorld(-13.5, layout.side * 1.3),
+        layout.toWorld(13.5, layout.side * 1.3)], half: 4.8 },
     ]);
   return {
     stands: [
@@ -575,6 +593,155 @@ function buildingRunnerRoute(building, requested, placements) {
   return route;
 }
 
+function barnRetreatPlan(building, sample) {
+  const cu = Math.cos(building.yaw), su = Math.sin(building.yaw);
+  const at = (u, v) => [building.x + u * cu - v * su, building.z + u * su + v * cu];
+  const front = -building.D / 2;
+  const truck = at(building.doorU + 1.5, front - 6.5);
+  const hideU = Math.max(-building.L / 2 + 1.35,
+    Math.min(building.L / 2 - 1.35, building.doorU + (building.doorU > 0 ? -2.3 : 2.3)));
+  const goAroundU = hideU + (hideU >= building.doorU ? -1.15 : 1.15);
+  const common = [
+    at(building.doorU, front - 2.1),
+    at(building.doorU, front + 0.9),
+    at(goAroundU, 0.05),
+    at(goAroundU, 1.35),
+    at(hideU, 1.35),
+  ];
+  const starts = [
+    [[truck[0] + cu * 3.1, truck[1] + su * 3.1],
+      [truck[0] - su * 3.0, truck[1] + cu * 3.0]],
+    [[truck[0] - cu * 3.1, truck[1] - su * 3.1],
+      [truck[0] + su * 3.0, truck[1] - cu * 3.0]],
+    [[truck[0] + su * 3.0, truck[1] - cu * 3.0],
+      [truck[0] + cu * 3.1, truck[1] + su * 3.1]],
+  ];
+  const routes = starts.map(start => [...start, ...common]);
+
+  // A waist-high stack inside the barn. The target rounds its end and crouches on the
+  // far side, so vanishing through the doorway is concealment rather than despawning.
+  const coverAt = at(hideU, 0.45);
+  const crossAt = at(hideU + (hideU >= building.doorU ? -0.58 : 0.58), 0.45);
+  const y = sample(coverAt[0], coverAt[1]);
+  const yCross = sample(crossAt[0], crossAt[1]);
+  const coverW = Math.abs(cu) * 1.45 + Math.abs(su) * 0.9;
+  const coverD = Math.abs(su) * 1.45 + Math.abs(cu) * 0.9;
+  const crossW = Math.abs(cu) * 0.95 + Math.abs(su) * 0.82;
+  const crossD = Math.abs(su) * 0.95 + Math.abs(cu) * 0.82;
+  return {
+    routes,
+    cover: [
+      [coverAt[0], y + 0.55, coverAt[1], coverW, 1.1, coverD, 0x8a7150],
+      [crossAt[0], yCross + 0.41, crossAt[1], crossW, 0.82, crossD, 0x927558],
+      [coverAt[0], y + 1.23, coverAt[1], coverW * 0.72, 0.38, coverD * 0.78, 0x765d3e],
+    ],
+  };
+}
+
+// ----------------------------------------------------------------- battlefield wear
+// What a working front actually looks like from a drone: shell craters walked around
+// the dug lines, churned staging ground behind them, and the fresh vehicle tracks that
+// give every position away. All painted (buildGroundScars / road ribbons) — the height
+// grid, the drone floor and the dugout runs never change.
+function closestOnRuns(x, z, runs) {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const run of runs) {
+    const pts = run.points;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+      const dx = bx - ax, dz = bz - az;
+      const t = Math.max(0, Math.min(1,
+        ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+      const px = ax + dx * t, pz = az + dz * t;
+      const d = Math.hypot(x - px, z - pz);
+      if (d < bestDistance) { bestDistance = d; best = [px, pz]; }
+    }
+  }
+  return { point: best, distance: bestDistance };
+}
+
+function supplyTrackRuns(deep, roadRuns) {
+  const layouts = deep ? [...BASE_TRENCHES, ...DEEP_TRENCHES] : BASE_TRENCHES;
+  const runs = [];
+  for (const layout of layouts) {
+    const [cx, cz] = layout.at;
+    const { point, distance } = closestOnRuns(cx, cz, roadRuns);
+    // Right on a road: no track needed. Too far: that trench was dug from elsewhere.
+    if (!point || distance < 18 || distance > 260) continue;
+    const dx = cx - point[0], dz = cz - point[1];
+    const len = Math.hypot(dx, dz) || 1;
+    // Vehicles stop short of the line; men walk the last metres. The dogleg keeps the
+    // track from reading as a ruler line.
+    const drop = [cx - dx / len * 14, cz - dz / len * 14];
+    const mid = [
+      (point[0] + drop[0]) / 2 + (dz / len) * 5,
+      (point[1] + drop[1]) / 2 - (dx / len) * 5,
+    ];
+    runs.push({ points: [point, mid, drop], width: 2.3, surface: [0x4d, 0x46, 0x37] });
+  }
+  return runs;
+}
+
+function groundScarPlan(deep, roadRuns, buildings, seedBase) {
+  let seed = ((seedBase + 5) * 2654435761) >>> 0;
+  const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  const layouts = deep ? [...BASE_TRENCHES, ...DEEP_TRENCHES] : BASE_TRENCHES;
+  const traces = layouts.map(layout => trenchTrace(layout)[0].points);
+  const craters = [];
+  const stains = [];
+  const clearOfTraces = (x, z, margin) => traces.every(points => {
+    for (let i = 0; i < points.length - 1; i++) {
+      if (pointSegmentDistance(x, z, points[i], points[i + 1]) < margin) return false;
+    }
+    return true;
+  });
+  const clear = (x, z) => {
+    if (Math.abs(x - 245) < 9) return false;                       // rail corridor
+    for (const building of buildings) {
+      if (Math.hypot(building.x - x, building.z - z) < 13) return false;
+    }
+    for (const run of roadRuns) {
+      const pts = run.points;
+      for (let i = 0; i < pts.length - 1; i++) {
+        if (pointSegmentDistance(x, z, pts[i], pts[i + 1])
+          < (run.width ?? 7) / 2 + 2.5) return false;
+      }
+    }
+    return true;
+  };
+  const craterRadius = () => (rand() < 0.72
+    ? 0.7 + rand() * 0.6          // mortar / 122mm
+    : 1.3 + rand() * 0.7);        // 152mm strikes
+  for (const layout of layouts) {
+    // Churned staging ground on the rear side of the line.
+    for (const u of [-7, 7]) {
+      const [sx, sz] = layout.toWorld(u + (rand() - 0.5) * 5, (4.5 + rand() * 2.5) * layout.side);
+      stains.push([sx, sz, 5 + rand() * 3]);
+    }
+    // The fire the position has already taken: craters walked around it.
+    let placed = 0;
+    for (let attempt = 0; attempt < 30 && placed < 9; attempt++) {
+      const [wx, wz] = layout.toWorld((rand() - 0.5) * 44, (rand() - 0.5) * 30);
+      if (!clearOfTraces(wx, wz, 3) || !clear(wx, wz)) continue;
+      craters.push([wx, wz, craterRadius()]);
+      placed++;
+    }
+  }
+  // Scattered strikes across the working area — a live front, not a golf course.
+  const area = deep ? [-300, 470, 300, -1150] : [-300, 470, 300, -600];
+  const want = deep ? 85 : 46;
+  let placed = 0;
+  for (let attempt = 0; attempt < want * 7 && placed < want; attempt++) {
+    const x = area[0] + rand() * (area[2] - area[0]);
+    const z = area[3] + rand() * (area[1] - area[3]);
+    if (!clearOfTraces(x, z, 6) || !clear(x, z)) continue;
+    craters.push([x, z, craterRadius()]);
+    placed++;
+  }
+  return { craters, stains };
+}
+
 function routePresentations(route, speed, starts = [0, 1, 2]) {
   return starts.map(start => {
     const rotated = [...route.slice(start), ...route.slice(0, start)];
@@ -591,6 +758,9 @@ function droneLevel(id, name, brief, objectives, options = {}) {
     vehicleClearways(objectives));
   const buildings = hamletLayout(hamletPlan, id);
   const treeCovers = treePlacements(treePlan, id);
+  const terrain = terrainSampler(DEEP_FENCE_TERRAIN);
+  const interiorHideCover = [];
+  const hideCoverKeys = new Set();
   // One occupancy roll per level build: within a mission the same trenches stay manned
   // across sorties, but the next session's build rolls again.
   const roster = trenchRoster(deep);
@@ -638,8 +808,18 @@ function droneLevel(id, name, brief, objectives, options = {}) {
           ? -building.D / 2 - requested.outsideFront : (requested.v || 0);
         const cu = Math.cos(building.yaw), su = Math.sin(building.yaw);
         const { positions: _positions, shelter: _shelter, ...rest } = vehicle;
-        const runnerRoute = vehicle.kind === 'infantry' && requested.evasionRoute
-          ? buildingRunnerRoute(building, requested, treeCovers) : null;
+        const retreat = vehicle.kind === 'infantry' && requested.retreatToCover
+          ? barnRetreatPlan(building, terrain) : null;
+        if (retreat) {
+          const key = `${building.x.toFixed(2)}:${building.z.toFixed(2)}`;
+          if (!hideCoverKeys.has(key)) {
+            hideCoverKeys.add(key);
+            interiorHideCover.push(...retreat.cover);
+          }
+        }
+        const runnerRoute = retreat?.routes[0]
+          || (vehicle.kind === 'infantry' && requested.evasionRoute
+            ? buildingRunnerRoute(building, requested, treeCovers) : null);
         return {
           ...rest,
           pos: runnerRoute
@@ -647,8 +827,12 @@ function droneLevel(id, name, brief, objectives, options = {}) {
             : [building.x + u * cu - v * su, 0, building.z + u * su + v * cu],
           ...(runnerRoute ? {
             route: runnerRoute,
-            variants: routePresentations(runnerRoute, vehicle.speed),
-            loop: true,
+            variants: retreat
+              ? retreat.routes.map(route => ({
+                pos: [route[0][0], 0, route[0][1]], route, speed: vehicle.speed,
+              }))
+              : routePresentations(runnerRoute, vehicle.speed),
+            loop: !retreat,
           } : {}),
           yaw: building.yaw + (requested.yawOffset || 0),
           shelter: {
@@ -662,11 +846,16 @@ function droneLevel(id, name, brief, objectives, options = {}) {
       }),
     })),
   }));
+  // Battlefield wear is generated AFTER the tree and hamlet plans so a supply track
+  // never carves a right-of-way through the belt that conceals its own trench.
+  const supplyTracks = supplyTrackRuns(deep, roadPaint);
+  const groundScars = groundScarPlan(deep, roadPaint, buildings, id);
   return {
     id, name, brief,
     curriculum: options.curriculum || [],
     targetDuration: options.targetDuration || [600, 720],
-    roadPaint,
+    roadPaint: [...roadPaint, ...supplyTracks],
+    groundScars,
     weapons: ['pistol'], grenades: 0, flashes: 0, squad: 0,
     lockPlayer: true, cameraFar: 3000,
     timeOfDay: options.timeOfDay || 'night',
@@ -679,7 +868,10 @@ function droneLevel(id, name, brief, objectives, options = {}) {
     hamletPlan,
     minimap: options.minimap || trainingMap(),
     start: [0, 0, 462, 0],
-    geo: () => droneFieldGeo(2000 + id * 31, options.geo || {}, treePlan, id, hamletPlan),
+    geo: () => [
+      ...droneFieldGeo(2000 + id * 31, options.geo || {}, treePlan, id, hamletPlan),
+      ...interiorHideCover,
+    ],
     doors: [], enemies: [], civilians: [], objectives: resolvedObjectives,
   };
 }
@@ -710,10 +902,11 @@ const interceptRuns = [
     label: 'FARMYARD RUNNER', health: 60, speed: 8.2, pos: [200, 0, 55],
     route: [[200, 55], [205, 62]], loop: true,
     shelter: {
-      kind: 'barn', standing: true, near: [200, 55], evasionRoute: true,
-      vehicleOrbit: true,
+      kind: 'barn', standing: true, near: [200, 55], retreatToCover: true,
     },
-    evasion: { style: 'building', triggerRadius: 150, decisionMin: 0.38, decisionMax: 0.82 },
+    evasion: { style: 'building-hide', oneWay: true, settleAtEnd: true,
+      activationRadius: 25,
+      triggerRadius: 150, decisionMin: 0.38, decisionMax: 0.82 },
     supportVehicles: [
       { kind: 'technical', label: 'PARKED FARM TRUCK', health: 180,
         optional: true, hostile: false,
@@ -1131,5 +1324,270 @@ export const DRONE_TRAINING_LEVELS = [
         ],
         places: [[-14, -527, 100, 70], [134, -1030, 84, 90], [330, -1237, 16, 60]],
       },
+    }),
+];
+
+// ---- Interdiction serial (21-24): FPV vs in-flight enemy drones ------------------------
+// The drone-on-drone war as it is actually run: a radar/acoustic net finds the track, the
+// plot goes to a mobile interceptor crew, the crew climbs to an ambush ahead of it and
+// takes the shot from above and behind. Quads are rammed through the rotors from the
+// camera blind spot; fixed-wing recon and one-way attack drones are hit on the transit.
+// The serial is a gunnery progression, not four operational sorties: 21 and 22 are
+// short air-start drills (contact, then evasion) with the target in view from the
+// first frame, 23 is the first real hunt from the pad, 24 is the night war.
+
+// An in-flight target. Route waypoints are [x, altitudeAGL, z] in world units; evasion
+// distances and rates are authored in metres like every other target field.
+function airborneTarget(kind, label, definition = {}) {
+  return {
+    kind, label, airborne: true, hostile: true,
+    health: definition.health ?? { mavic: 80, recon: 120, shahed: 140 }[kind] ?? 100,
+    ...definition,
+  };
+}
+
+// A drill starts on an airborne perch with the target already in the camera, so the
+// sortie IS the attack — no pad, no transit, no search. The controller uses `launch`
+// verbatim (and respawns every replacement airframe there), which is all an air start
+// needs; `facing` aims the first frame at the target's [x, z].
+function airStart(pos, facing) {
+  return {
+    launch: pos,
+    yaw: Math.atan2(-(facing[0] - pos[0]), -(facing[1] - pos[2])),
+  };
+}
+
+const DAY_SKY = {
+  timeOfDay: 'day',
+  sky: 0x78a9d2, fog: [0xb8c5bd, 650, 2800], ambient: 0.72, sun: 1.35,
+};
+const NIGHT_SKY = { sky: 0x10151c, fog: [0x151b22, 420, 2850], ambient: 0.48, sun: 0.22 };
+
+export const DRONE_INTERDICTION_LEVELS = [
+  droneLevel(21, 'FIRST CONTACT',
+    'Air-to-air gunnery, first period. You start each drill already at altitude with the target in view — no transit, no search. Three targets, none of them evade: a hover, a slow crossing, an orbit. Learn what it takes to put your airframe through another aircraft.',
+    [
+      phase('contact-hover', 'HIT A HOVERING TARGET', [fpv({
+        text: 'HOVERING QUAD 400 METRES AHEAD — FLY INTO IT.',
+        airframes: 3, ceiling: 95, ...airStart([6, 64, 270], [0, 150]),
+        training: { acquireRange: 320 },
+        lessons: [
+          lesson('THE WEAPON IS THE AIRCRAFT', 'There is no trigger. You kill another drone by flying into it, and a quad is a metre of plastic in an empty sky. Centre it, close at full speed, and hold it centred until the frame fills. Small, early corrections — at closure speed a late stick input is a miss.'),
+          lesson('MISSES ARE FREE, PANIC IS NOT', 'If the picture is wrong in the last hundred metres, fly THROUGH level and come around for another pass. A miss costs seconds; a desperate last-second dive costs the airframe into the dirt below the target.'),
+        ],
+        vehicles: [
+          airborneTarget('mavic', 'HOVERING QUAD', { pos: [0, 55, 150], speed: 0 }),
+        ],
+        startMessage: 'RANGE CONTROL — TARGET QUAD HOLDING A HOVER 400 METRES AHEAD, YOUR ALTITUDE. IT WILL NOT MOVE. FLY THROUGH IT.',
+        result: 'FIRST AIR-TO-AIR CONTACT',
+      })]),
+      phase('contact-crossing', 'HIT A CROSSING TARGET', [fpv({
+        text: 'QUAD SHUTTLING LEFT-RIGHT — AIM AHEAD OF IT, NOT AT IT.',
+        airframes: 3, ceiling: 95, ...airStart([6, 66, 300], [0, 170]),
+        training: { acquireRange: 320 },
+        lessons: [
+          lesson('LEAD THE CROSSING', 'Point at a moving target and you arrive where it was. Aim at empty air AHEAD of it and let the target fly into your path — the same lead you learned on trucks, flown in three dimensions.'),
+        ],
+        vehicles: [
+          airborneTarget('mavic', 'CROSSING QUAD', {
+            pos: [-90, 55, 170], speed: 6,
+            route: [[-90, 55, 170], [90, 55, 170]], loop: true,
+          }),
+        ],
+        startMessage: 'RANGE CONTROL — TARGET IS SHUTTLING A SLOW LINE ACROSS YOUR NOSE. FLY TO WHERE IT WILL BE.',
+        result: 'CROSSING TARGET KILLED',
+      })]),
+      phase('contact-orbit', 'HIT AN ORBITING TARGET', [fpv({
+        text: 'QUAD FLYING AN ORBIT — ATTACK FROM ABOVE AND BEHIND.',
+        airframes: 3, ceiling: 95, ...airStart([6, 74, 330], [0, 190]),
+        training: { acquireRange: 320 },
+        lessons: [
+          lesson('THE BLIND SPOT IS ABOVE', 'A camera quad looks down and out, never up. Hold your height advantage, settle onto the orbit from above and behind, and spend the height on one committed run. The first recorded drone-on-drone kill was exactly this — one quad dropped through another’s rotors.'),
+        ],
+        vehicles: [
+          airborneTarget('mavic', 'ORBITING QUAD', {
+            pos: [0, 55, 255], speed: 8,
+            route: [[-70, 55, 190], [0, 52, 120], [70, 55, 190], [0, 58, 255]], loop: true,
+          }),
+        ],
+        startMessage: 'RANGE CONTROL — TARGET IS FLYING A LAZY ORBIT BELOW YOU. TAKE IT FROM ABOVE AND BEHIND, DOWN THROUGH THE ROTORS.',
+        result: 'CONTACT DRILLS COMPLETE',
+      })]),
+    ], {
+      curriculum: ['air-to-air contact gunnery', 'lead and closure control'],
+      targetDuration: [240, 420], ...DAY_SKY,
+    }),
+
+  droneLevel(22, 'EVASIVE CONTACT',
+    'Second period: the targets fight back. Same air-start drills, but every aircraft on this range manoeuvres when it sees you — a light jink, then a full weave-and-climb, then a fixed-wing at three times your closing problem. Learn to hold the line through the middle of an evasion.',
+    [
+      phase('evade-jink', 'BEAT THE JINK', [fpv({
+        text: 'ORBITING QUAD — IT WILL JINK WHEN IT SEES YOU INSIDE 110 METRES.',
+        airframes: 3, ceiling: 95, ...airStart([6, 74, 330], [0, 190]),
+        training: { acquireRange: 320 },
+        lessons: [
+          lesson('DO NOT MIRROR THE JINK', 'The weave is a sine wave: it crosses its own track twice a cycle. Chase every swing and you amplify your own error; hold the middle of the weave and commit where the crossings converge.'),
+        ],
+        vehicles: [
+          airborneTarget('mavic', 'JINKING QUAD', {
+            pos: [0, 55, 255], speed: 6,
+            route: [[-70, 55, 190], [0, 52, 120], [70, 55, 190], [0, 58, 255]], loop: true,
+            evasion: { triggerRadius: 110, jinkRadius: 8, jinkPeriod: 2.4, climbRate: 1.5, climbMax: 8 },
+          }),
+        ],
+        startMessage: 'RANGE CONTROL — SAME ORBIT AS LAST PERIOD, BUT THIS PILOT IS AWAKE. INSIDE 110 METRES HE WEAVES. HOLD YOUR LINE.',
+        result: 'JINKING TARGET KILLED',
+      })]),
+      phase('evade-weave', 'BEAT THE FULL WEAVE', [fpv({
+        text: 'ALERTED QUAD — FULL WEAVE AND CLIMB FROM 160 METRES OUT.',
+        airframes: 3, ceiling: 95, ...airStart([6, 74, 330], [0, 190]),
+        training: { acquireRange: 320 },
+        lessons: [
+          lesson('EVASION TRADES SPEED FOR HEIGHT', 'A weaving target climbs. Arrive with more altitude than you think you need, or the fight migrates above you and your dive becomes a stern chase. Height in the bank is the only currency that buys a second pass.'),
+        ],
+        vehicles: [
+          airborneTarget('mavic', 'ALERTED QUAD', {
+            pos: [0, 55, 255], speed: 7,
+            route: [[-70, 55, 190], [0, 52, 120], [70, 55, 190], [0, 58, 255]], loop: true,
+            evasion: { triggerRadius: 160, jinkRadius: 14, jinkPeriod: 2.2, climbRate: 2.5, climbMax: 14 },
+          }),
+        ],
+        startMessage: 'RANGE CONTROL — THIS ONE BREAKS EARLY AND CLIMBS HARD. KEEP YOUR HEIGHT ADVANTAGE UNTIL THE LAST TWO SECONDS.',
+        result: 'FULL WEAVE DEFEATED',
+      })]),
+      phase('evade-fixedwing', 'BEAT A FIXED-WING', [fpv({
+        text: 'FIXED-WING ON THE RADAR PLOT — CUT THE ORBIT, MEET IT HEAD-ON.',
+        airframes: 3, ceiling: 135, ...airStart([6, 108, 160], [0, 10]),
+        training: { acquireRange: 420, radarBearing: true },
+        lessons: [
+          lesson('FLY THE PLOT, NOT THE DOT', 'The TRK line is the radar operator reading you the picture: bearing arrow, range, target altitude. A fixed-wing never stops, so fly to where the orbit will be, not where the readout was.'),
+          lesson('CUT THE CORNER', 'You cannot stern-chase 108 km/h. Fly the shortest line to a point AHEAD of it at its altitude and let it come to you — the head-on merge is the kill, and it weaves when it sees you.'),
+        ],
+        vehicles: [
+          airborneTarget('recon', 'FIXED-WING RECON', {
+            pos: [0, 95, 10], speed: 30,
+            route: [
+              [-260, 100, -140], [0, 108, -290], [260, 100, -140], [0, 95, 10],
+            ],
+            loop: true,
+            evasion: { triggerRadius: 240, jinkRadius: 26, jinkPeriod: 2.6, climbRate: 3.5, climbMax: 25 },
+          }),
+        ],
+        startMessage: 'RANGE CONTROL — FIXED-WING TARGET ON A RACETRACK ORBIT, PLOT ON YOUR OSD. GET AHEAD OF IT AND TAKE THE MERGE.',
+        result: 'EVASION DRILLS COMPLETE',
+      })]),
+    ], {
+      curriculum: ['defeating evasive manoeuvre', 'radar-plot intercept geometry'],
+      targetDuration: [300, 480], ...DAY_SKY,
+    }),
+
+  droneLevel(23, 'HUNTER-KILLER',
+    'Now do it for real. Launch from the pad, climb out, find the aircraft, kill it. First a quad orbiting over friendly positions with no cueing but your own eyes; then a fixed-wing artillery spotter with the radar net feeding its plot to your OSD.',
+    [
+      phase('hunt-quad', 'HUNT THE RECON QUAD', [fpv({
+        text: 'ENEMY QUAD ORBITING THE RANGE — FIND IT, ATTACK FROM ABOVE AND BEHIND.',
+        airframes: 3, ceiling: 95,
+        training: { acquireRange: 260 },
+        lessons: [
+          lesson('ENERGY OVER PURSUIT', 'Do not chase the tail at its own altitude. Climb on the way out, set your intercept ahead of the orbit, arrive high, and spend the height on one committed run. Several passes are normal; an empty battery is the only real miss.'),
+        ],
+        vehicles: [
+          airborneTarget('mavic', 'RECON QUAD', {
+            pos: [0, 55, 190], speed: 5,
+            route: [[-70, 55, 190], [0, 52, 120], [70, 55, 190], [0, 58, 255]], loop: true,
+            evasion: { triggerRadius: 150, jinkRadius: 10, jinkPeriod: 2.2, climbRate: 2.5, climbMax: 14 },
+          }),
+        ],
+        startMessage: 'KAVUN — HOSTILE QUAD ON THE RANGE, ORBITING AT ROUGHLY 190 METRES. IT IS WATCHING THE GROUND. YOU OWN EVERYTHING ABOVE IT.',
+        result: 'QUAD DOWNED — FIRST UNCUED KILL',
+      })]),
+      phase('hunt-orlan', 'KILL THE SPOTTER', [fpv({
+        text: 'RADAR TRACK ON YOUR OSD — INTERCEPT THE RECON DRONE ON ITS ORBIT.',
+        airframes: 3, ceiling: 135,
+        training: { acquireRange: 420, radarBearing: true },
+        lessons: [
+          lesson('THE ORBIT IS THE AMBUSH', 'The spotter flies the same racetrack until someone kills it. Read two laps off the plot, pick the leg that passes closest to you, climb to its altitude and park in its path. The target does the transit for you.'),
+        ],
+        vehicles: [
+          airborneTarget('recon', 'ORLAN-10 SPOTTER', {
+            pos: [-450, 105, -350], speed: 30,
+            route: [
+              [-450, 105, -350], [-100, 112, -540], [330, 112, -400],
+              [420, 105, -90], [80, 98, 60], [-380, 100, -100],
+            ],
+            loop: true,
+            evasion: { triggerRadius: 260, jinkRadius: 30, jinkPeriod: 2.6, climbRate: 4, climbMax: 35 },
+          }),
+        ],
+        startMessage: 'KAVUN — RADAR HOLDS ONE FIXED-WING TRACK ORBITING THE SECTOR AT ROUGHLY 370 METRES. IT IS SPOTTING FOR GUNS. THE PLOT IS ON YOUR OSD — GO UP AND GET AHEAD OF IT.',
+        result: 'SPOTTER DESTROYED — THE GUNS ARE BLIND',
+      })]),
+    ], {
+      curriculum: ['full intercept sortie', 'uncued and radar-cued hunting'],
+      ...DAY_SKY,
+    }),
+
+  droneLevel(24, 'NIGHT WAR',
+    'The drone war does not stop at dark. First a thermal stalk: a recon drone above the interceptor belt, the radar plot your search cue, the engine’s heat your confirmation — identify before you commit, friendly aircraft share this sky. Then the raid: three one-way attack drones transiting for the rear, and whatever required track crosses the southern boundary is a mission failure.',
+    [
+      phase('night-intercept', 'THERMAL INTERCEPT', [fpv({
+        text: 'NIGHT TRACK AT ALTITUDE — ACQUIRE ON THERMAL, IDENTIFY, DESTROY.',
+        airframes: 3, ceiling: 135,
+        training: { acquireRange: 420, radarBearing: true, identifyRange: 70 },
+        lessons: [
+          lesson('HEAT IS THE ONLY PICTURE', 'At night the airframe is invisible and the engine is a beacon. Fly the TRK plot to the search area, then flash thermal (N) to sweep for the hot point. Thermal costs battery — scan with it, do not cruise with it.'),
+          lesson('CONFIRM BEFORE COMMITTING', 'A hot dot is not an identification. Close until the shape reads on thermal and hold it centred until the confirmation completes. Interceptor crews have exactly one warhead per sortie; it does not go into an unconfirmed track.'),
+        ],
+        vehicles: [
+          airborneTarget('recon', 'ZALA NIGHT RECON', {
+            requiresIdentification: true, identifySeconds: 1.2,
+            pos: [350, 112, -250], speed: 28,
+            route: [
+              [350, 112, -250], [80, 116, -480], [-320, 116, -420],
+              [-430, 108, -80], [-80, 102, 40], [280, 106, -60],
+            ],
+            loop: true,
+            evasion: { triggerRadius: 240, jinkRadius: 26, jinkPeriod: 2.8, climbRate: 3.5, climbMax: 30 },
+          }),
+        ],
+        startMessage: 'AIR DEFENCE — RADAR HOLDS A SLOW FIXED-WING TRACK AT 390 METRES, NO LIGHTS. NIGHT AIRFRAME IS FITTED WITH THERMAL. CONFIRM THE TRACK BEFORE TERMINAL COMMITMENT.',
+        result: 'NIGHT RECON DESTROYED — POSITIVE IDENTIFICATION LOGGED',
+      })]),
+      phase('raid-intercept', 'STOP THE RAID', [fpv({
+        text: 'THREE INBOUND TRACKS — NOTHING REQUIRED CROSSES THE SOUTHERN BOUNDARY.',
+        airframes: 4, ceiling: 125,
+        training: {
+          acquireRange: 420, radarBearing: true,
+          engagementBounds: [-720, 505, 720, -935],
+        },
+        lessons: [
+          lesson('PRIORITIZE THE TRANSITS', 'A transiting one-way drone is racing you, not fighting you. Read each track’s course on the map plot: the one deepest along its run dies first. The orbiter is not going anywhere — targets of opportunity wait.'),
+          lesson('EVERY METRE OF CHASE IS BATTERY', 'Do not stern-chase a 140 km/h airframe. Fly the shortest line to a point AHEAD of the track at its altitude and meet it there. The second intercept is flown on whatever the first one left in the pack.'),
+        ],
+        vehicles: [
+          airborneTarget('shahed', 'TRACK ALPHA', {
+            pos: [-350, 85, -900], speed: 38,
+            route: [[-350, 85, -900], [-150, 85, -420], [40, 80, 90], [150, 80, 500]],
+            evasion: { triggerRadius: 200, jinkRadius: 18, jinkPeriod: 2.4, climbRate: 2.5, climbMax: 20 },
+          }),
+          airborneTarget('shahed', 'TRACK BRAVO', {
+            pos: [280, 90, -910], speed: 34,
+            route: [[280, 90, -910], [120, 88, -380], [-60, 84, 120], [-140, 84, 500]],
+            evasion: { triggerRadius: 200, jinkRadius: 18, jinkPeriod: 2.6, climbRate: 2.5, climbMax: 20 },
+          }),
+          airborneTarget('recon', 'GERBERA ORBITER', {
+            optional: true, health: 90,
+            pos: [-80, 70, -300], speed: 22,
+            route: [[-80, 70, -300], [80, 72, -420], [180, 70, -280], [20, 68, -180]],
+            loop: true,
+            evasion: { triggerRadius: 180, jinkRadius: 14, jinkPeriod: 3.0, climbRate: 2, climbMax: 16 },
+          }),
+        ],
+        startMessage: 'AIR DEFENCE — RAID WARNING. TWO ATTACK PROFILES TRANSITING SOUTH AT 280 TO 300 METRES PLUS ONE SLOW DECOY ORBIT. IF A REQUIRED TRACK CROSSES THE SOUTHERN BOUNDARY IT IS THROUGH TO THE REAR. FOUR AIRFRAMES. GO NOW.',
+        result: 'RAID DEFEATED — NOTHING REACHED THE REAR',
+      })]),
+    ], {
+      curriculum: ['night thermal identification', 'multi-track raid defence'],
+      ...NIGHT_SKY,
     }),
 ];

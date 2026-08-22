@@ -56,12 +56,16 @@ export class Civilian {
     this.escort = false;
     this.rescuer = null;
     this.escortSlot = 0;
-    this.escortCommand = 'follow';
+    this.escortCommand = 'shelter';
     this.escortAnchor = null;
     this.escortSide = this.random() < 0.5 ? -1 : 1;
     this.escortHeat = 0;
     this.escortBlocked = 0;
     this.escortFreeze = 0;
+    this.shelterClear = 0;
+    this.shelterDir = null;
+    this.shelterSettled = false;
+    this.escortIdle = false;
     this.freezeInDoorway = this.random() < 0.58;
     this.baseY = this.mesh.position.y;
     // Window civilians. Same bay geometry the shooters use, and that is the point: at 160m
@@ -119,8 +123,8 @@ export class Civilian {
     this.rescuer = by;
     this.escortSlot = Math.max(0, escortSlot | 0);
     if (this.escort) this.escortSide = this.escortSlot % 2 === 0 ? -1 : 1;
-    this.escortCommand = 'follow';
     this.rush = false;         // never convert a freed hostage into a muzzle-rushing civilian
+    if (this.escort) this.setEscortCommand('shelter');
     return true;
   }
 
@@ -135,7 +139,19 @@ export class Civilian {
       this.escortAnchor = { x: this.pos.x, z: this.pos.z };
     } else if (command === 'follow') {
       this.escortAnchor = null;
+      this.escortIdle = false;
       this.standUp();
+    } else if (command === 'shelter') {
+      this.escortAnchor = null;
+      this.standUp();
+      this.shelterClear = 1.9 + this.random() * 1.3;
+      this.shelterDir = null;
+      this.shelterSettled = false;
+      this.coverSearchDone = false;
+      this.coverTarget = null;
+      this.coverPath = null;
+      this.coverPathIdx = 0;
+      this.inHardCover = false;
     }
     return true;
   }
@@ -328,6 +344,10 @@ export class Civilian {
   // far behind they move to rejoin before dropping, so rescuing someone creates an escort
   // responsibility instead of instantly deleting that person from the encounter.
   updateEscort(dt, world) {
+    if (this.escortCommand === 'shelter') {
+      this.updateShelter(dt, world);
+      return;
+    }
     if (this.escortCommand === 'down') {
       this.takeCover(dt);
       return;
@@ -368,23 +388,32 @@ export class Civilian {
 
     const sin = Math.sin(world.playerYaw);
     const cos = Math.cos(world.playerYaw);
-    // Close enough to enter the sight picture when the player turns or backs through a door.
-    // That is deliberate escort pressure; the offset still keeps the hostage off the exact
-    // camera centre in a straight corridor. Multiple evacuees form two staggered columns
-    // instead of clipping into one actor: every extra pair occupies another metre of doorway
-    // and retreat space, which is exactly the escort complication the player must manage.
+    // Far enough back to stay out of the sight picture in a straight corridor; the lateral
+    // offset keeps the column off the exact camera centre. Multiple evacuees form two
+    // staggered columns instead of clipping into one actor: every extra pair occupies
+    // another metre of doorway and retreat space, which is exactly the escort complication
+    // the player must manage.
     const rank = Math.floor(this.escortSlot / 2);
-    const trail = 1.22 + rank * 0.92;
-    const lateral = 0.58 + rank * 0.12;
+    const trail = 2.05 + rank * 0.95;
+    const lateral = 0.62 + rank * 0.12;
     const tx = world.playerPos.x + sin * trail + cos * this.escortSide * lateral;
     const tz = world.playerPos.z + cos * trail - sin * this.escortSide * lateral;
     const distance = Math.hypot(tx - this.pos.x, tz - this.pos.z);
+    // Dual band, not one threshold: start moving only when meaningfully off station, stop
+    // only when actually on it. A single wide band let the column halt a full stride short
+    // from whichever side it approached, compressing three evacuees into a clump. A
+    // neighbour pressing inside half a metre also reopens the station.
+    if (this.escortIdle
+      && (distance > 1.35 || this.nearestEscortGap(world) < 0.55)) this.escortIdle = false;
+    else if (!this.escortIdle && distance < 0.3) this.escortIdle = true;
     if (world.combatHeat > 0) {
       this.escortHeat += dt;
       if (this.escortHeat < this.reactionDelay || distance > 5) {
-        if (distance > 1.25) {
-          this.panicDir = Math.atan2(tx - this.pos.x, tz - this.pos.z);
+        if (!this.escortIdle) {
+          this.panicDir = this.escortHeading(tx, tz, world);
           this.escortStep(dt, world, 2.8, distance);
+        } else {
+          animateRig(this.mesh, this.walkPhase, false);
         }
       } else {
         this.takeCover(dt);
@@ -394,12 +423,106 @@ export class Civilian {
 
     this.escortHeat = 0;
     if (this.prone > 0) this.standUp();
-    if (distance > 1.15) {
-      this.panicDir = Math.atan2(tx - this.pos.x, tz - this.pos.z);
+    if (!this.escortIdle) {
+      this.panicDir = this.escortHeading(tx, tz, world);
       this.escortStep(dt, world, 2.55, distance);
     } else {
       animateRig(this.mesh, this.walkPhase, false);
     }
+  }
+
+  // Heading toward the trail anchor with a personal-space repulsion around the player.
+  // When the player turns, the anchor flips to his other side; steering straight at it
+  // marched the evacuee through the camera. The repulsion bends that path AROUND the
+  // player — a person walks around you, not through you — and the tangential bias breaks
+  // the knife-edge case where the anchor sits exactly beyond the player's head.
+  escortHeading(tx, tz, world) {
+    const norm = Math.hypot(tx - this.pos.x, tz - this.pos.z) || 1;
+    let vx = (tx - this.pos.x) / norm;
+    let vz = (tz - this.pos.z) / norm;
+    const px = this.pos.x - world.playerPos.x;
+    const pz = this.pos.z - world.playerPos.z;
+    const playerGap = Math.hypot(px, pz) || 1;
+    if (playerGap < 2.3) {
+      const push = (2.3 - playerGap) / 2.3 * 1.9;
+      vx += px / playerGap * push;
+      vz += pz / playerGap * push;
+      if (playerGap < 1.6) {
+        vx += (pz / playerGap) * this.escortSide * 0.7;
+        vz += (-px / playerGap) * this.escortSide * 0.7;
+      }
+    }
+    // Mutual spacing: evacuees give each other shoulder room instead of merging into
+    // one clipping actor at the column anchors.
+    for (const other of world.civilians || []) {
+      if (other === this || other.dead || !other.escort || other.rescuer !== 'you') continue;
+      const ox = this.pos.x - other.pos.x;
+      const oz = this.pos.z - other.pos.z;
+      const gap = Math.hypot(ox, oz);
+      if (gap > 0.9 || gap < 0.001) continue;
+      const push = (0.9 - gap) / 0.9 * 1.4;
+      vx += ox / gap * push;
+      vz += oz / gap * push;
+    }
+    return Math.atan2(vx, vz);
+  }
+
+  nearestEscortGap(world) {
+    let nearest = Infinity;
+    for (const other of world.civilians || []) {
+      if (other === this || other.dead || !other.escort || other.rescuer !== 'you') continue;
+      nearest = Math.min(nearest, Math.hypot(
+        this.pos.x - other.pos.x, this.pos.z - other.pos.z));
+    }
+    return nearest;
+  }
+
+  // The default after a rescue. The freed man clears the player's working space in a burst
+  // of movement (that burst IS the shoot/no-shoot flare of the release), finds ground that
+  // breaks the sightline, and stays down there for the rest of the fight instead of living
+  // in the player's camera. FOLLOW remains one H press away when the player actually wants
+  // the escort-train problem.
+  updateShelter(dt, world) {
+    if (this.inHardCover) this.shelterSettled = true;
+    if (this.shelterSettled) {
+      this.takeCover(dt);
+      return;
+    }
+    if (this.shelterClear > 0) {
+      this.shelterClear -= dt;
+      if (this.shelterDir === null) {
+        this.shelterDir = Math.atan2(
+          this.pos.x - world.playerPos.x, this.pos.z - world.playerPos.z)
+          + (this.random() - 0.5) * 1.1;
+      }
+      this.panicDir = this.shelterDir;
+      const moved = this.step(dt, world, 3.3);
+      // Ran into a wall mid-burst: bend the line instead of grinding the corner.
+      if (moved < 3.3 * dt * 0.35) {
+        this.shelterDir += (this.random() < 0.5 ? 1 : -1)
+          * (Math.PI / 2 + this.random() * 0.5);
+      }
+      return;
+    }
+    if (!this.coverSearchDone) this.findHardCover(world);
+    if (this.coverPath || this.inHardCover) {
+      this.followCoverPath(dt, world);
+      return;
+    }
+    // No reachable hard cover on this map: keep opening distance until out of the player's
+    // immediate space, then get small and stay put. A blocked step settles where he stands —
+    // a man kneeling in a corner beats one grinding a wall.
+    const playerGap = Math.hypot(
+      this.pos.x - world.playerPos.x, this.pos.z - world.playerPos.z);
+    if (playerGap < 6.5) {
+      this.panicDir = Math.atan2(
+        this.pos.x - world.playerPos.x, this.pos.z - world.playerPos.z);
+      const moved = this.step(dt, world, 2.7);
+      if (moved < 2.7 * dt * 0.35) this.shelterSettled = true;
+      return;
+    }
+    this.shelterSettled = true;
+    this.takeCover(dt);
   }
 
   escortStep(dt, world, speed, targetDistance) {

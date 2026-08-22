@@ -1,2 +1,3 @@
 node_modules/
 tools/.terrain-tiles/
+__pycache__/

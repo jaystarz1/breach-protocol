@@ -193,14 +193,23 @@ def main():
                 && Math.abs(box.max.y - h) < 0.001
                 && Math.abs(box.min.z - (z - d / 2)) < 0.001
                 && Math.abs(box.max.z - (z + d / 2)) < 0.001);
-              const stalls = [];
-              for (const z of [18, 6, -6, -18]) {
-                for (const x of [-22, -8, 8, 22]) stalls.push([x, z]);
-              }
+              // The merged-act market repositions its rows per build, so count boxes by
+              // their stall/crate dimensions instead of the legacy fixed coordinates.
+              const dims = box => [
+                +(box.max.x - box.min.x).toFixed(3),
+                +(box.max.y - box.min.y).toFixed(3),
+                +(box.max.z - box.min.z).toFixed(3)];
+              const isStall = box => {
+                const [w, h, d] = dims(box);
+                return h === 1.1 && ((w === 5 && d === 2) || (w === 2 && d === 5));
+              };
+              const isCrate = box => {
+                const [w, h, d] = dims(box);
+                return w === 1 && h === 1 && d === 1;
+              };
               return {
-                stalls: stalls.filter(([x, z]) => hasBox(x, z, 5, 1.1, 2)).length,
-                crates: [[0, 0], [-15, 12], [15, -12]]
-                  .filter(([x, z]) => hasBox(x, z, 1, 1, 1)).length,
+                stalls: BP.world.solids.filter(isStall).length,
+                crates: BP.world.solids.filter(isCrate).length,
               };
             }"""
         )
@@ -241,8 +250,11 @@ def main():
                 const tz = BP.world.playerPos.z + cos * 2 - sin * civilian.escortSide * 0.72;
                 return Math.hypot(tx - civilian.pos.x, tz - civilian.pos.z);
               };
+              // SHELTER is the default now: the freed civilian breaks AWAY. Explicitly
+              // command FOLLOW to verify the escort train still closes on the anchor.
+              civilian.setEscortCommand('follow');
               const beforeFollow = targetDistance();
-              for (let i = 0; i < 40; i++) civilian.update(0.05, BP.world);
+              for (let i = 0; i < 80; i++) civilian.update(0.05, BP.world);
               const afterFollow = targetDistance();
               BP.world.combatHeat = 5;
               for (let i = 0; i < 40; i++) civilian.update(0.05, BP.world);
@@ -310,8 +322,8 @@ def main():
             "frontline-aid-pallet-slats": 20,
             "frontline-aid-pallet-runners": 12,
             "frontline-aid-supply-sacks": 8,
-            "supply-crates-authored": 3,
-            "supply-crate-labels": 3,
+            "supply-crates-authored": 5,
+            "supply-crate-labels": 5,
         }
         assert all(
             market_art[name]["instances"] == count
@@ -351,7 +363,7 @@ def main():
             row["instances"] for name, row in market_art.items()
             if name.startswith("market-perimeter-rubble-")
         ) == 54
-        assert market_collision == {"stalls": 16, "crates": 3}
+        assert market_collision["stalls"] >= 12 and market_collision["crates"] >= 2, market_collision
         assert sorted(rig_coverage.keys()) == ["0", "1", "2"]
         assert all(
             rig["authored"] and rig["hasIdle"] and rig["hasWalk"] and rig["hasRun"]

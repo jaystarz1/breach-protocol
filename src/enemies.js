@@ -79,6 +79,7 @@ export class Enemy {
     this.walkPhase = this.random() * 6;
     this.moving = false;
     this.inactiveTime = 0;
+    this.sinceFired = 9999;   // seconds since this man last discharged his weapon
     this.flinch = 0;
     this.shotPoseTimer = 0;
     this.stepAccum = 0;
@@ -853,7 +854,14 @@ export class Enemy {
       : this.shotPoseTimer > 0 ? 'firing'
         : this.state === 'patrol' ? 'patrol' : 'engage';
     animateRig(this.mesh, this.walkPhase, this.moving, this.flinch, false, intent);
-    this.inactiveTime = (this.moving || this.state !== 'patrol') ? 0 : this.inactiveTime + dt;
+    // Watchdog bookkeeping. "Inactive" means contributing nothing the player can find:
+    // stationary (or wedged on geometry and getting nowhere) and not firing. AI state alone
+    // is not activity — an alert straggler holding an unreachable corner is precisely the
+    // man who strands a zone-less clear objective, and the old `state !== 'patrol'` guard
+    // exempted him from the overwatch failsafe forever.
+    this.sinceFired += dt;
+    const stalled = !this.moving || this.blocked > 5;
+    this.inactiveTime = (!stalled || this.shotPoseTimer > 0) ? 0 : this.inactiveTime + dt;
 
     // footsteps: the single biggest piece of tactical information in a room-clearing game
     if (this.moving) {
@@ -965,6 +973,7 @@ export class Enemy {
     this.burstTimer = this.single ? 1.7 + this.random() : 0.11;
     this.shotsHere++;
     this.shotPoseTimer = 0.2;
+    this.sinceFired = 0;
     sfx.enemyShot(this.pos);
     world.enemyFlash(this.pos);
     world.enemyTracer(this, target);

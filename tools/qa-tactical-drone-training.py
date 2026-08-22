@@ -181,8 +181,9 @@ def main():
         runners = [profile for profile in moving_profiles if profile["kind"] == "infantry"]
         assert [profile["run"] for profile in runners] == [6, 7, 9], moving_profiles
         assert all(profile["team"] == 1 and profile["routePoints"] >= 5
-                   and profile["loop"] and profile["variants"] == 3
+                   and profile["variants"] == 3
                    for profile in runners), runners
+        assert runners[0]["loop"] and not runners[1]["loop"] and runners[2]["loop"], runners
         assert all(profile["speed"] >= 8 and profile["evasion"] for profile in runners), runners
         assert runners[1]["shelter"] == "barn" and runners[1]["supportVehicles"] == 1, runners
         assert runners[2]["shelter"] == "barn", runners
@@ -207,34 +208,86 @@ def main():
         page.wait_for_function("""() => BP.world?.level?.id === 12
           && BP.world?.objectiveIdx === 5 && !!BP.world.drone""")
         accelerate_review(page)
+        # Cover-commit contract: pressed inside the trigger the runner sprints for a
+        # canopy node away from the aircraft and holds under it; pressed inside the flush
+        # radius he breaks for the next tree; inside 25 m (3D) he freezes where he stands
+        # and resumes only once the aircraft opens past the release radius. Direction
+        # reversals along the run stay rare — no ping-pong, no boxed-in oscillation.
         runner_runtime = page.evaluate("""() => {
           const d = BP.world.drone;
           d.skipLessons?.();
           const runner = d.combatVehicles.find(vehicle =>
             !vehicle.optional && vehicle.kind === 'infantry');
-          const before = runner.pos.clone();
-          runner.update(.05, BP.world.solids);
-          runner.update(1, BP.world.solids);
-          const threat = runner.pos.clone(); threat.x += 4;
-          const headings = [];
-          for (let index = 0; index < 80; index++) {
+          // Unpressed (aircraft far beyond the trigger): he WALKS his line.
+          const remote = runner.pos.clone(); remote.x += 200; remote.y += 60;
+          let patrolSpeed = 0;
+          for (let index = 0; index < 40; index++) {
+            runner.update(.1, BP.world.solids, remote);
+            patrolSpeed = Math.max(patrolSpeed, runner.velocity.length());
+          }
+          const coverNodes = runner.routeCoverNodes().length;
+          // Press from ~130m out: he commits to the nearest safe canopy and holds.
+          const threat = runner.pos.clone(); threat.x += 37; threat.y += 12;
+          let held = false;
+          for (let index = 0; index < 400 && !held; index++) {
             runner.update(.1, BP.world.solids, threat);
+            held = runner.coverHold;
+          }
+          const committed = runner.coverCommit;
+          const holdUnderCanopy = held && runner.routeCoverNodes().includes(runner.routeIdx);
+          // Blow the hide: press inside the flush radius but outside the freeze bubble,
+          // approaching from the open side so the line to the next canopy stays clear.
+          // He must break cover and SPRINT the line to the next canopy, no ping-pong.
+          const flushThreat = runner.pos.clone();
+          flushThreat.x -= runner.evasion.flushRadius - 1; flushThreat.y += 3;
+          runner.update(.1, BP.world.solids, flushThreat);
+          const flushed = !runner.coverHold && runner.coverCommit !== committed;
+          const dashStart = runner.pos.clone();
+          const headings = [];
+          let sprintSpeed = 0;
+          let reHeld = false;
+          for (let index = 0; index < 600 && !reHeld; index++) {
+            runner.update(.1, BP.world.solids, flushThreat);
+            sprintSpeed = Math.max(sprintSpeed, runner.velocity.length());
             if (runner.velocity.lengthSq() > .01) headings.push(
               Math.atan2(runner.velocity.x, runner.velocity.z));
+            reHeld = runner.coverHold;
           }
-          let hardTurns = 0;
+          let reversals = 0;
           for (let index = 1; index < headings.length; index++) {
             const delta = Math.atan2(Math.sin(headings[index] - headings[index - 1]),
               Math.cos(headings[index] - headings[index - 1]));
-            if (Math.abs(delta) > Math.PI / 3) hardTurns++;
+            if (Math.abs(delta) > Math.PI * 0.75) reversals++;
+          }
+          const dashMoved = runner.pos.distanceTo(dashStart);
+          const reHeldUnderCanopy = reHeld
+            && runner.routeCoverNodes().includes(runner.routeIdx);
+          // Terminal press: inside 25 m running is pointless — he stops and goes small.
+          const closeThreat = runner.pos.clone();
+          closeThreat.x += runner.evasion.freezeRadius - 1;
+          const frozeAt = runner.pos.clone();
+          for (let index = 0; index < 30; index++) {
+            runner.update(.1, BP.world.solids, closeThreat);
+          }
+          const frozen = runner.freezeHold;
+          const heldStill = runner.pos.distanceTo(frozeAt) < .05;
+          const kneltFrozen = (runner.mesh.userData.crew || []).every(
+            soldier => soldier.userData.kneel);
+          // The aircraft leaves: he unfreezes and moves again.
+          const farThreat = runner.pos.clone(); farThreat.x += 120; farThreat.y += 40;
+          let resumed = false;
+          for (let index = 0; index < 200 && !resumed; index++) {
+            runner.update(.1, BP.world.solids, farThreat);
+            resumed = !runner.freezeHold && runner.velocity.lengthSq() > .01;
           }
           const figure = runner.mesh.userData.crew?.[0];
           return {
             crew: runner.mesh.userData.crew?.length || 0,
-            moved: runner.pos.distanceTo(before),
+            moved: dashMoved,
             physicalSpeed: runner.speed * 3.5,
-            decisions: runner.evasionDecisions,
-            hardTurns,
+            patrolSpeed, sprintSpeed, coverNodes,
+            reversals, holdUnderCanopy, flushed, reHeldUnderCanopy,
+            frozen, heldStill, kneltFrozen, resumed,
             routePoints: runner.route.length,
             thermalFigures: d.thermalSignatures.filter(signature =>
               !!signature.userData.figure).length,
@@ -242,17 +295,27 @@ def main():
           };
         }""")
         assert runner_runtime["crew"] == 1 and runner_runtime["routePoints"] >= 5, runner_runtime
-        assert runner_runtime["moved"] > 1 and runner_runtime["thermalFigures"] >= 1, runner_runtime
+        assert runner_runtime["moved"] > 10 and runner_runtime["thermalFigures"] >= 1, runner_runtime
         assert runner_runtime["physicalSpeed"] >= 8, runner_runtime
-        assert runner_runtime["decisions"] >= 5 and runner_runtime["hardTurns"] >= 2, runner_runtime
+        assert runner_runtime["coverNodes"] >= 3, runner_runtime
+        assert 0 < runner_runtime["patrolSpeed"] < runner_runtime["sprintSpeed"], runner_runtime
+        assert runner_runtime["reversals"] <= 2, runner_runtime
+        assert runner_runtime["holdUnderCanopy"], runner_runtime
+        assert runner_runtime["flushed"] and runner_runtime["reHeldUnderCanopy"], runner_runtime
+        assert runner_runtime["frozen"] and runner_runtime["heldStill"], runner_runtime
+        assert runner_runtime["kneltFrozen"] and runner_runtime["resumed"], runner_runtime
         assert any(word in runner_runtime["action"].lower()
                    for word in ("run", "walk")), runner_runtime
 
         page.evaluate("() => BP.startLevelAt(12, 6)")
         page.wait_for_function("""() => BP.world?.level?.id === 12
           && BP.world?.objectiveIdx === 6 && !!BP.world.drone""")
-        building_runner = page.evaluate("""() => {
+        building_runner = page.evaluate("""async () => {
+          const THREE = await import('three');
           const d = BP.world.drone;
+          d.skipLessons?.();
+          d.attemptStateTime = 1;
+          d.updateAttemptState(.1, { firePressed: true });
           const runner = d.combatVehicles.find(vehicle =>
             !vehicle.optional && vehicle.kind === 'infantry');
           const truck = d.combatVehicles.find(vehicle => vehicle.label === 'PARKED FARM TRUCK');
@@ -269,26 +332,90 @@ def main():
           const startedInside = inside(runner.pos);
           const insideNodes = runner.route.filter(inside).length;
           const outsideNodes = runner.route.length - insideNodes;
-          let wentOutside = false, returnedInside = false;
-          for (let index = 0; index < 500; index++) {
-            runner.update(.16, BP.world.solids);
-            if (!inside(runner.pos)) wentOutside = true;
-            if (wentOutside && inside(runner.pos)) { returnedInside = true; break; }
+          const waitingAt = runner.pos.clone();
+          const farThreat = runner.pos.clone();
+          farThreat.x += runner.evasion.activationRadius + 1;
+          for (let index = 0; index < 120; index++) {
+            runner.update(.16, BP.world.solids, farThreat);
           }
+          const waitedInPlace = runner.pos.distanceTo(waitingAt);
+          const inactiveWhileFar = !runner.activated;
+          const nearThreat = runner.pos.clone();
+          nearThreat.x += runner.evasion.activationRadius - .05;
+          let entered = false;
+          for (let index = 0; index < 500; index++) {
+            runner.update(.16, BP.world.solids, nearThreat);
+            if (inside(runner.pos)) entered = true;
+            if (runner.hiding) break;
+          }
+          const hiddenAt = runner.pos.clone();
+          for (let index = 0; index < 80; index++) runner.update(.16, BP.world.solids);
+          const nearbyLowCover = BP.world.solids.filter(box => {
+            const cx = (box.min.x + box.max.x) / 2;
+            const cz = (box.min.z + box.max.z) / 2;
+            const height = box.max.y - box.min.y;
+            return Math.hypot(cx - runner.pos.x, cz - runner.pos.z) < 3.2
+              && height > .3 && height < 1.7;
+          }).length;
           const truckOrbitDistance = Math.min(...runner.route.map(point =>
             Math.hypot(point.x - truck.pos.x, point.z - truck.pos.z)));
+          const figure = runner.mesh.userData.crew?.[0];
+          const outsidePoint = box => {
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const point = center.clone();
+            if (size.x < size.z) point.x = box.max.x + .2;
+            else point.z = box.max.z + .2;
+            return point;
+          };
+          const truckBox = new THREE.Box3().setFromObject(truck.mesh).expandByScalar(.12);
+          const runnerBox = new THREE.Box3().setFromObject(runner.mesh).expandByScalar(.12);
+          const truckNear = outsidePoint(truckBox);
+          const runnerNear = outsidePoint(runnerBox);
+          const oldSphereWouldHitTruck = truckNear.distanceTo(truck.pos) < 2.4;
+          const oldSphereWouldHitRunner = runnerNear.distanceTo(runner.pos) < 2.4;
+          d.pos.copy(truckNear); d.vel.set(0, 0, 0);
+          d.updateFpvFamily(0, { firePressed: false, nadePressed: false }, BP.world.solids);
+          const clearedTruck = !d.detonated;
+          d.pos.copy(runnerNear); d.vel.set(0, 0, 0);
+          d.updateFpvFamily(0, { firePressed: false, nadePressed: false }, BP.world.solids);
+          const clearedRunner = !d.detonated;
+
+          d.pos.set(0, 40, 0); d.vel.set(0, 0, 0);
+          const origin = new THREE.Vector3(-10, 40, 0);
+          const random = Math.random; Math.random = () => .99;
+          const fireRead = d.receiveEnemyFire(origin, BP.world.solids, 1.35);
+          Math.random = random;
           return {
-            startedInside, insideNodes, outsideNodes, wentOutside, returnedInside,
+            startedInside, insideNodes, outsideNodes, entered,
+            activationMeters: runner.evasion.activationRadius * 3.5,
+            waitedInPlace, inactiveWhileFar, activated: runner.activated,
+            hiding: runner.hiding, hiddenInside: inside(runner.pos),
+            stayedPut: runner.pos.distanceTo(hiddenAt), nearbyLowCover,
+            crouched: !!figure?.userData.kneel,
             routePoints: runner.route.length, truckOrbitDistance,
             truckStatic: !truck.route.length && truck.hostile === false,
+            oldSphereWouldHitTruck, oldSphereWouldHitRunner,
+            clearedTruck, clearedRunner,
+            missedShotVelocity: d.vel.length(), fireRead,
+            incomingPressure: d.incomingPressure,
             shelterState: s.state,
           };
         }""")
-        assert building_runner["startedInside"], building_runner
-        assert building_runner["insideNodes"] >= 3 and building_runner["outsideNodes"] >= 8, building_runner
-        assert building_runner["wentOutside"] and building_runner["returnedInside"], building_runner
-        assert building_runner["routePoints"] >= 12 and building_runner["truckStatic"], building_runner
+        assert not building_runner["startedInside"] and building_runner["entered"], building_runner
+        assert abs(building_runner["activationMeters"] - 25) < .01, building_runner
+        assert building_runner["waitedInPlace"] < .01 and building_runner["inactiveWhileFar"], building_runner
+        assert building_runner["activated"], building_runner
+        assert building_runner["insideNodes"] >= 3 and building_runner["outsideNodes"] >= 2, building_runner
+        assert building_runner["hiding"] and building_runner["hiddenInside"], building_runner
+        assert building_runner["stayedPut"] < .01 and building_runner["crouched"], building_runner
+        assert building_runner["nearbyLowCover"] >= 2, building_runner
+        assert building_runner["routePoints"] >= 7 and building_runner["truckStatic"], building_runner
         assert building_runner["truckOrbitDistance"] < 3.5, building_runner
+        assert building_runner["oldSphereWouldHitTruck"] and building_runner["oldSphereWouldHitRunner"], building_runner
+        assert building_runner["clearedTruck"] and building_runner["clearedRunner"], building_runner
+        assert building_runner["fireRead"] and building_runner["incomingPressure"] > 0, building_runner
+        assert building_runner["missedShotVelocity"] < .001, building_runner
 
         # The operator view fills the display as a curved optic. The map is deliberately a
         # sibling rather than a child of that optic: an external simulation aid, not video.
@@ -625,7 +752,9 @@ def main():
           const target = d.combatVehicles.find(v => v.optional && v.kind === 'infantry');
           const required = d.combatVehicles.find(v => !v.optional && !v.decoy && !v.protected);
           const kills = BP.world.stats.kills;
-          d.fpvDetonate(target.pos.clone());
+          const impact = target.pos.clone();
+          target.mesh.userData.crew?.[0]?.getWorldPosition(impact);
+          d.fpvDetonate(impact);
           return {
             optionalCount: d.combatVehicles.filter(v => v.optional && v.kind === 'infantry').length,
             targetDead: target.dead, requiredAlive: !required.dead,

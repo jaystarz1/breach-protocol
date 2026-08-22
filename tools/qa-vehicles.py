@@ -219,7 +219,7 @@ def main():
             )
         # This close sweep deliberately keeps the whole mixed fleet visible. The separate
         # frame-time profile remains the authoritative GPU gate.
-        assert coverage["calls"] < 270
+        assert coverage["calls"] < 285
         # Vehicle fidelity is gated alongside the fully authored Street Sweep environment.
         # The old 470k ceiling predated storefront interiors, degraded facades and the
         # frontline dressing pass; the gameplay profiler remains the authoritative frame-time

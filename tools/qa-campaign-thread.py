@@ -180,7 +180,7 @@ def main():
         print(json.dumps(result, indent=2))
 
         assert "MISSION 04" in briefing["number"], briefing
-        assert briefing["progress"].startswith("3/14"), briefing
+        assert briefing["progress"].startswith("3/18"), briefing
         assert "ANTON MOROZOV" in briefing["dossier"], briefing
         assert "forward-command" in briefing["target"].lower(), briefing
         assert "physically present" in briefing["evidence"].lower(), briefing

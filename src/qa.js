@@ -318,6 +318,18 @@ export function run(from = 1, to = 4, opts = {}) {
       const contact = w.enemies.find(e =>
         !e.dead && !e.surrendered && e.identifyTarget && !e.identified);
       if (contact) dyn = contact.pos;
+    } else if (obj && obj.type === 'clear' && (w.objStuckTime || 0) > 25) {
+      // A stalled clear: walk at the nearest holdout the way a player follows the
+      // watchdog's sector callouts, instead of waiting out the clock on the route.
+      const live = w.enemies.filter(e =>
+        !e.dead && !e.surrendered && !(obj.excludeHvt && e.hvt));
+      let best = null, bd = Infinity;
+      for (const e of live) {
+        const d = Math.hypot(e.pos.x - p.pos.x, e.pos.z - p.pos.z)
+          + Math.abs(e.pos.y - p.pos.y) * 3;
+        if (d < bd) { bd = d; best = e.pos; }
+      }
+      if (best) dyn = { x: best.x, y: best.y, z: best.z };
     }
     if (dyn) {
       if (!dynPath || dynTimer <= 0 || dynIdx >= dynPath.length) {

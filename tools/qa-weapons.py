@@ -26,7 +26,7 @@ def main():
 
         captures = []
         rigs = {}
-        for level, name in ((1, "pistol"), (4, "m4"), (6, "barrett")):
+        for level, name in ((1, "pistol"), (4, "m4"), (106, "barrett")):
             page.evaluate("() => { BP.input.ads = false; BP.input.breath = false; }")
             page.evaluate("(id) => BP.startLevel(id)", level)
             page.wait_for_function("() => BP.mode === 'playing'", timeout=90000)
@@ -91,15 +91,16 @@ def main():
             captures.append(f"{name}-ads.png")
             page.evaluate("() => { BP.input.ads = false; BP.input.breath = false; }")
 
+        page.evaluate("() => BP.startLevel(104)")
+        page.wait_for_function(
+            "() => BP.mode === 'playing' && BP.world?.level?.id === 4", timeout=90000)
         page.evaluate("""() => {
-          BP.startLevel(104);
           BP.weapons.select('m4');
           BP.weapons.state.m4.mag = 12;
           BP.weapons.reload();
         }""")
         page.wait_for_function(
-            """() => BP.mode === 'playing'
-              && BP.weapons.reloading > 0
+            """() => BP.weapons.reloading > 0
               && Math.abs(BP.weapons.holder.rotation.z) > 0.1
               && BP.weapons.holder.position.y < -0.25""",
             timeout=6000,
@@ -160,9 +161,12 @@ def main():
             assert {piece["support"] for piece in rig["armor"]} == {True, False}
             assert all(piece["vertices"] > 100 for piece in rig["sleeveDetails"])
             assert {piece["support"] for piece in rig["sleeveDetails"]} == {True, False}
-            assert rig["meshLayer"] == 2
-            assert rig["cameraLayers"] & 2
-            assert rig["lightLayers"] == [2, 2]
+            # The viewmodel is now its own scene rendered as a depth-cleared overlay
+            # pass (renderer/render-pipeline.js renderWithViewmodel); the layer-mask
+            # separation is gone, so everything sits on the default layer together.
+            assert rig["meshLayer"] == 1
+            assert rig["cameraLayers"] & 1
+            assert rig["lightLayers"] == [1, 1]
         assert reload_state["active"]
         assert abs(reload_state["holderCant"]) > 0.1
         assert reload_state["holderDrop"] < -0.25

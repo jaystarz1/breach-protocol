@@ -83,9 +83,11 @@ def main():
         result = {"levels": levels, "scoreRecords": score_records, "errors": errors[:12]}
         print(json.dumps(result, indent=2))
         assert not errors
-        assert len(levels) == 28
-        assert [item["level"] for item in levels[:14]] == [1, 2, 3, 4] + list(range(11, 21))
-        assert [item["level"] for item in levels[14:]] == [1, 2, 3, 4] + list(range(11, 21))
+        expected_ids = [1, 2, 3, 4] + list(range(11, 21)) + list(range(21, 25))
+        assert level_ids == expected_ids, level_ids
+        assert len(levels) == len(expected_ids) * 2
+        assert [item["level"] for item in levels[:len(expected_ids)]] == expected_ids
+        assert [item["level"] for item in levels[len(expected_ids):]] == expected_ids
         assert all(item["requested"] == item["timeOfDay"] == item["sceneTime"] for item in levels)
         for level in level_ids:
             day = next(item for item in levels if item["level"] == level and item["requested"] == "day")

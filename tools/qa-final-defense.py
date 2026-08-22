@@ -589,7 +589,9 @@ def main():
         assert combat_before["droneLoopingRoutes"] == combat_before["infantry"], result
         assert combat_before["droneInteriorWaypoints"], result
         assert result["assaultPressure"]["pressure"] > 0.05, result
-        assert result["assaultPressure"]["velocity"] > 0.1, result
+        # Incoming fire is presentation (camera pressure + roll), not a velocity
+        # impulse — the invisible-hand shove was removed with the ground-fire rework.
+        assert result["assaultPressure"]["velocity"] < 0.1, result
         assert result["assaultPressure"]["tracers"] >= 1, result
         assert movement["infantryMoved"] == combat_before["infantry"], result
         assert movement["vehicleMoved"], result
@@ -601,7 +603,7 @@ def main():
             "crews": [3, 3, 3],
         }, result
         assert result["artilleryPressure"]["pressure"] > 0.05, result
-        assert result["artilleryPressure"]["velocity"] > 0.1, result
+        assert result["artilleryPressure"]["velocity"] < 0.1, result
         assert result["artilleryPressure"]["tracers"] >= 1, result
         assert squirter_before["objectiveIdx"] == 1, result
         assert squirter_before["objectiveStepIdx"] == 2, result

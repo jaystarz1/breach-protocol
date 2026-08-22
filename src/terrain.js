@@ -165,14 +165,135 @@ export function buildTerrainMesh(def, skirtY) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  // World-anchored UVs for the cultivation detail map: the rows stay put in the world
+  // no matter how the DEM grid is framed.
+  const uvs = [];
+  for (let vi = 0; vi < positions.length / 3; vi++) {
+    uvs.push(positions[vi * 3] / DETAIL_TILE, positions[vi * 3 + 2] / DETAIL_TILE);
+  }
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true, flatShading: true, roughness: 0.96, metalness: 0.02,
+    map: cultivationDetailMap(),
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.receiveShadow = true;
   mesh.name = 'terrain';
+  mesh.userData.dispose = () => { geometry.dispose(); material.dispose(); };
+  return mesh;
+}
+
+// ----------------------------------------------------------------- ground detail
+// At FPV height a vertex-coloured field reads as felt: one flat tone per ~10m facet.
+// Real steppe farmland reads as CULTIVATION — plow rows, machine passes, patchy growth.
+// A single small tiling luminance map multiplied under the vertex colours supplies that
+// frequency band for free: rows every ~3m with breaks and speckle, subtle enough that
+// the crop-band mosaic and the spoil lines stay the dominant signal.
+const DETAIL_TILE = 56;
+let detailMapCache = null;
+function cultivationDetailMap() {
+  if (detailMapCache) return detailMapCache;
+  const size = 256;
+  const canvas = (typeof document !== 'undefined' && document.createElement)
+    ? document.createElement('canvas') : null;
+  if (!canvas) return null;
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rows = 18;                       // ~3.1m pitch at DETAIL_TILE 56
+  const image = ctx.createImageData(size, size);
+  const data = image.data;
+  const noise = (x, y) => {
+    const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return n - Math.floor(n);
+  };
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      // Rows run along x (the strip-farming long axis): a soft sine across y, broken up
+      // by low-frequency drift so passes wander like machinery instead of a printed grid.
+      const drift = noise(Math.floor(x / 24), 7) * 6;
+      const phase = ((y + drift) / size) * rows * Math.PI * 2;
+      const row = Math.sin(phase) * 0.5 + 0.5;
+      // Patchy growth: blotches a few metres across.
+      const blotch = (noise(Math.floor(x / 9), Math.floor(y / 9))
+        + noise(Math.floor(x / 23) + 11, Math.floor(y / 23))) * 0.5;
+      const speckle = noise(x, y);
+      let v = 236
+        + row * 14              // furrow/ridge lighting
+        + (blotch - 0.5) * 16   // growth patches
+        + (speckle - 0.5) * 8;  // grain
+      v = Math.max(214, Math.min(255, v));
+      const i = (y * size + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  detailMapCache = texture;
+  return texture;
+}
+
+// Shell craters and churned staging ground, draped on the sampled surface as one merged
+// decal mesh. Purely painted — the height grid is untouched, so the drone floor, wagon
+// paths and dugout runs never notice. Sits under the road LIFT so a maintained road
+// still draws over anything beneath it.
+export function buildGroundScars(def, scars = {}) {
+  const sample = terrainSampler(def);
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  const color = new THREE.Color();
+  const disc = (x, z, r, lift, rgb, darkenCenter = 0) => {
+    const segments = r > 4 ? 18 : 12;
+    const base = positions.length / 3;
+    positions.push(x, sample(x, z) + lift, z);
+    color.setRGB(
+      rgb[0] / 255 * (1 - darkenCenter), rgb[1] / 255 * (1 - darkenCenter),
+      rgb[2] / 255 * (1 - darkenCenter), THREE.SRGBColorSpace);
+    colors.push(color.r, color.g, color.b);
+    for (let s = 0; s <= segments; s++) {
+      const a = (s / segments) * Math.PI * 2;
+      const px = x + Math.cos(a) * r;
+      const pz = z + Math.sin(a) * r;
+      const jitter = 0.9 + (Math.abs(Math.sin(px * 12.9898 + pz * 78.233)) % 1) * 0.2;
+      positions.push(px, sample(px, pz) + lift, pz);
+      color.setRGB(
+        rgb[0] / 255 * jitter, rgb[1] / 255 * jitter, rgb[2] / 255 * jitter,
+        THREE.SRGBColorSpace);
+      colors.push(color.r, color.g, color.b);
+    }
+    for (let s = 0; s < segments; s++) {
+      indices.push(base, base + 2 + s, base + 1 + s);
+    }
+  };
+  // Churn stains first (lowest), then crater scorch, then the thrown-spoil rim ring so
+  // the stack never z-fights itself.
+  for (const [x, z, r] of scars.stains || []) {
+    disc(x, z, r, 0.1, [0x3e, 0x3c, 0x2b]);
+  }
+  for (const [x, z, r] of scars.craters || []) {
+    disc(x, z, r * 1.35, 0.14, [0x55, 0x4e, 0x3a]);  // thrown spoil apron
+    disc(x, z, r, 0.18, [0x24, 0x22, 0x1a], 0.25);   // scorched bowl
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true, flatShading: true, roughness: 0.97, metalness: 0.01,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.receiveShadow = true;
+  mesh.name = 'terrain-scars';
   mesh.userData.dispose = () => { geometry.dispose(); material.dispose(); };
   return mesh;
 }
