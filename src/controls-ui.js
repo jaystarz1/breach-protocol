@@ -28,7 +28,8 @@ const ACTION_BINDS = [
   ['thermal', 'THERMAL'],
   ['cruise', 'CRUISE'],
   ['interact', 'ABORT / INTERACT'],
-  ['gimbal', 'GIMBAL TILT (bomber camera) — move a slider or knob'],
+  ['skip', 'SKIP LESSON / STANDBY (landed)'],
+  ['gimbal', 'GIMBAL TILT (bomber camera): move a slider or knob'],
 ];
 
 function el(tag, attrs = {}, ...children) {
@@ -48,7 +49,7 @@ export function mountControlsScreen() {
   const back = document.getElementById('settings-back');
   if (!settings || !back || document.getElementById('screen-controls')) return;
   const open = el('button', {
-    class: 'menu-btn', id: 'settings-controls', text: 'CONTROLS — STICKS, RADIO, VR',
+    class: 'menu-btn', id: 'settings-controls', text: 'CONTROLS: STICKS, RADIO, VR',
     onclick: () => { hud.screen('controls'); paint(); },
   });
   open.style.marginTop = '14px';
@@ -147,9 +148,9 @@ export function mountControlsScreen() {
     if (!screen.classList.contains('active')) { requestAnimationFrame(tick); return; }
     const device = screen.querySelector('#ctl-device');
     if (sticks.source === 'none') {
-      device.textContent = 'NO STICKS DETECTED — connect a gamepad or an RC transmitter in USB joystick mode, then move a stick.';
+      device.textContent = 'NO STICKS DETECTED: connect a gamepad or an RC transmitter in USB joystick mode, then move a stick.';
     } else {
-      const radioNote = sticks.source === 'radio' && !sticks.calibrated ? ' — NOT CALIBRATED (using EdgeTX default AETR)' : '';
+      const radioNote = sticks.source === 'radio' && !sticks.calibrated ? ': NOT CALIBRATED (using EdgeTX default AETR)' : '';
       device.textContent = `${sticks.source === 'xr' ? 'QUEST TOUCH' : sticks.source.toUpperCase()}: ${sticks.label}${radioNote}`;
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -164,19 +165,19 @@ export function mountControlsScreen() {
   // ---- RC transmitter calibration ----
   let wizard = null;
   const STEPS = [
-    { id: 'rest', title: 'STEP 1 / 6 — REST', text: 'Centre pitch, roll and yaw. Put the THROTTLE fully DOWN. Press NEXT.' },
-    { id: 'throttle', title: 'STEP 2 / 6 — THROTTLE', text: 'Move the THROTTLE fully up and fully down twice. Leave it DOWN. Press NEXT.' },
-    { id: 'yaw', title: 'STEP 3 / 6 — YAW', text: 'Hold YAW (rudder) fully RIGHT. Press NEXT while holding.' },
-    { id: 'pitch', title: 'STEP 4 / 6 — PITCH', text: 'Hold PITCH (elevator) fully FORWARD / UP. Press NEXT while holding.' },
-    { id: 'roll', title: 'STEP 5 / 6 — ROLL', text: 'Hold ROLL (aileron) fully RIGHT. Press NEXT while holding.' },
-    { id: 'switches', title: 'STEP 6 / 6 — SWITCHES', text: '' },
+    { id: 'rest', title: 'STEP 1 / 6: REST', text: 'Centre pitch, roll and yaw. Put the THROTTLE fully DOWN. Press NEXT.' },
+    { id: 'throttle', title: 'STEP 2 / 6: THROTTLE', text: 'Move the THROTTLE fully up and fully down twice. Leave it DOWN. Press NEXT.' },
+    { id: 'yaw', title: 'STEP 3 / 6: YAW', text: 'Hold YAW (rudder) fully RIGHT. Press NEXT while holding.' },
+    { id: 'pitch', title: 'STEP 4 / 6: PITCH', text: 'Hold PITCH (elevator) fully FORWARD / UP. Press NEXT while holding.' },
+    { id: 'roll', title: 'STEP 5 / 6: ROLL', text: 'Hold ROLL (aileron) fully RIGHT. Press NEXT while holding.' },
+    { id: 'switches', title: 'STEP 6 / 6: SWITCHES AND KNOB', text: '' },
   ];
   const $w = id => screen.querySelector(id);
 
   function startWizard() {
     const pad = rawGamepads().find(isRadio);
     if (!pad) {
-      $w('#ctl-device').textContent = 'NO TRANSMITTER FOUND — set the radio to USB joystick mode, plug it in, move a stick, then try again.';
+      $w('#ctl-device').textContent = 'NO TRANSMITTER FOUND: set the radio to USB joystick mode, plug it in, move a stick, then try again.';
       return;
     }
     wizard = { padIndex: pad.index, id: pad.id, step: 0, rest: null, min: [], max: [], profile: { id: pad.id, actions: {} }, used: new Set(), bind: 0 };

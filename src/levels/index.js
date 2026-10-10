@@ -5,7 +5,7 @@ import { quality } from '../quality.js';
 import { streetShopLayout } from '../mission-variants.js';
 import { terrainSampler } from '../terrain.js';
 import { DEEP_FENCE_TERRAIN } from './terrain-deep-fence.js';
-import { DRONE_TRAINING_LEVELS, DRONE_INTERDICTION_LEVELS } from './drone-training.js';
+import { DRONE_TRAINING_LEVELS, DRONE_INTERDICTION_LEVELS, DRONE_KILLZONE_LEVELS } from './drone-training.js';
 import { buildActs } from './acts.js';
 import {
   facade, lift, rng, sandbags, waterTank, acUnit, ventStack, roofHutch,
@@ -2878,4 +2878,5 @@ export const LEVELS = [
   ...buildActs(LEGACY_LEVELS),
   ...DRONE_TRAINING_LEVELS,
   ...DRONE_INTERDICTION_LEVELS,
+  ...DRONE_KILLZONE_LEVELS,
 ];

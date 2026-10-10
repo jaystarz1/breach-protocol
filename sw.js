@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v173-xr-goggles';
+const CACHE = 'breach-protocol-v174-kill-zone';
 const ASSETS = [
   './', 'index.html', 'shooter.html', 'ui.css', 'manifest.json', 'shooter.webmanifest',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',

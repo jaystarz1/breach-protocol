@@ -57,7 +57,9 @@ export function createGoggles(renderer) {
   const postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), post));
 
-  const mirror = createDomMirror();
+  // The goggle screen spans ~1000 eye pixels on a Quest 2; 1600 keeps OSD glyphs crisp while
+  // halving the 24 Hz texture upload a 2048 canvas would cost on a mobile GPU.
+  const mirror = createDomMirror({ maxWidth: isQuest ? 1600 : 2048 });
   const hudTexture = new THREE.CanvasTexture(mirror.canvas);
   hudTexture.minFilter = THREE.LinearFilter;
   hudTexture.generateMipmaps = false;
@@ -179,7 +181,7 @@ export function createGoggles(renderer) {
   const button = document.createElement('button');
   button.id = 'vr-enter';
   button.type = 'button';
-  button.textContent = 'ENTER VR — GOGGLES';
+  button.textContent = 'ENTER VR: GOGGLES';
   button.onclick = () => (state.session ? state.session.end() : start());
   document.body.appendChild(button);
   const pause = document.getElementById('screen-pause');
@@ -219,7 +221,7 @@ export function createGoggles(renderer) {
         state.session = null;
         renderer.xr.enabled = false;
         document.body.classList.remove('xr-presenting');
-        button.textContent = 'ENTER VR — GOGGLES';
+        button.textContent = 'ENTER VR: GOGGLES';
         window.dispatchEvent(new Event('resize'));
       });
     } catch (error) {

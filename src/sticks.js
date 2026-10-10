@@ -1,6 +1,6 @@
 // Analog flight sticks: a USB RC transmitter (EdgeTX/OpenTX joystick mode), a standard game
 // pad, or the Quest Touch controllers inside a WebXR session. All three resolve to the same
-// four Mode 2 channels the drone reads — throttle, yaw, pitch, roll — plus the action buttons,
+// four Mode 2 channels the drone reads: throttle, yaw, pitch, roll: plus the action buttons,
 // which are written straight into the shared `input` edge flags so every existing gate (FIRE
 // to launch, R to skip a lesson, F to abort) works unchanged.
 //
@@ -22,7 +22,7 @@ export const CONTROL_DEFAULTS = {
   uptilt: 20,          // FPV camera tilt above the frame's thrust plane, degrees
   deadband: 0.04,
   vrScreen: 56,        // goggle screen width in the headset, degrees of view
-  vrFeedRate: 'auto',  // auto | full | half — scene refresh inside the headset
+  vrFeedRate: 'auto',  // auto | full | half: scene refresh inside the headset
   radio: null,         // calibration profile for a non-standard (RC transmitter) device
 };
 

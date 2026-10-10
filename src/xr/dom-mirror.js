@@ -2,7 +2,7 @@
 // canvas so it can ride on the goggle screen inside a WebXR session, where the browser
 // composites no DOM at all. It is deliberately a small renderer for THIS game's UI: boxes,
 // borders, text, canvases, range sliders, rotated bars and the whisker SVG. The DOM stays the
-// single source of truth — the game keeps writing textContent exactly as it does on a monitor.
+// single source of truth: the game keeps writing textContent exactly as it does on a monitor.
 
 const SKIP_IDS = new Set(['game-canvas', 'controls', 'vr-enter', 'rotate-hint']);
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'TEMPLATE']);
@@ -87,13 +87,14 @@ function textLines(node, cs) {
   return result;
 }
 
-export function createDomMirror() {
+// `maxWidth` caps the canvas (and so the per-repaint texture upload) in device pixels.
+export function createDomMirror({ maxWidth = 2048 } = {}) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   let width = 0, height = 0;
 
   function resize() {
-    const scale = Math.min(2, 2048 / Math.max(1, window.innerWidth));
+    const scale = Math.min(2, maxWidth / Math.max(1, window.innerWidth));
     const w = Math.round(window.innerWidth * scale);
     const h = Math.round(window.innerHeight * scale);
     if (w !== canvas.width || h !== canvas.height) {

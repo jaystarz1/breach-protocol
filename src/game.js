@@ -13,8 +13,8 @@ const GAMES = {
     // Player-facing word for one entry of the roster; numbering is per game, from 01.
     unit: 'CHAPTER',
     tagline: 'FPV STRIKE · BOMBER · INTERCEPTOR',
-    // Drone school (11-20) then the interceptor serial (21-24), in campaign order.
-    missions: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+    // Drone school (11-20), the interceptor serial (21-24), then the KILL ZONE serial (25-27).
+    missions: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
     saveKey: 'breach-protocol-drone-save-v1',
     // First boot inherits the shared pre-split save so drone progress and settings carry over.
     seedFrom: 'breach-protocol-save-v1',

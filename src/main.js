@@ -3042,9 +3042,9 @@ function frame() {
   if (world.drone?.active) {
     if (world.drone.mode === 'combat') updateDroneCombatWave(dt);
     world.drone.update(dt, input, world.solids);
-    // CRUISE transit runs the world time-compressed. Extra sub-steps see no pilot input
-    // (edges were consumed by the first step) and stop the moment the autopilot hands back.
-    for (let step = 1; step < (world.drone.timeCompression || 1) && world.drone.cruise; step++) {
+    // CRUISE transit and a landed standby run the world time-compressed. Extra sub-steps see
+    // no pilot input (edges were consumed by the first step) and stop the moment either ends.
+    for (let step = 1; step < (world.drone.timeCompression || 1); step++) {
       world.drone.update(dt, QUIET_INPUT, world.solids);
     }
     checkObjectives();

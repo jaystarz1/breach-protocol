@@ -27,6 +27,34 @@ const STICK_UP = new THREE.Vector3();
 const STICK_VEL = new THREE.Vector3();
 const STICK_ACCEL = new THREE.Vector3();
 const STICK_BODY_FWD = new THREE.Vector3();
+const LOCK_AIM = new THREE.Vector3();
+const LOCK_DIR = new THREE.Vector3();
+
+function makeNetBox(cx, cy, cz, w, h, d) {
+  return {
+    min: { x: cx - w / 2, y: cy - h / 2, z: cz - d / 2 },
+    max: { x: cx + w / 2, y: cy + h / 2, z: cz + d / 2 },
+  };
+}
+
+// Knotted netting: a diamond mesh painted once and shared by every net in a mission.
+let NET_TEXTURE = null;
+function netTexture() {
+  if (NET_TEXTURE) return NET_TEXTURE;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  for (let i = -128; i <= 256; i += 32) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 128, 128); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(i, 128); ctx.lineTo(i + 128, 0); ctx.stroke();
+  }
+  NET_TEXTURE = new THREE.CanvasTexture(canvas);
+  NET_TEXTURE.wrapS = NET_TEXTURE.wrapT = THREE.RepeatWrapping;
+  NET_TEXTURE.repeat.set(3, 3);
+  return NET_TEXTURE;
+}
 const FPV_ATTEMPT = Object.freeze({
   READY: 'ready',
   FLYING: 'flying',
@@ -368,7 +396,7 @@ export function strikeTargetModel(target) {
   // is position-derived so a mission replays with the same column every boot.
   // The authored technical is the UAZ-469, which ships with its own pintle recoilless.
   const authoredSlots = {
-    tank: 'tank', apc: 'apc', armor: 'apc', ew: 'gaz66', technical: 'uaz469',
+    tank: 'tank', turtle: 'tank', apc: 'apc', armor: 'apc', ew: 'gaz66', technical: 'uaz469',
     jeep: 'jeep', truck: 'truck', tanker: 'tanker',
   };
   let authored = null;
@@ -507,7 +535,7 @@ export function strikeTargetModel(target) {
       };
     }
     root.userData.crew = crew;
-  } else if (target.kind === 'tank') {
+  } else if (target.kind === 'tank' || target.kind === 'turtle') {
     // A main battle tank with a welded cope cage. The cage is the doctrine lesson made
     // visible from FPV distance: the roof is screened, so the drone has to come in on the
     // rear arc where the standoff frame is open and the engine deck is thin.
@@ -528,6 +556,26 @@ export function strikeTargetModel(target) {
       // Rear engine deck: intake grilles, the aim point the mission teaches.
       add(new THREE.BoxGeometry(1.15, 0.16, 2.2), dark, [1.65, 1.34, 0]);
     }
+    if (target.kind === 'turtle') {
+      // "Turtle" tank: a welded shed of roofing steel over the whole hull and turret, skirts
+      // nearly to the ground. Top and front are screened; the rear of the shed is open for the
+      // engine deck and the running gear shows under the skirts: the two places to hit it.
+      const sheet = new THREE.MeshStandardMaterial({
+        name: 'drone-strike-turtle-sheet',
+        color: 0x4a4d45, roughness: 0.86, metalness: 0.5,
+      });
+      root.userData.extraWreckMaterials = [sheet];
+      add(new THREE.BoxGeometry(4.3, 0.08, 3.5), sheet, [-0.35, 3.05, 0], [0, 0, 0.05]);
+      add(new THREE.BoxGeometry(4.3, 0.08, 1.95), sheet, [-0.35, 2.72, 1.55], [0.42, 0, 0.05]);
+      add(new THREE.BoxGeometry(4.3, 0.08, 1.95), sheet, [-0.35, 2.72, -1.55], [-0.42, 0, 0.05]);
+      for (const z of [-1.72, 1.72]) {
+        add(new THREE.BoxGeometry(4.2, 1.45, 0.06), sheet, [-0.4, 1.75, z]);
+      }
+      add(new THREE.BoxGeometry(0.06, 2.1, 3.4), sheet, [-2.45, 1.95, 0]);
+      for (const z of [-1.3, -0.4, 0.5, 1.3]) {
+        add(new THREE.BoxGeometry(0.07, 1.7, 0.07), dark, [1.85, 2.15, z]);
+      }
+    } else {
     // The cope cage: four standoff posts and a slat roof over the turret, open at the rear.
     const cage = new THREE.MeshStandardMaterial({
       name: 'drone-strike-cage',
@@ -540,6 +588,32 @@ export function strikeTargetModel(target) {
       add(new THREE.BoxGeometry(2.35, 0.05, 0.14), cage, [0.18, 2.86, z + 0.15]);
     }
     add(new THREE.BoxGeometry(0.1, 0.5, 2.1), cage, [-0.85, 2.6, 0]);
+    }
+  } else if (target.kind === 'ugv') {
+    // Logistics ground robot: a low tracked carrier with a strapped cargo load and a mast
+    // radio. Both sides run hundreds of these a day through the kill zone, so they are a
+    // priority target in their own right.
+    add(new THREE.BoxGeometry(1.9, 0.42, 1.1), olive, [0, 0.42, 0]);
+    for (const z of [-0.62, 0.62]) {
+      add(new THREE.BoxGeometry(2.05, 0.38, 0.24), dark, [0, 0.27, z]);
+      for (const x of [-0.75, 0, 0.75]) {
+        add(new THREE.CylinderGeometry(0.17, 0.17, 0.08, 12), steel,
+          [x, 0.27, z * 1.08], [Math.PI / 2, 0, 0]);
+      }
+    }
+    add(new THREE.BoxGeometry(0.62, 0.42, 0.88), dark, [0.32, 0.85, 0]);
+    add(new THREE.BoxGeometry(0.55, 0.36, 0.82), olive, [-0.42, 0.82, 0]);
+    add(new THREE.CylinderGeometry(0.02, 0.025, 0.95, 6), steel, [0.82, 1.1, 0.35]);
+  } else if (target.kind === 'parkedfpv') {
+    // A hostile fibre FPV lying in wait by the road: a 10-inch frame on its belly, charge
+    // slung underneath, camera up the verge. Tiny, cold-ish, and lethal to a passing column.
+    add(new THREE.BoxGeometry(0.34, 0.09, 0.2), dark, [0, 0.12, 0]);
+    add(new THREE.BoxGeometry(0.26, 0.12, 0.16), olive, [0.02, 0.05, 0]);
+    for (const [x, z] of [[0.26, 0.26], [0.26, -0.26], [-0.26, 0.26], [-0.26, -0.26]]) {
+      add(new THREE.BoxGeometry(0.42, 0.03, 0.05), dark, [x / 2, 0.13, z / 2], [0, Math.atan2(z, x), 0]);
+      add(new THREE.CylinderGeometry(0.17, 0.17, 0.012, 14), steel, [x, 0.16, z]);
+    }
+    add(new THREE.CylinderGeometry(0.035, 0.035, 0.35, 8), olive, [0.1, 0.02, 0], [0, 0, Math.PI / 2]);
   } else if (target.kind === 'locomotive') {
     // Compact diesel road locomotive: long hood, raised cab, paired bogies and visible
     // couplers. Its proportions match the tank wagon so the two read as one consist from
@@ -943,6 +1017,13 @@ export function createDroneAssaultVehicle(scene, definition = {}) {
     coverNodes: null,
     // Optional instructor line delivered when this target dies (the flight-school voice).
     killMessage: definition.killMessage || null,
+    // Timed traffic: a convoy due on the road, or our own run that must find it clear.
+    startAt: definition.startDelay ?? 0,
+    etaLabel: definition.etaLabel || null,
+    // A hostile ambush drone strikes any protected (friendly) mover inside this radius.
+    ambushRadius: definition.ambushRadius ? definition.ambushRadius / metersPerUnit : 0,
+    // Heavy armour: a non-killing hit stops it where it is (the double-tap setup).
+    immobilizeOnHit: !!definition.immobilizeOnHit,
     // An airborne target flies its route at authored AGL instead of taking the ground
     // snap; `exited` latches once it leaves the engagement box (the escape loss path).
     airborne: !!definition.airborne,
@@ -1521,6 +1602,21 @@ export class DroneController {
     this.cruiseCompression = definition.cruiseCompression ?? 4;
     this.cruiseContactRange = definition.cruiseContactRange ?? 95;
     this.searchBox = null;
+    // Machine-vision terminal guidance (authored per airframe): hold FIRE with a target near
+    // the crosshair to lock; a locked aircraft finishes the run itself if the link dies.
+    this.terminalGuidance = !!definition.terminalGuidance;
+    this.lockRange = (definition.lockRange ?? 420) / this.metersPerUnit;
+    this.terminal = { candidate: null, target: null, hold: 0, masked: 0, armedRelease: false };
+    // Landed standby (the roadside ambush): motors safe, camera and link only.
+    this.standby = false;
+    this.landed = false;
+    this.standbyDrain = definition.standbyDrain ?? 0.05;
+    this.standbyCompression = definition.standbyCompression ?? 6;
+    this.standbyWakeRange = (definition.standbyWakeRange ?? 600) / this.metersPerUnit;
+    this.standbyAlerted = false;
+    // Anti-drone netting strung over supply roads: drone-only colliders.
+    this.netBoxes = [];
+    this.netRoot = null;
     this.worldAccel = this.isFpvFamily ? this.accel / this.metersPerUnit : this.accel;
     this.bombs = this.mode === 'bomber' ? (definition.bombs ?? 6) : 0;
     this.bombsTotal = this.bombs;
@@ -1710,6 +1806,7 @@ export class DroneController {
       }
       if (this.training.requireReturn) this.buildLaunchMarker();
       if (this.fiberControlled) this.buildFiberCourse();
+      if (definition.nets?.length) this.buildNets(definition.nets);
     }
     // Ambient population: trench garrisons and small parties moving inside their own
     // areas. Scenery with body heat — never targets, never counted, but a blast that
@@ -1794,6 +1891,7 @@ export class DroneController {
           </svg>
         </div>` : ''}
         <div class="fpv-cross">+</div>
+        <div class="fpv-lockbox"><span></span></div>
         <div class="fpv-name">${this.craftName}</div>
         <div class="fpv-mode">${this.mode === 'bomber' ? 'ANGLE // PAYLOAD' : 'ACRO // ARMED'}</div>
         <div class="fpv-timer">00:00</div>
@@ -1862,6 +1960,10 @@ export class DroneController {
       .fpv-whiskers{position:absolute;left:32%;bottom:-3%;width:36%;height:58%;overflow:visible;filter:drop-shadow(1px 1px 1px #000)}
       .fpv-whiskers path{fill:none;stroke:rgba(191,176,143,.72);stroke-width:.68;stroke-linecap:round;vector-effect:non-scaling-stroke}
       .fpv-cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);font-size:18px;font-weight:400}
+      .fpv-lockbox{position:absolute;display:none;transform:translate(-50%,-50%);border:2px solid #ffd54f;box-shadow:0 0 0 1px #000}
+      .fpv-lockbox.locked{border-color:#fff;border-width:3px}
+      .fpv-lockbox span{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:4px;font-size:12px;white-space:nowrap;color:#ffd54f}
+      .fpv-lockbox.locked span{color:#fff}
       .fpv-name{position:absolute;left:6%;top:5%}
       .fpv-mode{position:absolute;left:6%;top:calc(5% + 22px);font-size:12px;color:#cfd8cf}
       .fpv-timer{position:absolute;left:6%;top:calc(5% + 42px)}
@@ -1918,8 +2020,9 @@ export class DroneController {
     ].map(selector => this.overlay.querySelector(selector)).filter(Boolean);
     this.osdElements = [
       '.fpv-cross', '.fpv-name', '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt',
-      '.fpv-link', '.fpv-warn', '.fpv-fiber', '.fpv-airframe',
+      '.fpv-link', '.fpv-warn', '.fpv-fiber', '.fpv-airframe', '.fpv-lockbox',
     ].map(selector => this.overlay.querySelector(selector)).filter(Boolean);
+    this.lockBox = this.overlay.querySelector('.fpv-lockbox');
     this.osd = {
       timer: this.overlay.querySelector('.fpv-timer'),
       mode: this.overlay.querySelector('.fpv-mode'),
@@ -1974,6 +2077,30 @@ export class DroneController {
     this.prepareNextAirframe();
   }
 
+  // Seeker box: amber while acquiring (FIRE held on a target), white once locked.
+  updateLockBox() {
+    const box = this.lockBox;
+    if (!box) return;
+    const t = this.terminal;
+    const target = t?.target || t?.candidate;
+    if (!this.terminalGuidance || !target || this.attemptState !== FPV_ATTEMPT.FLYING) {
+      box.style.display = 'none';
+      return;
+    }
+    const aim = this.lockAimPoint(target, LOCK_AIM).project(this.camera);
+    if (aim.z > 1 || Math.abs(aim.x) > 1.2 || Math.abs(aim.y) > 1.2) { box.style.display = 'none'; return; }
+    const range = target.pos.distanceTo(this.pos) * this.metersPerUnit;
+    const size = Math.max(26, Math.min(120, 5200 / Math.max(1, range)));
+    box.style.display = 'block';
+    box.style.left = `${(aim.x + 1) * 50}%`;
+    box.style.top = `${(1 - aim.y) * 50}%`;
+    box.style.width = box.style.height = `${size}px`;
+    box.classList.toggle('locked', !!t.target);
+    box.firstChild.textContent = t.target
+      ? `LOCK ${Math.round(range)}M`
+      : `ACQ ${Math.min(99, Math.round(t.hold / 0.55 * 100))}%`;
+  }
+
   // The control strip under the feed speaks whichever device is flying the aircraft.
   helpLine(source) {
     const bomber = this.mode === 'bomber';
@@ -1991,7 +2118,7 @@ export class DroneController {
     }
     return `SIM CONTROL // ${bomber
       ? 'WASD FLIGHT · MOUSE GIMBAL · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP · N THERMAL · T CRUISE'
-      : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · N EO/THERMAL · T CRUISE · CONTACT TO STRIKE'}`;
+      : `WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · N EO/THERMAL · T CRUISE${this.terminalGuidance ? ' · HOLD SPACE LOCK' : ''}${this.definition.standbyHint ? ' · LANDED: R STANDBY' : ''} · CONTACT TO STRIKE`}`;
   }
 
   showLesson() {
@@ -2125,6 +2252,27 @@ export class DroneController {
       if (jammer.estimated) ctx.setLineDash([5, 5]);
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+    // Anti-drone netting over the roads: violet runs, gaps where the roof is torn.
+    for (const net of definition.nets || []) {
+      const [ax, az] = net.from, [bx, bz] = net.to;
+      ctx.strokeStyle = 'rgba(196,140,255,0.85)';
+      ctx.lineWidth = 3;
+      const tears = net.tears || [];
+      let start = 0;
+      const stops = [...tears.flat(), 1];
+      for (let i = 0; i < stops.length; i += 2) {
+        const end = stops[i];
+        ctx.beginPath();
+        ctx.moveTo(...this.mapPoint(ax + (bx - ax) * start, az + (bz - az) * start));
+        ctx.lineTo(...this.mapPoint(ax + (bx - ax) * end, az + (bz - az) * end));
+        ctx.stroke();
+        start = stops[i + 1] ?? 1;
+      }
+      ctx.fillStyle = 'rgba(210,170,255,0.95)';
+      ctx.font = '700 7px ui-monospace, Menlo, monospace';
+      const [lx, lz] = this.mapPoint(ax, az);
+      ctx.fillText('NET', lx + 2, lz - 4);
     }
     // Authored training route: the flagged low line down the gully, dashed amber. Only
     // levels that stake flags on the ground declare it — the map matches the terrain.
@@ -2280,7 +2428,8 @@ export class DroneController {
     this.fiberPoints = [new THREE.Vector3(this.launch.x, ground, this.launch.z)];
     this.fiberPayout = 0;
     this.fiberTension = 0;
-    this.fiberWarning = 'CYAN CORRIDOR // RED RINGS SNAG OR WRAP THE LINE';
+    this.fiberWarning = this.training.fiberRoute?.length
+      ? 'CYAN CORRIDOR // RED RINGS SNAG OR WRAP THE LINE' : '';
     this.updateFiberGeometry();
   }
 
@@ -2349,7 +2498,7 @@ export class DroneController {
       ? 'FIBRE TENSION — WIDEN TURN / CLEAR RED'
       : reserve < maxLength * 0.18
         ? 'FIBRE RESERVE LOW — COMMIT OR ABORT'
-        : offRoute > (this.training.fiberCorridor ?? 62)
+        : this.training.fiberRoute?.length && offRoute > (this.training.fiberCorridor ?? 62)
           ? 'OFF ROUTE — CHECK TERRAIN / CABLE'
           : '';
     if (reserve <= 0 || this.fiberTension >= 1) {
@@ -2441,6 +2590,8 @@ export class DroneController {
       const source = this.combatVehicles.find(vehicle =>
         vehicle.jammerId === id || vehicle.targetId === id || vehicle.label === id);
       if (source?.dead) return false;
+      // A vehicle-mounted dome (the turtle's own EW) travels with its carrier.
+      if (jammer.follow && source) { jammer.x = source.pos.x; jammer.z = source.pos.z; }
     }
     if (jammer.pulse) {
       const on = Math.max(0.2, jammer.pulse.on ?? 8);
@@ -2578,6 +2729,8 @@ export class DroneController {
     if (report.jamTime > 8) improve.push(`The aircraft spent ${report.jamTime.toFixed(1)} seconds under electronic attack; the red route segments show exactly where exposure accumulated.`);
     if (report.routeEfficiency > 1.7) improve.push(`After accounting for all required target legs${report.returnIncluded ? ' and the return home' : ''}, you flew ${Math.round(report.routeExcess)} m beyond the ${Math.round(report.baselineDistance)} m task baseline (${report.routeEfficiency.toFixed(2)}×).`);
     if (!report.acquired) improve.push('The terminal run began without a stable acquisition; establish the target before committing.');
+    if (report.effect === 'NETTED') improve.push('The netting caught the aircraft. Strike where the road leaves the net, or drop through a torn section of the roof.');
+    if (report.effect === 'ROAD NOT CLEARED') improve.push('Our run reached a live ambush drone. Search the verges in departure order: nearest to our start first.');
     if (report.effect === 'PROTECTION DEFEAT') improve.push(`The ${report.aspect.toLowerCase()} impact struck protection rather than the rear opening; only this protected target requires a rear attack.`);
     else if (['NO EFFECT', 'MISS'].includes(report.effect)) improve.push(`The closest valid target was ${Math.round(report.impactDistance)} m from impact; correct the final line by that miss distance rather than changing aspect automatically.`);
     if (this.training.maxAgl && report.maxAgl > this.training.maxAgl) {
@@ -3015,6 +3168,8 @@ export class DroneController {
     this.cruise = null;
     this.stickAttitude = false;
     this.bodyRates?.set(0, 0, 0);
+    this.standby = false;
+    if (this.terminal) { this.terminal.target = null; this.terminal.candidate = null; this.terminal.hold = 0; }
     this.pos.copy(this.launch);
     this.pos.y += 1.7;
     this.yaw = this.launchYaw;
@@ -3087,7 +3242,7 @@ export class DroneController {
     if (this.attemptState === FPV_ATTEMPT.READY
       && this.attemptStateTime > 0.25 && (input.firePressed || input.breachPressed)) {
       // A stick-flown quad launches from the pad itself, not from the assisted law's 6 m
-      // hover point — otherwise a radio with the throttle down drops it onto its own pad.
+      // hover point: otherwise a radio with the throttle down drops it onto its own pad.
       if (this.mode === 'fpv' && !this.airStart && activeFlightMode() !== 'assist') {
         const ground = groundHeight(this.frameSolids || [], this.pos.x, this.pos.z, 0.12, this.pos.y + 0.05);
         const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : 0;
@@ -3147,9 +3302,21 @@ export class DroneController {
     // real thrust-vector model (ANGLE self-levelling or ACRO rate mode). The payload hex is
     // a stabilized platform in every law, so sticks feed its assisted controls instead.
     const law = this.isFpvFamily ? activeFlightMode() : 'assist';
-    if (this.cruise && !this.updateCruiseGate(input)) this.endCruise(this.cruiseEndReason);
-    else if (!this.cruise && input.cruisePressed && this.isFpvFamily) this.startCruise();
-    if (this.cruise) {
+    const guided = !this.standby && this.updateTerminal(dt, input, solids);
+    if (this.standby) {
+      if (this.pilotInput(input)) this.wakeFromStandby();
+    } else if (input.reloadPressed && this.isFpvFamily && this.landed && !this.lessonQueue?.length) {
+      this.enterStandby();
+    }
+    if (guided) {
+      if (this.cruise) this.cruise = null;
+    } else if (this.cruise && !this.updateCruiseGate(input)) this.endCruise(this.cruiseEndReason);
+    else if (!this.cruise && input.cruisePressed && this.isFpvFamily && !this.standby) this.startCruise();
+    if (this.standby) {
+      this.vel.set(0, 0, 0);
+    } else if (guided) {
+      // updateTerminal already flew the aircraft this frame.
+    } else if (this.cruise) {
       this.flyCruise(dt);
     } else if (this.mode === 'fpv' && law !== 'assist') {
       if (!this.stickAttitude) this.beginStickAttitude();
@@ -3158,7 +3325,8 @@ export class DroneController {
       if (this.stickAttitude) this.endStickAttitude();
       this.flyAssisted(dt, this.assistedCommand(input, dt), control);
     }
-    this.flightLaw = this.cruise ? 'cruise' : law;
+    this.flightLaw = this.standby ? 'standby' : guided ? 'terminal' : this.cruise ? 'cruise' : law;
+    this.updateCruiseHint(dt);
 
     this.next.copy(this.pos).addScaledVector(this.vel, dt);
     this.move.copy(this.next).sub(this.pos);
@@ -3172,6 +3340,14 @@ export class DroneController {
         raycastSolids(
           droneFoliage, this.pos.x, this.pos.y, this.pos.z,
           this.move.x, this.move.y, this.move.z, distance + 0.16));
+      const netHit = this.netBoxes.length
+        ? raycastSolids(this.netBoxes, this.pos.x, this.pos.y, this.pos.z,
+          this.move.x, this.move.y, this.move.z, distance + 0.16)
+        : Infinity;
+      if (netHit < distance + 0.16 && netHit <= hit) {
+        this.netCatch(this.pos.clone().addScaledVector(this.move, Math.max(0, netHit - 0.05)));
+        return;
+      }
       if (hit > distance) this.pos.copy(this.next);
       else if (this.mode === 'fpv' && this.armTimer <= 0) {
         // An armed FPV does not bounce off a wall. Whatever it touches, it touches once.
@@ -3210,6 +3386,8 @@ export class DroneController {
       this.vel.x *= skid;
       this.vel.z *= skid;
     }
+    this.landed = this.pos.y <= floor + 0.04 && Math.hypot(this.vel.x, this.vel.z) < 0.45
+      && Math.abs(this.vel.y) < 0.6;
     // At the ceiling the climb is spent; drop the vertical speed so it does not bank up.
     if (this.pos.y >= this.ceiling + Math.max(0, terrainY) - 0.001 && this.vel.y > 0) this.vel.y = 0;
     if (this.updateFiberControl(dt)) return;
@@ -3274,7 +3452,12 @@ export class DroneController {
       // is gone. The timer is the pilot's chance to dive out of the bubble.
       if (this.signal <= 0.1) this.linkLowTimer += dt; else this.linkLowTimer = 0;
       const linkLossGrace = this.training.linkLossGrace ?? 1.7;
-      if (this.linkLowTimer > linkLossGrace) { this.loseAirframe('LINK LOST IN THE BUBBLE'); return; }
+      // A locked machine-vision seeker needs no link for the last stretch: the pilot watches
+      // snow and waits for the result. Without a lock, a dead link is a lost aircraft.
+      if (this.linkLowTimer > linkLossGrace && !this.terminal.target) {
+        this.loseAirframe('LINK LOST IN THE BUBBLE');
+        return;
+      }
       if (this.battery <= 0) { this.loseAirframe('BATTERY FLAT'); return; }
     } else if (this.signal <= 0.02 || this.battery <= 0) this.resetAircraft();
 
@@ -3542,7 +3725,7 @@ export class DroneController {
   // Attitude is a full quaternion (ACRO flips are legal). Thrust acts along the frame's up
   // axis against real gravity and quadratic drag, all in metres, converted to map units at
   // the end. The camera is bolted to the frame with uptilt, so forward speed means the frame
-  // pitches down and the picture shows it — exactly why FPV cameras are tilted up.
+  // pitches down and the picture shows it: exactly why FPV cameras are tilted up.
   beginStickAttitude() {
     const uptilt = controls().uptilt * DEG;
     STICK_EULER.set(Math.max(-1.2, this.pitch - uptilt), this.yaw, this.roll, 'YXZ');
@@ -3594,7 +3777,7 @@ export class DroneController {
     let thrust;
     if (sticks.sprung) {
       // Self-centring throttle (pad, Touch): centre is hover. ANGLE also compensates for
-      // tilt so a level-flight push holds altitude — the altitude-hold every pad sim adds.
+      // tilt so a level-flight push holds altitude: the altitude-hold every pad sim adds.
       const hover = law === 'angle' ? g / Math.max(0.42, STICK_UP.y) : g;
       thrust = sticks.throttle >= 0
         ? hover + (maxThrust - hover) * sticks.throttle
@@ -3644,7 +3827,8 @@ export class DroneController {
   // still drains at the true rate. Anything tactical hands the sticks straight back.
   cruiseAvailability() {
     if (!this.isFpvFamily || this.attemptState !== FPV_ATTEMPT.FLYING) return 'NOT AIRBORNE';
-    if (this.fiberControlled) return 'FIBRE — HAND-FLY THE CABLE ROUTE';
+    // The fibre course is a hand-flown cable lesson; an open fibre sortie may cruise its transit.
+    if (this.fiberControlled && this.training.fiberRoute?.length) return 'FIBRE: HAND-FLY THE CABLE ROUTE';
     if (this.lessonQueue?.length) return 'LESSON IN PROGRESS';
     if (this.signal < 0.6) return 'LINK TOO WEAK FOR AUTOPILOT';
     if (this.battery < 25) return 'BATTERY TOO LOW';
@@ -3661,16 +3845,22 @@ export class DroneController {
     return !!b && p.x > b.x1 - pad && p.x < b.x2 + pad && p.z > b.z1 - pad && p.z < b.z2 + pad;
   }
 
-  hostileContactWithin(range) {
+  // `movingOnly`: traffic that has actually set off (the standby wake). Otherwise every
+  // hostile except optional static teams: a dug-in trench garrison is scenery to the
+  // autopilot, and its ground fire already ends CRUISE through incomingPressure.
+  hostileContactWithin(range, movingOnly = false) {
     const r2 = range * range;
     return this.combatVehicles.some(vehicle => !vehicle.dead && !vehicle.protected
       && vehicle.hostile !== false && !vehicle.exited
+      && (movingOnly
+        ? vehicle.route?.length > 0 && this.missionFlightTime >= (vehicle.startAt || 0)
+        : !(vehicle.optional && !vehicle.route?.length))
       && (vehicle.pos.x - this.pos.x) ** 2 + (vehicle.pos.z - this.pos.z) ** 2 < r2);
   }
 
   startCruise() {
     const blocked = this.cruiseAvailability();
-    if (blocked) { this.radioCall(`CRUISE UNAVAILABLE — ${blocked}`, 2600); return false; }
+    if (blocked) { this.radioCall(`CRUISE UNAVAILABLE: ${blocked}`, 2600); return false; }
     const home = this.egressRequired;
     const waypoints = [];
     if (home) {
@@ -3691,8 +3881,8 @@ export class DroneController {
     this.cruise = { waypoints, index: 0, home, elapsed: 0 };
     if (this.stickAttitude) this.heading = this.yaw;
     this.radioCall(home
-      ? `CRUISE — AUTOPILOT RTB TO ${this.training.homeLabel || 'LZ'}. ANY STICK TAKES CONTROL.`
-      : `CRUISE — AUTOPILOT TO THE SEARCH AREA, ${waypoints.length} LEG${waypoints.length > 1 ? 'S' : ''}. ANY STICK TAKES CONTROL.`, 3200);
+      ? `CRUISE: AUTOPILOT RTB TO ${this.training.homeLabel || 'LZ'}. ANY STICK TAKES CONTROL.`
+      : `CRUISE: AUTOPILOT TO THE SEARCH AREA, ${waypoints.length} LEG${waypoints.length > 1 ? 'S' : ''}. ANY STICK TAKES CONTROL.`, 3200);
     return true;
   }
 
@@ -3721,15 +3911,15 @@ export class DroneController {
     this.cruise = null;
     if (this.stickAttitude) this.heading = this.yaw;
     const text = {
-      PILOT: 'CRUISE OFF — PILOT HAS CONTROL',
-      JAMMING: 'CRUISE OFF — JAMMING. YOU HAVE CONTROL.',
-      'UNDER FIRE': 'CRUISE OFF — UNDER FIRE. YOU HAVE CONTROL.',
-      CABLE: 'CRUISE OFF — CABLE WARNING.',
-      BATTERY: 'CRUISE OFF — BATTERY RESERVE. YOU HAVE CONTROL.',
-      'SEARCH AREA': 'CRUISE OFF — ENTERING THE SEARCH AREA. YOU HAVE CONTROL.',
-      CONTACT: 'CRUISE OFF — CONTACT AHEAD. YOU HAVE CONTROL.',
-      ARRIVED: 'CRUISE OFF — OVERHEAD THE LZ. BRING IT IN.',
-    }[reason] || `CRUISE OFF — ${reason}`;
+      PILOT: 'CRUISE OFF: PILOT HAS CONTROL',
+      JAMMING: 'CRUISE OFF: JAMMING. YOU HAVE CONTROL.',
+      'UNDER FIRE': 'CRUISE OFF: UNDER FIRE. YOU HAVE CONTROL.',
+      CABLE: 'CRUISE OFF: CABLE WARNING.',
+      BATTERY: 'CRUISE OFF: BATTERY RESERVE. YOU HAVE CONTROL.',
+      'SEARCH AREA': 'CRUISE OFF: ENTERING THE SEARCH AREA. YOU HAVE CONTROL.',
+      CONTACT: 'CRUISE OFF: CONTACT AHEAD. YOU HAVE CONTROL.',
+      ARRIVED: 'CRUISE OFF: OVERHEAD THE LZ. BRING IT IN.',
+    }[reason] || `CRUISE OFF: ${reason}`;
     this.radioCall(text, 2800);
   }
 
@@ -3781,13 +3971,255 @@ export class DroneController {
     }
   }
 
+  // One-time coaching: a pilot hand-flying a long empty transit hears about CRUISE once.
+  updateCruiseHint(dt) {
+    if (this.cruiseHinted || this.cruise || !this.isFpvFamily || !this.searchBox) return;
+    this.cruiseHintClock = (this.cruiseHintClock || 0) + dt;
+    if (this.cruiseHintClock < 12) return;
+    this.cruiseHintClock = 6;
+    let seen = false;
+    try { seen = !!localStorage.getItem('bp-cruise-hint'); } catch { seen = false; }
+    if (seen) { this.cruiseHinted = true; return; }
+    const b = this.searchBox;
+    const far = Math.hypot(this.pos.x - (b.x1 + b.x2) / 2, this.pos.z - (b.z1 + b.z2) / 2) > 220;
+    if (!far || this.cruiseAvailability()) return;
+    this.cruiseHinted = true;
+    try { localStorage.setItem('bp-cruise-hint', '1'); } catch { /* private mode */ }
+    const key = sticks.active ? { gamepad: 'RB', xr: 'X', radio: 'YOUR CRUISE SWITCH' }[sticks.source] || 'T' : 'T';
+    this.radioCall(`RANGE CONTROL: LONG EMPTY TRANSIT. PRESS ${key} FOR CRUISE AND THE AUTOPILOT FLIES IT AT 4x. ANY STICK TAKES IT BACK.`, 5200);
+  }
+
   // Sim-time multiplier the main loop applies while the autopilot flies the transit.
   get timeCompression() {
-    return this.cruise ? this.cruiseCompression : 1;
+    if (this.cruise) return this.cruiseCompression;
+    // A landed ambush waits in compressed time until something moves inside wake range.
+    if (this.standby && !this.hostileContactWithin(this.standbyWakeRange, true)) return this.standbyCompression;
+    return 1;
+  }
+
+  // ---- Terminal guidance (machine vision, last mile) ----
+  lockAimPoint(vehicle, out = new THREE.Vector3()) {
+    // The seeker tracks the hull's visual centre; on a turtle that is the gap under the skirts.
+    const lift = vehicle.kind === 'parkedfpv' ? 0.12
+      : vehicle.kind === 'infantry' ? 0.9 : vehicle.kind === 'ugv' ? 0.5
+        : vehicle.kind === 'turtle' ? 0.7 : 1.05;
+    out.copy(vehicle.pos);
+    out.y += lift;
+    return out;
+  }
+
+  updateTerminal(dt, input, solids) {
+    const t = this.terminal;
+    if (!this.terminalGuidance || this.mode !== 'fpv') return false;
+    const fireHeld = !!(input.fire || input.stickFire);
+    if (t.target) {
+      if (!fireHeld) t.armedRelease = true;
+      if (t.target.dead) { this.releaseLock(null); return false; }
+      if (t.armedRelease && input.firePressed) { this.releaseLock('LOCK RELEASED: PILOT HAS CONTROL'); return false; }
+      const aim = this.lockAimPoint(t.target, LOCK_AIM);
+      if (!hasLOS(solids, this.pos.x, this.pos.y, this.pos.z, aim.x, aim.y, aim.z)) {
+        t.masked += dt;
+        if (t.masked > 0.6) { this.releaseLock('LOCK LOST: TARGET MASKED'); return false; }
+      } else t.masked = 0;
+      this.flyTerminal(dt, t.target, aim);
+      return true;
+    }
+    t.candidate = null;
+    if (!fireHeld) { t.hold = 0; return false; }
+    let best = null;
+    let bestDot = Math.cos(8 * DEG);
+    for (const vehicle of this.combatVehicles) {
+      if (vehicle.dead || vehicle.protected || vehicle.hostile === false || vehicle.exited) continue;
+      const aim = this.lockAimPoint(vehicle, LOCK_AIM);
+      this.to.copy(aim).sub(this.pos);
+      const range = this.to.length();
+      if (range > this.lockRange || range < 1) continue;
+      const dot = this.forward.dot(this.to.multiplyScalar(1 / range));
+      if (dot <= bestDot) continue;
+      if (!hasLOS(solids, this.pos.x, this.pos.y, this.pos.z, aim.x, aim.y, aim.z)) continue;
+      bestDot = dot;
+      best = vehicle;
+    }
+    t.candidate = best;
+    if (!best) { t.hold = 0; return false; }
+    t.hold += dt;
+    if (t.hold >= 0.55) {
+      t.target = best;
+      t.candidate = null;
+      t.hold = 0;
+      t.masked = 0;
+      t.armedRelease = false;
+      this.radioCall(`TERMINAL LOCK: ${best.label || 'TARGET'}. SEEKER FLIES THE LAST STRETCH. TAP FIRE TO CANCEL.`, 2600);
+    }
+    return false;
+  }
+
+  releaseLock(message) {
+    this.terminal.target = null;
+    this.terminal.hold = 0;
+    if (message) this.radioCall(message, 2200);
+  }
+
+  // Proportional pursuit with a lead on the target's own motion.
+  flyTerminal(dt, target, aim) {
+    const mpu = this.metersPerUnit;
+    const speed = this.stickTopSpeed * 0.85 / mpu;
+    this.to.copy(aim).sub(this.pos);
+    const range = this.to.length();
+    if (target.velocity) this.to.addScaledVector(target.velocity, Math.min(2.5, range / speed));
+    this.to.normalize();
+    this.vel.lerp(this.to.multiplyScalar(speed), 1 - Math.exp(-dt * 3.5));
+    const dir = LOCK_DIR.copy(this.vel).normalize();
+    const yaw = Math.atan2(-dir.x, -dir.z);
+    const pitch = Math.asin(Math.max(-1, Math.min(1, dir.y)));
+    if (this.stickAttitude) {
+      STICK_EULER.set(pitch - controls().uptilt * DEG, yaw, 0, 'YXZ');
+      STICK_TARGET.setFromEuler(STICK_EULER);
+      this.attitude.slerp(STICK_TARGET, 1 - Math.exp(-dt * 9));
+      this.syncStickCamera();
+      this.heading = this.yaw;
+    } else {
+      this.yaw = yaw;
+      this.pitch = pitch;
+      this.roll += (0 - this.roll) * Math.min(1, dt * 6);
+      const cp = Math.cos(this.pitch);
+      this.forward.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
+      this.horizontalForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    }
+  }
+
+  // ---- Landed standby ----
+  pilotInput(input) {
+    const keyed = Math.abs(input.move.x) + Math.abs(input.move.y) > 0.2
+      || Math.abs(input.lookDelta.x) + Math.abs(input.lookDelta.y) > 0.002
+      || input.droneClimb || input.droneDescend || input.firePressed || input.reloadPressed;
+    const radioThrottle = sticks.active && !sticks.sprung && sticks.throttle > 0.18;
+    return keyed || sticks.moved || radioThrottle;
+  }
+
+  enterStandby() {
+    this.standby = true;
+    this.standbyAlerted = false;
+    this.cruise = null;
+    this.vel.set(0, 0, 0);
+    this.radioCall('STANDBY: MOTORS SAFE, CAMERA ON. TIME RUNS FAST UNTIL SOMETHING MOVES. ANY INPUT WAKES IT.', 3200);
+  }
+
+  wakeFromStandby() {
+    this.standby = false;
+    this.radioCall('MOTORS SPOOLING: AIRCRAFT LIVE', 1600);
+  }
+
+  // ---- Anti-drone netting ----
+  // Each net is an axis-aligned road segment: two side walls and a roof on posts, with
+  // authored tears (fractions along the run) where shelling opened the roof. The ends are
+  // open: vehicles drive in and out, and so can a pilot good enough to fly the tunnel.
+  buildNets(nets) {
+    const root = new THREE.Group();
+    root.name = 'anti-drone-nets';
+    const texture = netTexture();
+    const netMaterial = new THREE.MeshStandardMaterial({
+      name: 'anti-drone-net', color: 0x5a6150, map: texture, alphaMap: texture,
+      transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 1, metalness: 0,
+      depthWrite: false,
+    });
+    const postMaterial = new THREE.MeshStandardMaterial({ name: 'anti-drone-net-post', color: 0x3b3328, roughness: 0.95 });
+    const postGeometry = new THREE.BoxGeometry(0.16, 1, 0.16);
+    const ground = (x, z) => (droneTerrain ? droneTerrain(x, z) : 0);
+    for (const net of nets) {
+      const [ax, az] = net.from, [bx, bz] = net.to;
+      const alongX = Math.abs(bx - ax) >= Math.abs(bz - az);
+      const length = alongX ? Math.abs(bx - ax) : Math.abs(bz - az);
+      const half = net.halfWidth ?? 5;
+      const height = net.height ?? 5.5;
+      const segment = 8;
+      const count = Math.max(1, Math.round(length / segment));
+      const tears = net.tears || [];
+      const torn = t => tears.some(([t0, t1]) => t >= t0 && t <= t1);
+      for (let i = 0; i < count; i++) {
+        const t0 = i / count, t1 = (i + 1) / count, tm = (t0 + t1) / 2;
+        const cx = ax + (bx - ax) * tm, cz = az + (bz - az) * tm;
+        const gy = ground(cx, cz);
+        const segLength = length / count;
+        const roofTorn = torn(tm);
+        // Roof panel (or the hole where one was).
+        if (!roofTorn) {
+          const roof = new THREE.Mesh(new THREE.PlaneGeometry(alongX ? segLength : half * 2, alongX ? half * 2 : segLength), netMaterial);
+          roof.rotation.x = -Math.PI / 2;
+          roof.position.set(cx, gy + height, cz);
+          root.add(roof);
+          this.netBoxes.push(alongX
+            ? makeNetBox(cx, gy + height, cz, segLength, 0.3, half * 2)
+            : makeNetBox(cx, gy + height, cz, half * 2, 0.3, segLength));
+        } else {
+          // Shredded edges hang into the gap so the tear reads from above and from the road.
+          for (const side of [-1, 1]) {
+            const rag = new THREE.Mesh(new THREE.PlaneGeometry(alongX ? segLength * 0.8 : 1.6, alongX ? 1.6 : segLength * 0.8), netMaterial);
+            rag.rotation.x = -Math.PI / 2 + side * 0.7;
+            rag.position.set(cx + (alongX ? 0 : side * half * 0.85), gy + height - 0.5, cz + (alongX ? side * half * 0.85 : 0));
+            root.add(rag);
+          }
+        }
+        for (const side of [-1, 1]) {
+          const wx = alongX ? cx : cx + side * half;
+          const wz = alongX ? cz + side * half : cz;
+          const wall = new THREE.Mesh(new THREE.PlaneGeometry(segLength, height), netMaterial);
+          wall.position.set(wx, gy + height / 2, wz);
+          if (!alongX) wall.rotation.y = Math.PI / 2;
+          root.add(wall);
+          this.netBoxes.push(alongX
+            ? makeNetBox(wx, gy + height / 2, wz, segLength, height, 0.3)
+            : makeNetBox(wx, gy + height / 2, wz, 0.3, height, segLength));
+          const post = new THREE.Mesh(postGeometry, postMaterial);
+          const px = alongX ? ax + (bx - ax) * t0 : wx;
+          const pz = alongX ? wz : az + (bz - az) * t0;
+          post.scale.y = height + 0.4;
+          post.position.set(px, ground(px, pz) + (height + 0.4) / 2, pz);
+          root.add(post);
+        }
+      }
+    }
+    this.scene.add(root);
+    this.netRoot = root;
+  }
+
+  netCatch(point) {
+    if (this.attemptState !== FPV_ATTEMPT.FLYING) return;
+    this.createImpactEffect(point, this.airframesLost + 31);
+    this.loseAirframe(this.mode === 'fpv'
+      ? 'CAUGHT IN THE ANTI-DRONE NET: CHARGE WASTED ON THE MESH'
+      : 'AIRCRAFT FOULED IN THE ANTI-DRONE NET', { effect: 'NETTED', impact: point });
   }
 
   updateFpvFamily(dt, input, solids) {
-    for (const vehicle of this.combatVehicles) vehicle.update?.(dt, solids, this.pos);
+    for (const vehicle of this.combatVehicles) {
+      if (vehicle.startAt && this.missionFlightTime < vehicle.startAt) {
+        vehicle.velocity?.set(0, 0, 0);
+        continue;
+      }
+      vehicle.update?.(dt, solids, this.pos);
+    }
+    // Hostile ambush drones on our supply road: if our run reaches one alive, it strikes.
+    for (const hunter of this.combatVehicles) {
+      if (hunter.dead || !hunter.ambushRadius) continue;
+      for (const friend of this.combatVehicles) {
+        if (friend.dead || !friend.protected || !friend.route?.length) continue;
+        if (Math.hypot(hunter.pos.x - friend.pos.x, hunter.pos.z - friend.pos.z) > hunter.ambushRadius) continue;
+        friend.damage(friend.maxHealth);
+        this.createImpactEffect(friend.pos.clone(), 77);
+        this.loseAirframe(`${hunter.label || 'AMBUSH DRONE'} STRUCK ${friend.label || 'OUR RUN'}: ROAD NOT CLEARED`, {
+          effect: 'ROAD NOT CLEARED', target: hunter, impact: friend.pos.clone(),
+          expended: false, missionComplete: false, criticalFailure: true,
+        });
+        return;
+      }
+    }
+    // Something moved into wake range while the ambush aircraft sits on the verge.
+    if (this.standby && !this.standbyAlerted && this.hostileContactWithin(this.standbyWakeRange, true)) {
+      this.standbyAlerted = true;
+      this.radioCall('MOVEMENT ON THE ROAD: TIME BACK TO REAL. WAKE ON YOUR CALL.', 3600);
+    }
     // Interdiction loss path: a required airborne track that crosses out of the
     // engagement box has beaten the crew — it is through to whatever it came for.
     const box = this.training.engagementBounds;
@@ -3938,19 +4370,36 @@ export class DroneController {
       toBlast.y = 0;
       if (toBlast.lengthSq() > 0.001) toBlast.normalize();
       const rearHit = rear.dot(toBlast) > 0.35;
-      if (vehicle.cage && !rearHit) {
+      // A turtle's skirts stop short of the ground: a low hit finds the running gear.
+      const runningGear = vehicle.kind === 'turtle' && position.y - vehicle.pos.y < 1.25;
+      if (vehicle.cage && !rearHit && runningGear) {
+        vehicle.damage(200);
+        if (!vehicle.dead) {
+          vehicle.route = [];
+          vehicle.speed = 0;
+          vehicle.velocity.set(0, 0, 0);
+        }
+        note = `${vehicle.label || 'TARGET'} RUNNING GEAR HIT: MOBILITY KILL. FINISH IT THROUGH THE REAR.`;
+        effect = 'MOBILITY KILL';
+      } else if (vehicle.cage && !rearHit) {
         vehicle.damage(55);
         note = 'CAGE DEFEATED THE CHARGE — TAKE THE REAR ARC';
         effect = 'PROTECTION DEFEAT';
       } else {
         const killed = vehicle.damage(460);
         killedTarget = killed;
+        if (!killed && vehicle.immobilizeOnHit) {
+          vehicle.route = [];
+          vehicle.speed = 0;
+          vehicle.velocity.set(0, 0, 0);
+        }
         note = killed
           ? vehicle.optional
             ? `${vehicle.label || 'TARGET'} DESTROYED — TARGET OF OPPORTUNITY`
             : `${vehicle.label || 'TARGET'} DESTROYED`
-          : 'TARGET HIT — STILL MOVING';
-        effect = killed ? 'DESTROYED' : 'EFFECTIVE';
+          : vehicle.immobilizeOnHit ? `${vehicle.label || 'TARGET'} HIT: IMMOBILIZED. SECOND AIRFRAME FINISHES IT.`
+            : 'TARGET HIT: STILL MOVING';
+        effect = killed ? 'DESTROYED' : vehicle.immobilizeOnHit ? 'MOBILITY KILL' : 'EFFECTIVE';
         if (killed) this.onVehicleKilled?.(vehicle);
       }
       break;
@@ -4051,7 +4500,11 @@ export class DroneController {
     const seconds = String(Math.floor(this.flightTime % 60)).padStart(2, '0');
     osd.timer.textContent = `${minutes}:${seconds}`;
     if (osd.mode) {
-      if (this.cruise) {
+      if (this.standby) {
+        osd.mode.textContent = `STANDBY // MOTORS SAFE${this.timeCompression > 1 ? ` // WAIT x${this.timeCompression}` : ''}`;
+      } else if (this.terminal?.target) {
+        osd.mode.textContent = 'TERMINAL // SEEKER LOCKED';
+      } else if (this.cruise) {
         const legs = this.cruise.waypoints.length;
         osd.mode.textContent = `CRUISE x${this.cruiseCompression} // ${this.cruise.home ? 'RTB'
           : `LEG ${this.cruise.index + 1}/${legs}`}`;
@@ -4129,7 +4582,22 @@ export class DroneController {
         radarLine = '\nTRK — NO CONTACT';
       }
     }
-    osd.dist.textContent = `HDG ${String(hdg).padStart(3, '0')} ${cardinal}   SPD ${speedKmh}KM/H\n${distText}${radarLine}`;
+    // Timed traffic: the convoy intelligence says is due, or our own run that must find the
+    // road clear. One line, nearest departure first.
+    let etaLine = '';
+    const timed = this.combatVehicles.filter(vehicle => vehicle.etaLabel && !vehicle.dead);
+    if (timed.length) {
+      const pending = timed.filter(vehicle => vehicle.startAt > this.missionFlightTime)
+        .sort((a, b) => a.startAt - b.startAt)[0];
+      if (pending) {
+        const left = Math.max(0, pending.startAt - this.missionFlightTime);
+        etaLine = `\n${pending.etaLabel} ${String(Math.floor(left / 60)).padStart(2, '0')}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
+      } else {
+        etaLine = `\n${timed[0].etaLabel.replace(/ (IN|DUE|DEPARTS)$/, '')} MOVING`;
+      }
+    }
+    osd.dist.textContent = `HDG ${String(hdg).padStart(3, '0')} ${cardinal}   SPD ${speedKmh}KM/H\n${distText}${radarLine}${etaLine}`;
+    this.updateLockBox();
     if (this.mapCtx) {
       const ctx = this.mapCtx;
       ctx.clearRect(0, 0, this.mapW, this.mapH);
@@ -4171,6 +4639,7 @@ export class DroneController {
       ctx.fill();
     }
     osd.warn.textContent = this.frozen ? ''
+      : this.terminal?.target && signal < 0.3 ? 'LINK LOST: SEEKER FLYING'
       : this.fiberWarning ? this.fiberWarning
       : this.egressRequired ? `RTB — ${this.training.homeLabel || 'LZ'} // BLUE RING / HOT BEACON`
       : this.linkLowTimer > 0.3 ? 'SIGNAL CRITICAL — TURN OUT'
@@ -4575,6 +5044,7 @@ export class DroneController {
   }
 
   currentBatteryDrainRate() {
+    if (this.standby) return this.batteryDrain * this.standbyDrain;
     const propulsion = this.batteryDrain
       + this.vel.length() / this.worldMaxSpeed * this.batteryDrain * 0.6;
     return propulsion * (this.thermalEnabled ? this.thermalBatteryMultiplier : 1);
@@ -5119,6 +5589,11 @@ export class DroneController {
       this.scene.remove(this.fiberCable);
       disposeObject(this.fiberCable);
       this.fiberCable = null;
+    }
+    if (this.netRoot) {
+      this.scene.remove(this.netRoot);
+      disposeObject(this.netRoot);
+      this.netRoot = null;
     }
     this.munitions.length = 0;
     this.effects.length = 0;

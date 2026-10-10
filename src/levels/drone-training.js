@@ -1608,3 +1608,135 @@ export const DRONE_INTERDICTION_LEVELS = [
       ...NIGHT_SKY,
     }),
 ];
+
+// ---- KILL ZONE serial (25-27): the 2025-26 front as the strike cells fly it ----
+// Netting over supply roads, fibre FPVs landed on the verge waiting for traffic, ground
+// robots running the logistics, machine-vision seekers finishing runs the jammer has already
+// cut, and shed-covered "turtle" tanks. Each chapter teaches one counter, coached then checked.
+const NET_EAST_WEST = { from: [-262, 150], to: [62, 150], halfWidth: 5.5, height: 5.6 };
+const NET_SOUTH_ROAD = {
+  from: [-6, 40], to: [-6, -330], halfWidth: 5.5, height: 5.6,
+  tears: [[0.29, 0.35], [0.69, 0.75]],
+};
+
+export const DRONE_KILLZONE_LEVELS = [
+  droneLevel(25, 'NET ROAD',
+    'The 37th has strung anti-drone netting over its supply roads. An FPV that touches the mesh spends its charge on string. Learn the two answers crews use every day: strike the vehicle where the road leaves the net, then find the sections shelling has torn open and drop through the roof onto the robots running inside.',
+    [
+      phase('net-mouth', 'STRIKE AT THE TUNNEL MOUTH', [fpv({
+        text: 'NETTED ROAD. HIT THE SUPPLY TRUCK WHERE IT LEAVES THE MESH.',
+        airframes: 3,
+        nets: [NET_EAST_WEST],
+        lessons: [
+          lesson('THE NET IS A WALL', 'Netting over a road catches the airframe and wastes the charge on the mesh. Walls and roof both count. The violet run on the nav-aid is the netted section.'),
+          lesson('TIME THE MOUTH', 'Traffic has to come out of the end of the tunnel. Hold a few hundred metres off the mouth, watch the shuttle and meet it as the cab clears the last post. Press T to CRUISE the empty transit.'),
+        ],
+        vehicles: [
+          { kind: 'technical', label: 'NETTED SUPPLY TRUCK', health: 160, pos: [-330, 0, 150], route: [[-330, 150], [150, 150]], speed: 5.2, loop: true },
+          { kind: 'ugv', label: 'TRAIL UGV', health: 70, optional: true, pos: [-345, 0, 150], route: [[-345, 150], [135, 150]], speed: 5.2, loop: true },
+        ],
+        startMessage: 'KAVUN. THE EAST-WEST ROAD IS NETTED. THE TRUCK SHUTTLES THROUGH IT. MEET IT AT A MOUTH.',
+        result: 'TUNNEL-MOUTH STRIKE CERTIFIED',
+      })]),
+      phase('net-tear', 'DROP THROUGH THE TORN NET', [fpv({
+        text: 'TWO GROUND ROBOTS SHUTTLE UNDER THE SOUTH-ROAD NET. ENTER THROUGH A TEAR OR A MOUTH.',
+        airframes: 4,
+        nets: [NET_SOUTH_ROAD],
+        lessons: [
+          lesson('ROBOTS CARRY THE FRONT', 'Ground robots now haul most of the ammunition, water and casualties through the kill zone. Under a net they look safe. They are only safe where the roof is whole.'),
+          lesson('FIND THE TEARS', 'Shelling has opened the roof in two places, shown as gaps in the violet run. Thermal (N) shows the robots through the mesh. Get over a tear, wait for one to pass under it, and drop.'),
+        ],
+        vehicles: [
+          { kind: 'ugv', label: 'CARGO UGV ONE', health: 70, pos: [-6, 0, 25], route: [[-6, 25], [-6, -315]], speed: 4.2, loop: true },
+          { kind: 'ugv', label: 'CARGO UGV TWO', health: 70, pos: [-6, 0, -300], route: [[-6, -300], [-6, 25]], speed: 3.8, loop: true },
+          { kind: 'technical', label: 'CASEVAC TRUCK', hostile: false, protected: true, pos: [24, 0, 60], yaw: 1.6 },
+        ],
+        startMessage: 'KAVUN. TWO ROBOTS UNDER THE SOUTH NET. THE ROOF IS TORN IN TWO PLACES. THE TRUCK AT THE NORTH MOUTH IS A CASEVAC: HANDS OFF.',
+        result: 'NET-ROAD INTERDICTION CERTIFIED',
+      })]),
+    ], {
+      curriculum: ['anti-drone netting', 'ground-robot logistics'],
+      ...DAY_SKY,
+    }),
+
+  droneLevel(26, 'LIE IN WAIT',
+    'Fibre drones changed the roads. With no radio to jam and no transmitter to find, a crew can fly a charge out, land it on the verge and wait for traffic. First lay the ambush yourself. Then do the job in reverse: hostile fibre drones are lying in wait along our own supply road, and our robot run leaves on a timetable.',
+    [
+      phase('ambush-wait', 'LAND, WAIT, STRIKE THE CONVOY', [fpv({
+        text: 'FIBRE FPV. LAND BY THE SOUTH ROAD, STANDBY, KILL THE BTR WHEN THE CONVOY COMES THROUGH.',
+        airframes: 2, controlLink: 'fiber', standbyHint: true,
+        training: { openRange: false, fiberMaxLength: 760, identifyRange: 60 },
+        lessons: [
+          lesson('FIBRE CANNOT BE JAMMED', 'The picture and the sticks ride a glass line paid out behind the aircraft. No jammer touches it and no direction finder hears it. The cost is the spool: watch RES on the left of the OSD.'),
+          lesson('LAND AND WAIT', 'Fly to the road, put the aircraft down on the verge with the camera on the carriageway, then press R for STANDBY. Motors stop, the battery nearly stops, and time runs fast until something moves. Any input wakes it.'),
+          lesson('PICK THE RIGHT VEHICLE', 'The column is a BTR with trucks and a robot. The BTR is the task. Once it burns the rest will run.'),
+        ],
+        vehicles: [
+          { kind: 'apc', label: 'BTR-82A', health: 320, requiresIdentification: true, startDelay: 260, etaLabel: 'CONVOY DUE', pos: [-430, 0, -120], route: [[-430, -120], [430, -120]], speed: 6, loop: true, reaction: { speedMultiplier: 1.6 } },
+          { kind: 'technical', label: 'CONVOY TRUCK', health: 150, optional: true, startDelay: 260, pos: [-452, 0, -120], route: [[-452, -120], [408, -120]], speed: 6, loop: true, reaction: { speedMultiplier: 1.7, route: [[-200, -120], [-200, -300], [-420, -300]] } },
+          { kind: 'ugv', label: 'CONVOY UGV', health: 70, optional: true, startDelay: 260, pos: [-470, 0, -120], route: [[-470, -120], [390, -120]], speed: 6, loop: true },
+        ],
+        startMessage: 'KAVUN. CONVOY IS DUE ON THE SOUTH ROAD IN ABOUT FOUR MINUTES. GET THERE, GET DOWN, GO QUIET.',
+        result: 'ROADSIDE AMBUSH EXECUTED',
+      })]),
+      phase('counter-ambush', 'CLEAR OUR ROAD BEFORE THE ROBOT RUN', [fpv({
+        text: 'THREE HOSTILE AMBUSH DRONES ON THE NORTH-SOUTH ROAD VERGES. KILL THEM BEFORE OUR UGV RUN REACHES THEM.',
+        airframes: 4,
+        training: { openRange: false },
+        lessons: [
+          lesson('HUNT THE HUNTERS', 'Each ambush drone is a small frame on its belly beside the road, battery warm, camera up the carriageway. Thermal finds the warm pack. A dive into the ground beside it is enough: you do not need a direct hit.'),
+          lesson('THE TIMETABLE IS THE ENEMY', 'Our robot run leaves on schedule. Clear the verges in the order it will reach them, nearest our start first. The OSD counts down the departure.'),
+        ],
+        vehicles: [
+          { kind: 'parkedfpv', label: 'AMBUSH DRONE ALPHA', health: 30, ambushRadius: 70, pos: [5, 0, 205], yaw: 1.4 },
+          { kind: 'parkedfpv', label: 'AMBUSH DRONE BRAVO', health: 30, ambushRadius: 70, pos: [-18, 0, -18], yaw: -1.6 },
+          { kind: 'parkedfpv', label: 'AMBUSH DRONE CHARLIE', health: 30, ambushRadius: 70, pos: [7, 0, -255], yaw: 1.8 },
+          { kind: 'ugv', label: 'OUR UGV RUN', hostile: false, protected: true, startDelay: 110, etaLabel: 'OWN UGV RUN DEPARTS', pos: [-6, 0, 415], route: [[-6, 415], [-6, -430]], speed: 5 },
+        ],
+        startMessage: 'KAVUN. OUR ROBOT RUN LEAVES IN UNDER TWO MINUTES. THREE AMBUSH DRONES ARE REPORTED ON THE VERGES. CLEAR THE ROAD.',
+        result: 'SUPPLY ROAD CLEARED',
+      })]),
+    ], {
+      curriculum: ['fibre-optic ambush', 'counter-ambush search'],
+    }),
+
+  droneLevel(27, 'LAST MILE',
+    'Close to the target the jammer wins: the link fails and the picture turns to snow. Machine-vision seekers answer that. Lock the target while you can still see it and the aircraft flies the last stretch on its own. It is not magic: the lock breaks if trees or walls hide the target. Then meet the answer to drones on the other side, a tank under a welded steel shed with its own jammer.',
+    [
+      phase('lock-coached', 'LOCK BEFORE THE LINK DIES', [fpv({
+        text: 'SEEKER AIRFRAME. THE GUN SITS INSIDE A JAMMER THAT KILLS THE LINK SHORT OF IMPACT. LOCK IT FIRST.',
+        airframes: 3, terminalGuidance: true, lockRange: 430, maxRange: 2600,
+        training: { linkLossGrace: 1.2 },
+        lessons: [
+          lesson('MACHINE VISION, LAST MILE', 'Hold FIRE (Space, A or the trigger) with the target near the crosshair. The amber box fills, then turns white: LOCK. From then on the aircraft flies itself into the target, even through dead video.'),
+          lesson('LOCK EARLY, KEEP IT SEEN', 'The link here dies a few hundred metres out, so lock from outside that ring. Trees, walls or terrain between you and the target break the lock. Tap FIRE again to cancel and fly it yourself.'),
+        ],
+        jammers: [{ id: 'gun-ew', x: -130, z: -150, r: 230, signalFloor: 0, falloff: 2.2, estimated: true }],
+        vehicles: [
+          { kind: 'artillery', label: 'SCREENED HOWITZER', health: 200, pos: [-130, 0, -150], yaw: 0.6 },
+        ],
+        startMessage: 'KAVUN. SEEKER AIRFRAMES TODAY. THE GUN IS INSIDE A HEAVY JAMMER. YOU WILL LOSE THE PICTURE. LOCK FIRST.',
+        result: 'TERMINAL-GUIDANCE STRIKE CERTIFIED',
+      })]),
+      phase('turtle-double-tap', 'DOUBLE-TAP THE TURTLE', [fpv({
+        text: 'TURTLE TANK WITH ITS OWN EW DOME ON THE SOUTH ROAD. STOP IT, THEN FINISH IT THROUGH THE OPEN REAR.',
+        airframes: 4, terminalGuidance: true, lockRange: 430, maxRange: 2600,
+        training: { linkLossGrace: 1.2, identifyRange: 60 },
+        lessons: [
+          lesson('THE TURTLE', 'A welded shed covers the roof, the front and the sides. Hits there are wasted. The skirts stop short of the ground and the back of the shed is open for the engine.'),
+          lesson('DOUBLE TAP', 'First airframe: lock it and the seeker goes in low, into the running gear. That stops it. Second airframe: come round to the open rear and finish it. Its own jammer moves with it, so lock before you close.'),
+        ],
+        jammers: [{ id: 'turtle-dome', linkedVehicle: 'turtle', follow: true, x: 220, z: -120, r: 120, signalFloor: 0, falloff: 2.4, estimated: true }],
+        vehicles: [
+          { kind: 'turtle', targetId: 'turtle', label: 'T-80BV TURTLE', cage: true, health: 600, requiresIdentification: true, pos: [220, 0, -120], route: [[220, -120], [-260, -120]], speed: 3.2, loop: true },
+          { kind: 'apc', label: 'ESCORT MT-LB', health: 220, optional: true, pos: [245, 0, -120], route: [[245, -120], [-235, -120]], speed: 3.2, loop: true },
+          { kind: 'infantry', label: 'TANK DESANT', optional: true, team: 3, pos: [150, 0, -100], yaw: 2.4 },
+        ],
+        startMessage: 'OPERATIONS. ONE TURTLE AND AN ESCORT ON THE SOUTH ROAD, JAMMER DOME ON THE TANK. TWO STRIKES: STOP IT, THEN FINISH IT.',
+        result: 'TURTLE DESTROYED. THE LAST MILE IS YOURS.',
+      })]),
+    ], {
+      curriculum: ['machine-vision terminal guidance', 'turtle armour and the double tap'],
+      ...DAY_SKY,
+    }),
+];

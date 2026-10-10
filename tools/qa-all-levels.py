@@ -85,7 +85,7 @@ def main():
         result = {"levels": levels, "scoreRecords": score_records, "errors": errors[:12]}
         print(json.dumps(result, indent=2))
         assert not errors
-        expected_ids = [1, 2, 3, 4] + list(range(11, 21)) + list(range(21, 25))
+        expected_ids = [1, 2, 3, 4] + list(range(11, 21)) + list(range(21, 28))
         assert level_ids == expected_ids, level_ids
         assert len(levels) == len(expected_ids) * 2
         assert [item["level"] for item in levels[:len(expected_ids)]] == expected_ids
