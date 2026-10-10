@@ -1774,7 +1774,7 @@ export class DroneController {
     : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · N EO/THERMAL · CONTACT TO STRIKE'}</div>
       </div>
       <div class="fpv-map-panel">
-        <div class="fpv-map-label">EXTERNAL SIM NAV-AID // AO + SEARCH + TOO // NOT CAMERA</div>
+        <div class="fpv-map-label">GROUND STATION NAV-AID // NOT CAMERA</div>
         <canvas class="fpv-map"></canvas>
       </div>
       <div class="fpv-lesson">
@@ -1833,14 +1833,14 @@ export class DroneController {
       .fpv-cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);font-size:18px;font-weight:400}
       .fpv-name{position:absolute;left:6%;top:5%}
       .fpv-mode{position:absolute;left:6%;top:calc(5% + 22px);font-size:12px;color:#cfd8cf}
-      .fpv-timer{position:absolute;right:22%;top:5%}
-      .fpv-dist{position:absolute;left:50%;top:5%;transform:translateX(-50%);text-align:center;white-space:pre}
+      .fpv-timer{position:absolute;left:6%;top:calc(5% + 42px)}
+      .fpv-dist{position:absolute;left:50%;top:max(5%, 74px);transform:translateX(-50%);text-align:center;white-space:pre}
       .fpv-batt{position:absolute;left:6%;bottom:7%;white-space:pre;font-size:17px}
       .fpv-link{position:absolute;right:6%;bottom:7%;text-align:right;white-space:pre}
       .fpv-fiber{position:absolute;left:6%;bottom:calc(7% + 49px);color:#9fe9ff;font-size:11px;white-space:pre}
       .fpv-warn{position:absolute;left:50%;top:63%;transform:translateX(-50%);color:#ffd8b0;font-size:18px;letter-spacing:3px;animation:fpvblink 0.6s steps(2) infinite}
       .fpv-map-panel{position:absolute;z-index:7;right:1.5%;top:2%;padding:5px 5px 4px;border:1px solid rgba(233,239,233,.58);background:rgba(4,6,5,.94);box-shadow:0 8px 30px rgba(0,0,0,.72);text-shadow:none}
-      .fpv-map-label{padding:0 1px 4px;color:#dbe5db;font-size:8px;font-weight:700;letter-spacing:.55px;white-space:nowrap}
+      .fpv-map-label{padding:0 1px 4px;color:#dbe5db;font-size:8px;font-weight:700;letter-spacing:.55px;max-width:216px;line-height:1.35}
       .fpv-map{display:block;background:rgba(6,8,6,.68);image-rendering:pixelated}
       .fpv-lesson{position:absolute;left:50%;top:34%;transform:translateX(-50%);max-width:520px;padding:16px 20px;border:1px solid rgba(255,213,79,.75);background:rgba(8,10,8,.92);display:none}
       .fpv-lesson-title{color:#ffd54f;letter-spacing:2px;margin-bottom:8px}
@@ -1868,6 +1868,9 @@ export class DroneController {
     `;
     this.overlay.appendChild(style);
     document.body.appendChild(this.overlay);
+    // The page HUD (phase banner, kill feed) shares the top of the screen with the nav-aid
+    // panel; ui.css keys their FPV layout off this class.
+    document.body.classList.add('fpv-feed');
     this.status = null;
     this.lock = null;
     this.help = this.overlay.querySelector('.fpv-help');
@@ -1881,6 +1884,10 @@ export class DroneController {
       '.fpv-noise', '.fpv-tear', '.fpv-tear-secondary', '.fpv-cross', '.fpv-name',
       '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt', '.fpv-link', '.fpv-warn',
       '.fpv-fiber', '.fpv-airframe', '.fpv-map-panel', '.fpv-help',
+    ].map(selector => this.overlay.querySelector(selector)).filter(Boolean);
+    this.osdElements = [
+      '.fpv-cross', '.fpv-name', '.fpv-mode', '.fpv-timer', '.fpv-dist', '.fpv-batt',
+      '.fpv-link', '.fpv-warn', '.fpv-fiber', '.fpv-airframe',
     ].map(selector => this.overlay.querySelector(selector)).filter(Boolean);
     this.osd = {
       timer: this.overlay.querySelector('.fpv-timer'),
@@ -2656,6 +2663,11 @@ export class DroneController {
     this.pendingRunReset = !!outcome.restartRun;
     this.attemptState = FPV_ATTEMPT.IMPACT_HOLD;
     this.attemptStateTime = 0;
+    // The OSD is drawn by the aircraft's own flight controller. When the airframe is gone the
+    // goggles receive bare snow: no characters, no warnings. A recovered aircraft keeps its OSD.
+    if (outcome.expended !== false) {
+      for (const element of this.osdElements) element.style.visibility = 'hidden';
+    }
     this.result.textContent = `${reason}\nAWAITING STRIKE CONFIRMATION`;
     this.result.style.opacity = '1';
     this.help.style.display = 'none';
@@ -2971,6 +2983,7 @@ export class DroneController {
     this.resetAttemptTelemetry();
     this.debriefPanel.style.display = 'none';
     for (const element of this.flightHudElements) element.style.display = '';
+    for (const element of this.osdElements) element.style.visibility = '';
     this.help.style.display = 'none';
     if (this.canvas) this.canvas.style.filter = 'saturate(.62) contrast(1.14) brightness(.94)';
     this.readyPanel.querySelector('.fpv-review-kicker').textContent = readyReason
@@ -2978,6 +2991,8 @@ export class DroneController {
     this.readyPanel.querySelector('.fpv-ready-title').textContent = readyReason
       || `AIRFRAME ${this.airframesLost + 1}/${this.airframes} READY`;
     this.readyPanel.style.display = 'block';
+    // Paint the OSD and nav-aid once so the pad shows the real picture, not a black map.
+    this.updateFpvOsd(0);
     this.attemptState = FPV_ATTEMPT.READY;
     this.attemptStateTime = 0;
   }
@@ -4721,5 +4736,6 @@ export class DroneController {
     this.munitions.length = 0;
     this.effects.length = 0;
     this.overlay.remove();
+    document.body.classList.remove('fpv-feed');
   }
 }

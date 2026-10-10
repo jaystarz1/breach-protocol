@@ -56,7 +56,8 @@ export function photoSurfaces() {
 function canvas2d() {
   const c = document.createElement('canvas');
   c.width = c.height = SIZE;
-  return { c, x: c.getContext('2d') };
+  // Every generator reads its pixels back at least once (speckle, height-to-normal).
+  return { c, x: c.getContext('2d', { willReadFrequently: true }) };
 }
 
 function finish(c, repeat = 1) {
@@ -96,7 +97,7 @@ function speckle(x, { base, spread, density = 1, dot = 1 }) {
 // the derived map tiles seamlessly with the colour map it came from.
 function heightToNormal(srcCanvas, strength = 2.0) {
   const { c, x } = canvas2d();
-  const src = srcCanvas.getContext('2d').getImageData(0, 0, SIZE, SIZE).data;
+  const src = srcCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, SIZE, SIZE).data;
   const out = x.createImageData(SIZE, SIZE);
   const M = SIZE - 1;
   const h = (i, j) => src[(((j & M) * SIZE) + (i & M)) * 4] / 255;
