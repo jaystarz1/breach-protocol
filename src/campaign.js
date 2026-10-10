@@ -16,10 +16,10 @@ export const CAMPAIGN = {
   },
 };
 
-// One degraded frontline district. The ground war is four connected operations — the
-// kill-house shakedown plus three long merged acts — followed by the ten-mission drone
-// school. Mission ids are stable but not contiguous (acts kept 2-4, the school kept 11-20),
-// so every entry carries its id and all lookups go by id.
+// Two games share this record (see game.js). The ground war is four connected operations —
+// the kill-house shakedown plus three long merged acts. The drone war is the ten-mission
+// strike school plus the interceptor serial. Mission ids are stable but not contiguous (acts
+// kept 2-4, the school kept 11-20), so every entry carries its id and all lookups go by id.
 export const CAMPAIGN_MISSIONS = [
   {
     id: 1,
@@ -59,12 +59,12 @@ export const CAMPAIGN_MISSIONS = [
     target: 'Morozov is confirmed in the hardened forward-command site with no prepared evacuation route.',
     intel: 'OP Alpha, OP Bravo and the captured relay agree: Anton Morozov is physically present in the forward bunker.',
     result: 'BASTION is neutralized, the forward command collapses and the assault loses its coordinated air picture.',
-    nextLead: 'DRONARIUM \u2014 certify on the strike drones before the deep-fence sorties begin.',
+    nextLead: 'DISTRICT HELD \u2014 the launch corridor is Vektor\u2019s.',
   },
   {
     id: 11,
     node: 'DRONARIUM',
-    sitrep: 'The district holds, and Vektor is standing up a long-range strike cell. Daylight training begins on a clean range with live flight from the first minute.',
+    sitrep: 'Vektor Group is standing up a long-range strike cell behind the frontline. Daylight training begins on a clean range with live flight from the first minute.',
     purpose: 'Learn basic handling, the essential OSD and battery discipline, then repeat the profile without instructor prompts.',
     target: 'No enemy contact. The only thing that can kill you out here is your own flying.',
     intel: 'Instructor KAVUN runs the range. Each airframe is reviewed before the next one launches.',
@@ -207,14 +207,14 @@ export function campaignMission(id) {
   return CAMPAIGN_MISSIONS.find(m => m.id === id) || CAMPAIGN_MISSIONS[0];
 }
 
-export function briefingText(id, tacticalBrief) {
+export function briefingText(id, tacticalBrief, statusLabel = 'BASTION STATUS') {
   const m = campaignMission(id);
   return [
     m.sitrep,
     `FRONTLINE NODE: ${m.node}`,
     `MISSION PURPOSE: ${m.purpose}`,
     tacticalBrief,
-    `BASTION STATUS: ${m.target}`,
+    `${statusLabel}: ${m.target}`,
   ].join('\n\n');
 }
 
@@ -229,12 +229,10 @@ export function campaignDebrief(id, won = true) {
     };
 }
 
-export function nextCampaignMission(saveState) {
+// First unfinished mission of one game's roster (ids in campaign order).
+export function nextCampaignMission(saveState, missionIds = CAMPAIGN_MISSIONS.map(m => m.id)) {
   const completed = saveState?.best || {};
-  for (const mission of CAMPAIGN_MISSIONS) {
-    if (!completed[mission.id]) return mission.id;
-  }
-  return CAMPAIGN_MISSIONS[CAMPAIGN_MISSIONS.length - 1].id;
+  return missionIds.find(id => !completed[id]) ?? missionIds[missionIds.length - 1];
 }
 
 export function campaignSnapshot(currentMission, saveState) {

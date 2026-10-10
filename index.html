@@ -1,204 +1,15 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-game="drone">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0a0e12">
-<title>Breach Protocol</title>
+<title>Dronerium</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
-  html, body { width:100%; height:100%; overflow:hidden; background:#0a0e12; font-family:-apple-system, 'Helvetica Neue', Arial, sans-serif; color:#cfd8dc; position:fixed; touch-action:none; }
-  #game-canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
-
-  /* ---------- HUD ---------- */
-  #hud { position:absolute; inset:0; pointer-events:none; display:none; }
-  #crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:24px; height:24px; }
-  #crosshair::before, #crosshair::after { content:''; position:absolute; background:#e8f5e9; }
-  #crosshair::before { left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
-  #crosshair::after { top:50%; left:0; height:2px; width:100%; transform:translateY(-50%); }
-  #crosshair.hit::before, #crosshair.hit::after { background:#ff5252; }
-  #hitmarker { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) rotate(45deg); width:30px; height:30px; opacity:0; }
-  #hitmarker::before, #hitmarker::after { content:''; position:absolute; background:#fff; }
-  #hitmarker::before { left:50%; top:0; width:3px; height:100%; transform:translateX(-50%); }
-  #hitmarker::after { top:50%; left:0; height:3px; width:100%; transform:translateY(-50%); }
-  #hitmarker.show { animation:hitpop .25s ease-out; }
-  @keyframes hitpop { 0%{opacity:1; transform:translate(-50%,-50%) rotate(45deg) scale(1.4);} 100%{opacity:0; transform:translate(-50%,-50%) rotate(45deg) scale(.8);} }
-
-  #health-bar { position:absolute; left:max(20px, env(safe-area-inset-left)); bottom:calc(150px + env(safe-area-inset-bottom)); width:140px; height:10px; background:rgba(255,255,255,.15); border-radius:5px; overflow:hidden; }
-  #health-fill { height:100%; width:100%; background:#66bb6a; border-radius:5px; transition:width .2s; }
-  #ammo { position:absolute; right:max(20px, env(safe-area-inset-right)); bottom:calc(170px + env(safe-area-inset-bottom)); font-size:26px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000; text-align:right; }
-  #ammo small { font-size:15px; color:#90a4ae; }
-  #weapon-name { position:absolute; right:max(20px, env(safe-area-inset-right)); bottom:calc(152px + env(safe-area-inset-bottom)); font-size:12px; letter-spacing:1px; color:#90a4ae; text-align:right; }
-  #objective { position:absolute; top:calc(14px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); font-size:13px; letter-spacing:.5px; color:#e0e0e0; background:rgba(0,0,0,.45); padding:6px 14px; border-radius:14px; white-space:nowrap; max-width:90%; overflow:hidden; text-overflow:ellipsis; }
-  #score-line { position:absolute; top:calc(48px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); font-size:11px; color:#90a4ae; }
-  #noshoot-warn { position:absolute; top:35%; left:50%; transform:translateX(-50%); font-size:22px; font-weight:800; color:#ff5252; text-shadow:0 0 12px rgba(255,0,0,.6); opacity:0; letter-spacing:2px; }
-  #noshoot-warn.show { animation:warnflash 1.2s ease-out; }
-  @keyframes warnflash { 0%{opacity:1;} 80%{opacity:1;} 100%{opacity:0;} }
-  #damage-vignette { position:absolute; inset:0; box-shadow:inset 0 0 120px rgba(255,0,0,.0); transition:box-shadow .15s; }
-  #kill-feed { position:absolute; top:calc(80px + env(safe-area-inset-top)); right:max(14px, env(safe-area-inset-right)); text-align:right; font-size:11px; color:#b0bec5; }
-  #kill-feed div { margin-bottom:3px; text-shadow:0 1px 2px #000; }
-
-  /* ---------- Touch controls ---------- */
-  #controls { position:absolute; inset:0; pointer-events:none; display:none; }
-  #stick-zone { position:absolute; left:0; bottom:0; width:45%; height:65%; pointer-events:auto; }
-  #look-zone { position:absolute; right:0; bottom:0; width:55%; height:100%; pointer-events:auto; }
-  #stick-base { position:absolute; width:110px; height:110px; border-radius:50%; background:rgba(255,255,255,.07); border:2px solid rgba(255,255,255,.18); display:none; }
-  #stick-nub { position:absolute; width:48px; height:48px; border-radius:50%; background:rgba(255,255,255,.28); display:none; }
-  .btn { position:absolute; border-radius:50%; background:rgba(255,255,255,.10); border:2px solid rgba(255,255,255,.22); color:#eceff1; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; letter-spacing:.5px; pointer-events:auto; text-shadow:0 1px 2px #000; }
-  .btn:active, .btn.pressed { background:rgba(255,255,255,.3); }
-  #btn-fire { right:max(24px, env(safe-area-inset-right)); bottom:calc(56px + env(safe-area-inset-bottom)); width:84px; height:84px; font-size:14px; background:rgba(244,67,54,.22); border-color:rgba(244,67,54,.55); }
-  #btn-ads { right:calc(118px + env(safe-area-inset-right)); bottom:calc(40px + env(safe-area-inset-bottom)); width:60px; height:60px; }
-  #btn-reload { right:calc(120px + env(safe-area-inset-right)); bottom:calc(112px + env(safe-area-inset-bottom)); width:54px; height:54px; }
-  #btn-nade { right:max(30px, env(safe-area-inset-right)); bottom:calc(152px + env(safe-area-inset-bottom)); width:54px; height:54px; }
-  #btn-swap { right:calc(190px + env(safe-area-inset-right)); bottom:calc(30px + env(safe-area-inset-bottom)); width:48px; height:48px; font-size:10px; }
-  #btn-breach { left:50%; transform:translateX(-50%); bottom:calc(120px + env(safe-area-inset-bottom)); width:120px; height:52px; border-radius:26px; background:rgba(255,193,7,.25); border-color:rgba(255,193,7,.7); font-size:14px; display:none; }
-  #btn-breath { right:calc(190px + env(safe-area-inset-right)); bottom:calc(90px + env(safe-area-inset-bottom)); width:56px; height:56px; font-size:10px; display:none; }
-  #btn-pause { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:max(14px, env(safe-area-inset-left)); width:40px; height:40px; font-size:15px; }
-  #btn-crouch { left:max(18px, env(safe-area-inset-left)); bottom:calc(16px + env(safe-area-inset-bottom)); width:54px; height:54px; font-size:10px; }
-  #btn-crouch.latched { background:rgba(255,193,7,.3); border-color:rgba(255,193,7,.75); color:#ffd54f; }
-  #btn-lean-l { left:max(16px, env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:16px; }
-  #btn-lean-r { left:calc(68px + env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:16px; }
-  #btn-flash { right:max(30px, env(safe-area-inset-right)); bottom:calc(212px + env(safe-area-inset-bottom)); width:52px; height:52px; font-size:10px; display:none; }
-  #btn-nvg { left:calc(120px + env(safe-area-inset-left)); top:calc(58px + env(safe-area-inset-top)); width:44px; height:44px; font-size:10px; }
-  #btn-nvg.latched { background:rgba(76,255,150,.28); border-color:rgba(76,255,150,.75); color:#9dffc4; }
-  #reinf-warn { position:absolute; top:calc(66px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
-    font-size:12px; font-weight:700; letter-spacing:1.5px; color:#ff8a65; text-shadow:0 0 8px rgba(255,80,40,.6);
-    animation:reinfpulse 1s ease-in-out infinite; }
-  @keyframes reinfpulse { 0%,100%{opacity:1} 50%{opacity:.45} }
-  #squad-line { position:absolute; left:max(20px, env(safe-area-inset-left)); bottom:calc(168px + env(safe-area-inset-bottom));
-    font-size:11px; letter-spacing:.5px; color:#8fd0ff; text-shadow:0 1px 2px #000; }
-  #hostage-line { position:absolute; left:max(20px, env(safe-area-inset-left)); bottom:calc(188px + env(safe-area-inset-bottom));
-    font-size:11px; letter-spacing:.7px; color:#a5d6a7; text-shadow:0 1px 2px #000; }
-
-  /* ---------- Directional damage ---------- */
-  #dmg-ring { position:absolute; inset:0; pointer-events:none; }
-  .dmg-arc { position:absolute; left:50%; top:50%; width:230px; height:230px; margin:-115px 0 0 -115px;
-    border-radius:50%; border:5px solid transparent; border-top-color:rgba(255,42,42,.92);
-    opacity:0; transition:opacity .5s; }
-
-  /* ---------- Flashbang ---------- */
-  #flash-white { position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; }
-  #btn-refresh { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:calc(64px + env(safe-area-inset-left)); width:40px; height:40px; font-size:17px; }
-  #menu-refresh { position:absolute; top:calc(12px + env(safe-area-inset-top)); left:max(14px, env(safe-area-inset-left)); width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.2); color:#eceff1; font-size:17px; pointer-events:auto; }
-
-  /* ---------- Control hints ---------- */
-  .ctl-hint { position:absolute; pointer-events:none; transition:opacity .6s; color:#cfd8dc; text-align:center; }
-  .ctl-hint.off { opacity:0; }
-  #move-hint { left:9%; bottom:calc(60px + env(safe-area-inset-bottom)); width:120px; }
-  #move-hint .ring { width:96px; height:96px; margin:0 auto 8px; border-radius:50%; border:2px dashed rgba(255,255,255,.45); display:flex; align-items:center; justify-content:center; font-size:22px; color:rgba(255,255,255,.6); }
-  #aim-hint { right:22%; top:38%; }
-  .ctl-hint .lbl { font-size:12px; font-weight:700; letter-spacing:2px; text-shadow:0 1px 3px #000; background:rgba(0,0,0,.4); padding:4px 10px; border-radius:10px; }
-
-  /* ---------- NVG overlay ---------- */
-  #nvg { position:absolute; inset:0; pointer-events:none; display:none;
-    background: radial-gradient(circle at 50% 50%,
-      rgba(70,255,150,.10) 0%, rgba(70,255,150,.13) 42%,
-      rgba(3,16,8,.6) 60%, rgba(0,5,2,.98) 71%);
-  }
-  #nvg::before { content:''; position:absolute; inset:0; background:rgba(60,255,140,.12); mix-blend-mode:screen; }
-  #nvg::after { content:''; position:absolute; inset:0;
-    background: repeating-linear-gradient(0deg, rgba(0,0,0,.06) 0 1px, transparent 1px 3px); }
-
-  /* ---------- ADS red dot (non-scoped weapons) ----------
-     The authored optic supplies the housing and glass. Only its projected emitter belongs in
-     the HUD: a large green ring plus four witness bars read as an arcade overlay rather than
-     something reflected inside the sight. */
-  #ads-reticle { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    width:24px; height:24px; display:none; pointer-events:none; }
-  #ads-reticle .rdot { position:absolute; left:50%; top:50%; width:3px; height:3px; margin:-1.5px 0 0 -1.5px;
-    border-radius:50%; background:#ff654d;
-    box-shadow:0 0 3px #ff4a30, 0 0 7px rgba(255,74,48,.58); }
-
-  /* ---------- Scope overlay ----------
-     Illuminated reticle. Black crosshairs vanish against a night city, which is exactly what
-     this game is: at 7 degrees FOV over an unlit plaza the old reticle was invisible against
-     the ground and only readable against the sky. Etched glass gets lit for the same reason.
-     Everything here is CSS so it costs no draw calls and stays crisp at any resolution. */
-  #scope { position:absolute; inset:0; display:none; pointer-events:none; }
-  #scope-mask { position:absolute; inset:0;
-    background:radial-gradient(circle at 50% 50%, transparent 33%, rgba(0,0,0,.6) 34%, rgba(0,0,0,.97) 36%); }
-  /* soft green wash inside the glass + a bright inner rim, like light in a coated tube */
-  #scope-glow { position:absolute; inset:0;
-    background:radial-gradient(circle at 50% 50%, rgba(90,255,160,.05) 0%, rgba(90,255,160,.02) 26%, rgba(120,255,180,.16) 33%, transparent 34.5%); }
-  #scope-cross { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:66vmin; height:66vmin;
-    --ret:rgba(150,255,190,.92); --glow:0 0 3px rgba(80,255,150,.9), 0 0 7px rgba(60,255,130,.45); }
-  /* main crosswires: thick outer posts that thin down toward a clear centre (duplex reticle) */
-  #scope-cross .post { position:absolute; background:var(--ret); box-shadow:var(--glow); }
-  #scope-cross .post.v { left:50%; width:2.5px; transform:translateX(-50%); }
-  #scope-cross .post.h { top:50%; height:2.5px; transform:translateY(-50%); }
-  #scope-cross .post.v.up { top:0; height:34%; }
-  #scope-cross .post.v.dn { bottom:0; height:34%; }
-  #scope-cross .post.h.lf { left:0; width:34%; }
-  #scope-cross .post.h.rt { right:0; width:34%; }
-  /* fine crosswires bridging the gap, 1px, so the aim point is precise but not obscured */
-  #scope-cross .fine { position:absolute; background:var(--ret); box-shadow:var(--glow); opacity:.8; }
-  #scope-cross .fine.v { left:50%; top:34%; height:32%; width:1px; transform:translateX(-50%); }
-  #scope-cross .fine.h { top:50%; left:34%; width:32%; height:1px; transform:translateY(-50%); }
-  /* mil dots down the vertical and across the horizontal: the ranging scale */
-  #scope-cross .dot { position:absolute; width:4px; height:4px; border-radius:50%; background:var(--ret);
-    box-shadow:var(--glow); transform:translate(-50%,-50%); }
-  /* holdover stadia: short ticks under the centre, longer the further out */
-  #scope-cross .tick { position:absolute; left:50%; height:1.5px; background:var(--ret); box-shadow:var(--glow);
-    transform:translateX(-50%); opacity:.85; }
-  /* centre aiming dot, dimmer than the wires so it never eats a distant target */
-  #scope-center { position:absolute; left:50%; top:50%; width:3px; height:3px; margin:-1.5px 0 0 -1.5px;
-    border-radius:50%; background:rgba(255,90,70,.95); box-shadow:0 0 4px rgba(255,70,50,.9); }
-  /* elevation/windage witness marks at the edge of the glass */
-  #scope-cross .edge { position:absolute; color:rgba(150,255,190,.7); font-size:9px; letter-spacing:1px;
-    text-shadow:0 0 4px rgba(60,255,130,.6); }
-
-  /* ---------- Screens ---------- */
-  .screen { position:absolute; inset:0; background:linear-gradient(160deg,#0a0e12 0%,#101820 60%,#0d1a24 100%); display:none; flex-direction:column; align-items:center; justify-content:center; padding:24px env(safe-area-inset-right) 24px env(safe-area-inset-left); text-align:center; z-index:10; overflow-y:auto; }
-  .screen.active { display:flex; }
-  h1.logo { font-size:34px; font-weight:900; letter-spacing:4px; color:#fff; }
-  h1.logo span { color:#ffc107; }
-  .tagline { font-size:12px; letter-spacing:3px; color:#607d8b; margin:6px 0 30px; }
-  .menu-btn { pointer-events:auto; display:block; width:min(300px, 80vw); margin:7px auto; padding:14px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16); border-radius:10px; color:#eceff1; font-size:15px; font-weight:600; letter-spacing:1px; }
-  .menu-btn:active { background:rgba(255,255,255,.18); }
-  .menu-btn.primary { background:rgba(255,193,7,.16); border-color:rgba(255,193,7,.5); color:#ffd54f; }
-  .menu-btn:disabled { opacity:.35; }
-  .menu-btn .sub { display:block; font-size:10px; font-weight:400; color:#78909c; letter-spacing:.5px; margin-top:3px; }
-  #level-list { max-height:60vh; overflow-y:auto; width:100%; -webkit-overflow-scrolling:touch; }
-  .diff-row { display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin:10px 0 18px; }
-  .diff-pill { padding:8px 13px; border-radius:16px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.05); font-size:12px; color:#b0bec5; }
-  .diff-pill.sel { background:rgba(255,193,7,.2); border-color:#ffc107; color:#ffd54f; font-weight:700; }
-  .time-row { display:flex; gap:8px; justify-content:center; margin:10px 0 18px; }
-  .time-pill { pointer-events:auto; min-width:104px; padding:9px 14px; border:1px solid #37474f; border-radius:14px; background:rgba(255,255,255,.025); color:#78909c; font-size:11px; font-weight:700; letter-spacing:1.5px; }
-  .time-pill.sel { border-color:#ffc107; color:#ffd54f; background:rgba(255,193,7,.12); }
-  .brief-text { max-width:620px; font-size:14px; line-height:1.55; color:#b0bec5; margin:14px 0 26px; white-space:pre-line; }
-  .run-picker { width:min(620px,88vw); margin:0 0 14px; text-align:left; }
-  .run-picker-head { color:#90a4ae; font:700 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:2px; margin:0 0 8px; }
-  .run-picker-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; max-height:220px; overflow-y:auto; padding:1px 4px 1px 1px; -webkit-overflow-scrolling:touch; }
-  .run-pill { pointer-events:auto; min-width:0; padding:9px 11px; border:1px solid rgba(255,255,255,.14); border-radius:8px; background:rgba(255,255,255,.035); color:#c6d0d5; text-align:left; font-size:11px; font-weight:700; letter-spacing:.5px; }
-  .run-pill .run-meta { display:block; overflow:hidden; margin-top:3px; color:#71848d; font:500 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.8px; text-overflow:ellipsis; white-space:nowrap; }
-  .run-pill.sel { border-color:#ffc107; color:#ffe082; background:rgba(255,193,7,.13); box-shadow:inset 3px 0 0 #ffc107; }
-  .run-pill.sel .run-meta { color:#c9a94a; }
-  @media(max-width:620px) { .run-picker-grid { grid-template-columns:1fr; } }
-  .intel-card { width:min(620px,88vw); border:1px solid rgba(105,205,235,.28); background:rgba(4,13,19,.72); padding:13px 16px; margin:0 0 18px; text-align:left; box-shadow:inset 3px 0 0 rgba(93,205,235,.5); }
-  .intel-head { display:flex; justify-content:space-between; gap:16px; color:#72d8ef; font:700 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:2px; }
-  .intel-target { margin-top:8px; color:#f1f4f5; font-size:13px; letter-spacing:.7px; }
-  .intel-status { margin-top:5px; color:#94aab3; font-size:12px; line-height:1.45; }
-  .intel-lead { margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,.1); color:#d7b36d; font-size:11px; line-height:1.4; letter-spacing:.4px; }
-  .debrief-grid { display:grid; grid-template-columns:auto auto; gap:8px 26px; font-size:14px; margin:18px 0 26px; text-align:left; }
-  .debrief-grid .val { text-align:right; font-weight:700; color:#fff; }
-  .grade { font-size:52px; font-weight:900; color:#ffc107; margin:6px 0; }
-  .small-note { font-size:11px; color:#546e7a; margin-top:16px; }
-  .sens-row { display:flex; align-items:center; gap:12px; margin:12px 0; }
-  input[type=range] { pointer-events:auto; width:200px; }
-  #rotate-hint { display:none; position:absolute; inset:0; z-index:50; background:#0a0e12; color:#90a4ae; align-items:center; justify-content:center; font-size:16px; text-align:center; padding:30px; }
-  /* Only nag about rotating on an actual touch device - a tall desktop window is not a phone. */
-  @media (orientation: portrait) and (pointer: coarse) { #rotate-hint { display:flex; } }
-  /* Desktop: keyboard+mouse covers every action, so the thumb UI is just clutter over the view. */
-  body.desktop #controls { display:none !important; }
-  #key-help { display:none; margin:22px auto 0; max-width:430px; font-size:11px; line-height:1.9; color:#78909c; letter-spacing:.5px; }
-  body.desktop #key-help { display:block; }
-  #key-help b { color:#b0bec5; font-weight:600; }
-  #key-help .kh-row { display:flex; justify-content:space-between; gap:18px; border-top:1px solid rgba(255,255,255,.07); padding:2px 0; }
-</style>
+<link rel="stylesheet" href="ui.css">
 </head>
 <body>
 <canvas id="game-canvas"></canvas>
@@ -275,34 +86,17 @@
 
 <div class="screen active" id="screen-menu">
   <button id="menu-refresh" title="Reload game">⟳</button>
-  <h1 class="logo">BREACH <span>PROTOCOL</span></h1>
-  <div class="tagline">FRONTLINE ASSAULT · RECONNAISSANCE · FPV SUPPORT</div>
+  <h1 class="logo" id="menu-logo"></h1>
+  <div class="tagline" id="menu-tagline"></div>
   <button class="menu-btn primary" id="menu-continue">CONTINUE CAMPAIGN</button>
   <button class="menu-btn" id="menu-levels">MISSION SELECT</button>
   <button class="menu-btn" id="menu-settings">SETTINGS</button>
-  <div id="key-help">
-    <div class="kh-row"><span>Move</span><b>W A S D</b></div>
-    <div class="kh-row"><span>Look / aim</span><b>Arrow Keys</b></div>
-    <div class="kh-row"><span>Look (alt)</span><b>Mouse &mdash; click view to lock</b></div>
-    <div class="kh-row"><span>Fire</span><b>Space</b> </div>
-    <div class="kh-row"><span>Fire (alt)</span><b>Left Mouse</b></div>
-    <div class="kh-row"><span>Aim / scope (hold)</span><b>Z</b></div>
-    <div class="kh-row"><span>Aim / scope (alt, hold)</span><b>Right Mouse</b></div>
-    <div class="kh-row"><span>Reload</span><b>R</b></div>
-    <div class="kh-row"><span>Breach door</span><b>F</b></div>
-    <div class="kh-row"><span>Hostages: follow / stay / down</span><b>H</b></div>
-    <div class="kh-row"><span>Grenade / Flashbang</span><b>G / B</b></div>
-    <div class="kh-row"><span>Swap weapon</span><b>X</b></div>
-    <div class="kh-row"><span>Night vision (toggle)</span><b>N</b></div>
-    <div class="kh-row"><span>Crouch (toggle)</span><b>C or Left Ctrl</b></div>
-    <div class="kh-row"><span>Lean left / right</span><b>Q / E</b></div>
-    <div class="kh-row"><span>Hold breath (steady scope)</span><b>Left Shift</b></div>
-    <div class="kh-row"><span>Pause</span><b>Esc or P</b></div>
-  </div>
+  <div id="key-help"></div>
+  <a id="menu-other"></a>
 </div>
 
 <div class="screen" id="screen-levels">
-  <h1 class="logo" style="font-size:22px">MISSIONS</h1>
+  <h1 class="logo" style="font-size:22px" id="levels-title">MISSIONS</h1>
   <div class="diff-row" id="diff-row"></div>
   <div id="level-list"></div>
   <button class="menu-btn" id="levels-back" style="margin-top:14px">BACK</button>
@@ -322,7 +116,7 @@
   <h1 class="logo" style="font-size:26px" id="brief-title">FIRST DOOR</h1>
   <div class="intel-card" id="brief-intel">
     <div class="intel-head"><span>TARGET DOSSIER</span><span id="brief-progress">0/10 NODES</span></div>
-    <div class="intel-target">ANTON MOROZOV // CALLSIGN BASTION</div>
+    <div class="intel-target" id="brief-dossier"></div>
     <div class="intel-status" id="brief-target-status"></div>
     <div class="intel-lead" id="brief-evidence"></div>
   </div>
@@ -344,7 +138,7 @@
   <div class="grade" id="debrief-grade">A</div>
   <div class="debrief-grid" id="debrief-grid"></div>
   <div class="intel-card" id="debrief-intel">
-    <div class="intel-head"><span id="debrief-intel-head">INTELLIGENCE RECOVERED</span><span>BASTION TRACK</span></div>
+    <div class="intel-head"><span id="debrief-intel-head">INTELLIGENCE RECOVERED</span><span id="debrief-track"></span></div>
     <div class="intel-status" id="debrief-intel-result"></div>
     <div class="intel-lead" id="debrief-intel-lead"></div>
   </div>
@@ -361,7 +155,7 @@
   <button class="menu-btn" id="pause-quit">ABANDON TO MENU</button>
 </div>
 
-<div id="rotate-hint">Rotate your phone to landscape<br><br>BREACH PROTOCOL plays sideways.</div>
+<div id="rotate-hint"></div>
 
 <script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
 <script type="module" src="src/main.js"></script>

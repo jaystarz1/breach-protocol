@@ -8,12 +8,15 @@ import {
   hasRequestedResolutionScale, normalizeMode, requestedMode, requestedResolutionScale,
   resolveRendererMode,
 } from './renderer/capabilities.js';
+import { GAME } from './game.js';
 
-const KEY = 'breach-protocol-save-v1';
+const KEY = GAME.saveKey;
 
 function storedChoice() {
   try {
-    const q = JSON.parse(localStorage.getItem(KEY) || '{}').quality;
+    // Before save.js seeds a new game's key, fall back to the save it will inherit from.
+    const raw = localStorage.getItem(KEY) ?? (GAME.seedFrom && localStorage.getItem(GAME.seedFrom));
+    const q = JSON.parse(raw || '{}').quality;
     return normalizeMode(q);
   } catch { return 'auto'; }
 }

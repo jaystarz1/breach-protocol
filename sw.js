@@ -1,8 +1,8 @@
-const CACHE = 'breach-protocol-v170-field-craft';
+const CACHE = 'breach-protocol-v171-two-games';
 const ASSETS = [
-  './', 'index.html', 'manifest.json',
+  './', 'index.html', 'shooter.html', 'ui.css', 'manifest.json', 'shooter.webmanifest',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
-  'src/main.js', 'src/input.js', 'src/player.js', 'src/weapons.js', 'src/enemies.js',
+  'src/main.js', 'src/game.js', 'src/input.js', 'src/player.js', 'src/weapons.js', 'src/enemies.js',
   'src/civilians.js', 'src/breach.js', 'src/hud.js', 'src/audio.js', 'src/physics.js',
   'src/levelgen.js', 'src/difficulty.js', 'src/save.js', 'src/levels/index.js',
   'src/levels/acts.js', 'src/levels/drone-training.js', 'src/levels/terrain-deep-fence.js',

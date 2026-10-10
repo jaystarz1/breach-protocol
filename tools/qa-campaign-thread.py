@@ -9,7 +9,7 @@ from playwright.sync_api import sync_playwright
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:4178/?renderer=desktop")
+    parser.add_argument("--url", default="http://127.0.0.1:4178/shooter.html?renderer=desktop")
     parser.add_argument("--output", default="/private/tmp/bp-campaign-thread")
     args = parser.parse_args()
     output_dir = Path(args.output)
@@ -180,7 +180,7 @@ def main():
         print(json.dumps(result, indent=2))
 
         assert "MISSION 04" in briefing["number"], briefing
-        assert briefing["progress"].startswith("3/18"), briefing
+        assert briefing["progress"].startswith("3/4 NODES SECURED"), briefing
         assert "ANTON MOROZOV" in briefing["dossier"], briefing
         assert "forward-command" in briefing["target"].lower(), briefing
         assert "physically present" in briefing["evidence"].lower(), briefing

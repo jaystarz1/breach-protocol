@@ -5,6 +5,11 @@ Player unit: Vektor Group
 Enemy formation: fictional 37th Assault Group
 Campaign antagonist: Anton Morozov, callsign BASTION
 
+> **Two games, one engine (2026-10-04).** The drone war is now its own game, **Dronerium**
+> (`index.html`, missions 11-24), and is the primary product. This document covers the ground
+> war, **Breach Protocol** (`shooter.html`, missions 1-4). Both pages share `src/` and `ui.css`;
+> `src/game.js` decides each page's title, roster, save key and menu text.
+
 ## Premise
 
 Breach Protocol is a ground-combat campaign in a degraded town on the edge of a fictional

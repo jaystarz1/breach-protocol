@@ -8,6 +8,7 @@ import { DoorSystem } from './breach.js';
 import { buildStaticGeometry } from './levelgen.js';
 import { makeBox, raycastSolids, raySphere, rayVerticalCapsule, groundHeight, hasLOS } from './physics.js';
 import { LEVELS, LEGACY_LEVELS } from './levels/index.js';
+import { GAME } from './game.js';
 import { buildNavGrid, nearestNode } from './navgrid.js';
 import { DIFFICULTIES } from './difficulty.js';
 import { hud } from './hud.js';
@@ -51,6 +52,24 @@ import { levelTimeOfDay, missionLightingVariant } from './time-of-day.js';
 
 const $ = id => document.getElementById(id);
 
+// Both entry points share one HTML shell; everything that names the game is painted here.
+function paintGameChrome() {
+  document.title = GAME.title;
+  $('menu-logo').innerHTML = GAME.logo;
+  $('menu-levels').textContent = `${GAME.unit} SELECT`;
+  $('levels-title').textContent = `${GAME.unit}S`;
+  $('debrief-next').textContent = `NEXT ${GAME.unit}`;
+  $('menu-tagline').textContent = GAME.tagline;
+  $('key-help').innerHTML = GAME.keyHelp
+    .map(([action, keys]) => `<div class="kh-row"><span>${action}</span><b>${keys}</b></div>`).join('');
+  $('rotate-hint').innerHTML = `Rotate your phone to landscape<br><br>${GAME.rotateHint}`;
+  $('brief-dossier').textContent = GAME.briefDossier;
+  $('debrief-track').textContent = GAME.debriefTrack;
+  $('menu-other').textContent = GAME.other.label;
+  $('menu-other').href = GAME.other.href;
+}
+paintGameChrome();
+
 // ---------- Renderer ----------
 const canvas = $('game-canvas');
 const renderPipeline = createRenderPipeline(canvas, quality);
@@ -80,7 +99,11 @@ let mode = 'menu';           // menu | playing | paused | debrief
 let world = null;
 let player = null;
 let weapons = null;
-let currentLevel = nextCampaignMission(S);
+// The player-facing roster for this page's game. LEVELS still holds every mission so QA can
+// boot any id from either entry point; menus, progression and skips only walk GAME_LEVELS.
+const GAME_LEVELS = GAME.missions.map(id => LEVELS.find(l => l.id === id)).filter(Boolean);
+const gameBest = () => Object.keys(S.best || {}).filter(id => GAME.missions.includes(Number(id)));
+let currentLevel = nextCampaignMission(S, GAME.missions);
 // Mission ids are stable but no longer contiguous (the merged acts kept ids 2-4 while the
 // drone school kept 11-20), so every lookup goes through the id, never the array index.
 // The 100-series is a QA-only registry: startLevel(10X) boots legacy source level X
@@ -90,8 +113,8 @@ const levelById = id => (id >= 100
   ? LEGACY_LEVELS[id - 101]
   : LEVELS.find(l => l.id === id));
 const levelAfter = id => {
-  const index = LEVELS.findIndex(l => l.id === id);
-  return index >= 0 ? LEVELS[index + 1] || null : null;
+  const index = GAME_LEVELS.findIndex(l => l.id === id);
+  return index >= 0 ? GAME_LEVELS[index + 1] || null : null;
 };
 let currentTimeOfDay = levelTimeOfDay(levelById(currentLevel),
   S.timeOfDayByLevel?.[currentLevel]);
@@ -128,7 +151,7 @@ function buildDiffRow() {
 function buildLevelList() {
   const list = $('level-list');
   list.innerHTML = '';
-  LEVELS.forEach((L, index) => {
+  GAME_LEVELS.forEach((L, index) => {
     const btn = document.createElement('button');
     btn.className = 'menu-btn';
     const variants = S.bestByTime?.[L.id] || {};
@@ -137,7 +160,8 @@ function buildLevelList() {
         || (time === levelTimeOfDay(L) ? S.best?.[L.id] : null);
       return best ? `${best.grade} ${best.score}` : '—';
     };
-    btn.innerHTML = `${String(index + 1).padStart(2, '0')} — ${L.name}` +
+    const number = String(index + 1).padStart(2, '0');
+    btn.innerHTML = `${GAME.unit === 'MISSION' ? number : `${GAME.unit} ${number}`} — ${L.name}` +
       `<span class="sub">DAY ${result('day')} · NIGHT ${result('night')}${L.sniper ? ' · SNIPER' : ''}</span>`;
     btn.onclick = () => showBrief(L.id);
     list.appendChild(btn);
@@ -146,10 +170,10 @@ function buildLevelList() {
 
 function renderBriefTime() {
   const L = levelById(currentLevel);
-  const missionNumber = LEVELS.findIndex(l => l.id === currentLevel) + 1;
+  const missionNumber = GAME_LEVELS.findIndex(l => l.id === currentLevel) + 1;
   $('brief-day').classList.toggle('sel', currentTimeOfDay === 'day');
   $('brief-night').classList.toggle('sel', currentTimeOfDay === 'night');
-  $('brief-num').textContent = `MISSION ${String(missionNumber).padStart(2, '0')} · ${currentTimeOfDay.toUpperCase()} · ${DIFFICULTIES[S.difficulty].name}`;
+  $('brief-num').textContent = `${GAME.unit} ${String(missionNumber).padStart(2, '0')} · ${currentTimeOfDay.toUpperCase()} · ${DIFFICULTIES[S.difficulty].name}`;
   const selectedBest = S.bestByTime?.[currentLevel]?.[currentTimeOfDay]
     || (currentTimeOfDay === levelTimeOfDay(L) ? S.best?.[currentLevel] : null);
   const runPicker = $('brief-run-picker');
@@ -236,14 +260,14 @@ function showBrief(id) {
   currentTimeOfDay = levelTimeOfDay(L, S.timeOfDayByLevel?.[id]);
   const mission = campaignMission(id);
   $('brief-title').textContent = L.name;
-  $('brief-progress').textContent = `${Object.keys(S.best || {}).length}/${LEVELS.length} NODES SECURED`;
+  $('brief-progress').textContent = `${gameBest().length}/${GAME_LEVELS.length} ${GAME.progressLabel}`;
   $('brief-target-status').textContent = mission.target;
   $('brief-evidence').textContent = `CURRENT INTELLIGENCE — ${mission.intel}`;
   const directRuns = (L.objectives || []).length > 1
     && L.objectives.every(phaseDef => phaseSteps(phaseDef).some(step => step.type === 'drone'));
   const phasePlan = (L.objectives || []).map((phaseDef, index) =>
     `${index + 1}. ${phaseDef.text || phaseDef.id || 'AUTHORED PHASE'}`).join('\n');
-  $('brief-text').textContent = briefingText(id, L.brief)
+  $('brief-text').textContent = briefingText(id, L.brief, GAME.statusLabel)
     + (directRuns ? '' : `\n\nOPERATION PLAN\n${phasePlan}`);
   renderBriefRunPicker(L);
   renderBriefTime();
@@ -255,7 +279,7 @@ $('brief-night').onclick = () => selectBriefTime('night');
 
 $('menu-continue').onclick = () => {
   audioUnlock();
-  showBrief(nextCampaignMission(S));
+  showBrief(nextCampaignMission(S, GAME.missions));
 };
 $('menu-levels').onclick = () => { audioUnlock(); buildDiffRow(); buildLevelList(); hud.screen('levels'); };
 $('menu-settings').onclick = () => hud.screen('settings');
@@ -283,7 +307,7 @@ $('pause-skip').onclick = () => {
     hud.screen(null);
     return;
   }
-  startLevel(levelAfter(currentLevel)?.id ?? LEVELS[0].id);
+  startLevel(levelAfter(currentLevel)?.id ?? GAME_LEVELS[0].id);
 };
 $('pause-quit').onclick = () => toMenu();
 $('debrief-retry').onclick = () => startLevel(currentLevel);
@@ -3326,6 +3350,7 @@ window.BP = {
   get rendererMode() { return renderPipeline.mode; },
   get performance() { return renderPipeline.performanceSnapshot(); },
   startLevel, LEVELS, LEGACY_LEVELS, S, input,
+  GAME, GAME_LEVELS,
   // Boot an act at one of its authored checkpoints — the same path a death-retry takes.
   startLevelAt(id, phaseIndex, timeOfDay = null) {
     resumePhase = phaseIndex;

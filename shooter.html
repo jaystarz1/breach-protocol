@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en" data-game="shooter">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0e12">
+<title>Breach Protocol</title>
+<link rel="manifest" href="shooter.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+
+<div id="hud">
+  <div id="damage-vignette"></div>
+  <div id="dmg-ring"></div>
+  <div id="crosshair"></div>
+  <div id="hitmarker"></div>
+  <div id="objective">OBJECTIVE</div>
+  <div id="score-line"></div>
+  <div id="noshoot-warn">CIVILIAN DOWN</div>
+  <div id="kill-feed"></div>
+  <div id="health-bar"><div id="health-fill"></div></div>
+  <div id="ammo">12 <small>/ 48</small></div>
+  <div id="weapon-name">M9 SIDEARM</div>
+  <div id="squad-line"></div>
+  <div id="hostage-line"></div>
+  <div id="reinf-warn"></div>
+</div>
+
+<div id="ads-reticle">
+  <div class="rdot"></div>
+</div>
+<div id="nvg"></div>
+<div id="flash-white"></div>
+<div id="scope">
+  <div id="scope-mask"></div>
+  <div id="scope-glow"></div>
+  <div id="scope-cross">
+    <div class="post v up"></div><div class="post v dn"></div>
+    <div class="post h lf"></div><div class="post h rt"></div>
+    <div class="fine v"></div><div class="fine h"></div>
+    <div class="dot" style="left:50%;top:57%"></div>
+    <div class="dot" style="left:50%;top:64%"></div>
+    <div class="dot" style="left:50%;top:71%"></div>
+    <div class="dot" style="left:50%;top:43%"></div>
+    <div class="dot" style="left:50%;top:36%"></div>
+    <div class="dot" style="left:43%;top:50%"></div>
+    <div class="dot" style="left:36%;top:50%"></div>
+    <div class="dot" style="left:57%;top:50%"></div>
+    <div class="dot" style="left:64%;top:50%"></div>
+    <div class="tick" style="top:60.5%;width:5%"></div>
+    <div class="tick" style="top:67.5%;width:8%"></div>
+    <div class="tick" style="top:74.5%;width:11%"></div>
+    <div class="edge" style="left:50%;top:2%;transform:translateX(-50%)">ELEV</div>
+    <div class="edge" style="right:2%;top:50%;transform:translateY(-50%)">WIND</div>
+  </div>
+  <div id="scope-center"></div>
+</div>
+
+<div id="controls">
+  <div id="stick-zone"></div>
+  <div id="look-zone"></div>
+  <div id="stick-base"></div>
+  <div id="stick-nub"></div>
+  <div class="btn" id="btn-fire">FIRE</div>
+  <div class="btn" id="btn-ads">ADS</div>
+  <div class="btn" id="btn-reload">R</div>
+  <div class="btn" id="btn-nade">G</div>
+  <div class="btn" id="btn-swap">SWAP</div>
+  <div class="btn" id="btn-breach">BREACH</div>
+  <div class="btn" id="btn-breath">HOLD<br>BREATH</div>
+  <div class="btn" id="btn-pause">II</div>
+  <div class="btn" id="btn-refresh">⟳</div>
+  <div class="btn" id="btn-crouch">CROUCH</div>
+  <div class="btn" id="btn-lean-l">◐</div>
+  <div class="btn" id="btn-lean-r">◑</div>
+  <div class="btn" id="btn-flash">FLASH</div>
+  <div class="btn" id="btn-nvg">NVG</div>
+  <div class="ctl-hint" id="move-hint"><div class="ring">✛</div><div class="lbl">LEFT THUMB — MOVE</div></div>
+  <div class="ctl-hint" id="aim-hint"><div class="lbl">DRAG RIGHT SIDE — AIM · FIRE BUTTON — SHOOT</div></div>
+</div>
+
+<div class="screen active" id="screen-menu">
+  <button id="menu-refresh" title="Reload game">⟳</button>
+  <h1 class="logo" id="menu-logo"></h1>
+  <div class="tagline" id="menu-tagline"></div>
+  <button class="menu-btn primary" id="menu-continue">CONTINUE CAMPAIGN</button>
+  <button class="menu-btn" id="menu-levels">MISSION SELECT</button>
+  <button class="menu-btn" id="menu-settings">SETTINGS</button>
+  <div id="key-help"></div>
+  <a id="menu-other"></a>
+</div>
+
+<div class="screen" id="screen-levels">
+  <h1 class="logo" style="font-size:22px" id="levels-title">MISSIONS</h1>
+  <div class="diff-row" id="diff-row"></div>
+  <div id="level-list"></div>
+  <button class="menu-btn" id="levels-back" style="margin-top:14px">BACK</button>
+</div>
+
+<div class="screen" id="screen-settings">
+  <h1 class="logo" style="font-size:22px">SETTINGS</h1>
+  <div class="sens-row"><span style="font-size:13px">Look sensitivity</span><input type="range" id="sens-slider" min="0.3" max="2.5" step="0.1" value="1"></div>
+  <div class="sens-row"><span style="font-size:13px">Invert Y</span><button class="menu-btn" id="invert-btn" style="width:80px;margin:0;padding:8px">OFF</button></div>
+  <div class="sens-row"><span style="font-size:13px">Graphics</span><button class="menu-btn" id="quality-btn" style="width:140px;margin:0;padding:8px">AUTO</button></div>
+  <div style="font-size:10px;color:#546e7a;max-width:340px;margin-top:-4px">Desktop is the full renderer. Compatibility retains the old lightweight path. Takes effect after reload.</div>
+  <button class="menu-btn" id="settings-back" style="margin-top:20px">BACK</button>
+</div>
+
+<div class="screen" id="screen-brief">
+  <div style="font-size:11px;letter-spacing:3px;color:#607d8b" id="brief-num">MISSION 1</div>
+  <h1 class="logo" style="font-size:26px" id="brief-title">FIRST DOOR</h1>
+  <div class="intel-card" id="brief-intel">
+    <div class="intel-head"><span>TARGET DOSSIER</span><span id="brief-progress">0/10 NODES</span></div>
+    <div class="intel-target" id="brief-dossier"></div>
+    <div class="intel-status" id="brief-target-status"></div>
+    <div class="intel-lead" id="brief-evidence"></div>
+  </div>
+  <div class="brief-text" id="brief-text"></div>
+  <div class="run-picker" id="brief-run-picker" hidden>
+    <div class="run-picker-head">CHOOSE STARTING RUN</div>
+    <div class="run-picker-grid" id="brief-run-grid"></div>
+  </div>
+  <div class="time-row" id="brief-time-row" aria-label="Mission time of day">
+    <button class="time-pill" id="brief-day" type="button">DAY</button>
+    <button class="time-pill" id="brief-night" type="button">NIGHT</button>
+  </div>
+  <button class="menu-btn primary" id="brief-go">DEPLOY</button>
+  <button class="menu-btn" id="brief-back">BACK</button>
+</div>
+
+<div class="screen" id="screen-debrief">
+  <div style="font-size:11px;letter-spacing:3px;color:#607d8b" id="debrief-status">MISSION COMPLETE</div>
+  <div class="grade" id="debrief-grade">A</div>
+  <div class="debrief-grid" id="debrief-grid"></div>
+  <div class="intel-card" id="debrief-intel">
+    <div class="intel-head"><span id="debrief-intel-head">INTELLIGENCE RECOVERED</span><span id="debrief-track"></span></div>
+    <div class="intel-status" id="debrief-intel-result"></div>
+    <div class="intel-lead" id="debrief-intel-lead"></div>
+  </div>
+  <button class="menu-btn primary" id="debrief-next">NEXT MISSION</button>
+  <button class="menu-btn" id="debrief-retry">RETRY</button>
+  <button class="menu-btn" id="debrief-menu">MAIN MENU</button>
+</div>
+
+<div class="screen" id="screen-pause">
+  <h1 class="logo" style="font-size:24px">PAUSED</h1>
+  <button class="menu-btn primary" id="pause-resume">RESUME</button>
+  <button class="menu-btn" id="pause-restart">RESTART MISSION</button>
+  <button class="menu-btn" id="pause-skip">SKIP TO NEXT MISSION</button>
+  <button class="menu-btn" id="pause-quit">ABANDON TO MENU</button>
+</div>
+
+<div id="rotate-hint"></div>
+
+<script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
+<script type="module" src="src/main.js"></script>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>

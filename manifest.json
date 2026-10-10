@@ -1,7 +1,8 @@
 {
-  "name": "Breach Protocol",
-  "short_name": "Breach",
-  "description": "Urban counter-terror FPS. Breach, clear, identify your targets.",
+  "id": "./",
+  "name": "Dronerium",
+  "short_name": "Dronerium",
+  "description": "FPV drone war. Strike, bomb and intercept across the deep fence.",
   "start_url": "./",
   "display": "fullscreen",
   "orientation": "landscape",

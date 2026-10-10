@@ -25,14 +25,16 @@ def main():
 
         # Every mission briefing exposes both variants and persists the selection used by
         # deploy. Exercise the real menu path before the direct boot sweep.
+        # The menu lists only this page's game; its first entry is that game's opener.
+        first_id = page.evaluate("() => BP.GAME_LEVELS[0].id")
         page.locator("#menu-levels").click()
         page.locator("#level-list .menu-btn").first.click()
         page.locator("#brief-day").click()
         assert "sel" in (page.locator("#brief-day").get_attribute("class") or "")
         assert "DAY" in page.locator("#brief-num").inner_text()
-        assert page.evaluate("() => BP.S.timeOfDayByLevel[1]") == "day"
+        assert page.evaluate(f"() => BP.S.timeOfDayByLevel[{first_id}]") == "day"
         page.locator("#brief-go").click()
-        page.wait_for_function("() => BP.mode === 'playing' && BP.world?.level?.id === 1")
+        page.wait_for_function(f"() => BP.mode === 'playing' && BP.world?.level?.id === {first_id}")
         assert page.evaluate("() => BP.world.level.timeOfDay") == "day"
 
         # Results at the same difficulty remain independent across lighting variants while

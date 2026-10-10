@@ -1,4 +1,8 @@
-const KEY = 'breach-protocol-save-v1';
+import { GAME } from './game.js';
+
+// Each game keeps its own save. A game with seedFrom inherits that key's contents on first
+// boot (the pre-split save held both games' progress), keeping only its own mission results.
+const KEY = GAME.saveKey;
 
 const defaults = {
   unlocked: 10,          // all missions playable from the start — no earning your way up
@@ -16,12 +20,27 @@ let state = null;
 export function load() {
   if (state) return state;
   try {
-    state = { ...defaults, ...JSON.parse(localStorage.getItem(KEY) || '{}') };
+    let raw = localStorage.getItem(KEY);
+    if (raw === null && GAME.seedFrom) raw = seedFrom(GAME.seedFrom);
+    state = { ...defaults, ...JSON.parse(raw || '{}') };
   } catch { state = { ...defaults }; }
   state.best ||= {};
   state.bestByTime ||= {};
   state.timeOfDayByLevel ||= {};
   return state;
+}
+
+function seedFrom(key) {
+  const seed = JSON.parse(localStorage.getItem(key) || 'null');
+  if (!seed) return null;
+  const own = map => Object.fromEntries(Object.entries(map || {})
+    .filter(([id]) => GAME.missions.includes(Number(id))));
+  seed.best = own(seed.best);
+  seed.bestByTime = own(seed.bestByTime);
+  seed.timeOfDayByLevel = own(seed.timeOfDayByLevel);
+  const raw = JSON.stringify(seed);
+  try { localStorage.setItem(KEY, raw); } catch {}
+  return raw;
 }
 
 export function save() {
