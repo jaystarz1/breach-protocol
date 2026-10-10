@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { initInput, input, clearEdges, applyKeyLook, resetInput } from './input.js';
+import { pollSticks } from './sticks.js';
+import { mountControlsScreen } from './controls-ui.js';
 import { Player } from './player.js';
 import { Weapons, Grenade, explosionEffect } from './weapons.js';
 import { Enemy, resetPathBudget } from './enemies.js';
@@ -285,6 +287,7 @@ $('menu-levels').onclick = () => { audioUnlock(); buildDiffRow(); buildLevelList
 $('menu-settings').onclick = () => hud.screen('settings');
 $('levels-back').onclick = () => hud.screen('menu');
 $('settings-back').onclick = () => hud.screen('menu');
+if (GAME.id === 'drone') mountControlsScreen();
 $('brief-back').onclick = () => { buildDiffRow(); buildLevelList(); hud.screen('levels'); };
 $('brief-go').onclick = () => {
   audioUnlock();
@@ -2985,11 +2988,21 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) audi
 // ---------- Main loop ----------
 initInput();
 
+// Input seen by the extra CRUISE sub-steps: no sticks, no keys, no edges.
+const QUIET_INPUT = Object.freeze({
+  move: Object.freeze({ x: 0, y: 0 }), lookDelta: Object.freeze({ x: 0, y: 0 }),
+  fire: false, firePressed: false, ads: false, reloadPressed: false, nadePressed: false,
+  flashPressed: false, swapPressed: false, breachPressed: false, nvgPressed: false,
+  pausePressed: false, cruisePressed: false, crouch: false, droneClimb: false,
+  droneDescend: false, desktopAltitude: true, breath: false,
+});
+
 function frame() {
   requestAnimationFrame(frame);
   const now = performance.now();
   let dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
+  pollSticks(null, mode === 'playing');
 
   if (skyMesh) skyMesh.position.copy(camera.position);
   // The first-person rig renders as an overlay pass from its own scene (see weapons.js).
@@ -3026,6 +3039,11 @@ function frame() {
   if (world.drone?.active) {
     if (world.drone.mode === 'combat') updateDroneCombatWave(dt);
     world.drone.update(dt, input, world.solids);
+    // CRUISE transit runs the world time-compressed. Extra sub-steps see no pilot input
+    // (edges were consumed by the first step) and stop the moment the autopilot hands back.
+    for (let step = 1; step < (world.drone.timeCompression || 1) && world.drone.cruise; step++) {
+      world.drone.update(dt, QUIET_INPUT, world.solids);
+    }
     checkObjectives();
     renderPipeline.render(scene, camera, {
       adaptive: true, viewmodel, fpv: world.drone?.feedVisualState?.(),

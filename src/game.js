@@ -33,8 +33,10 @@ const GAMES = {
       ['Drop / grenade', 'G'],
       ['EO / thermal', 'N'],
       ['Hand off / interact', 'F'],
+      ['Cruise autopilot (transit)', 'T'],
       ['Skip lesson card', 'R'],
       ['Pause', 'Esc or P'],
+      ['Gamepad · RC radio · VR', 'Settings → Controls'],
     ],
   },
   shooter: {

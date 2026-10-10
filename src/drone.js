@@ -9,10 +9,24 @@ import {
   animateAuthoredCharacter, createAuthoredCharacter, kneelAuthoredCharacter,
   stopAuthoredCharacter,
 } from './character-assets.js';
+import { activeFlightMode, controls, sticks } from './sticks.js';
 
 const MAX_RANGE = 95;
 const MAX_SPEED = 16;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const DEG = Math.PI / 180;
+// Scratch objects for the stick flight model (one aircraft flies at a time).
+const STICK_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
+const STICK_RATES = new THREE.Vector3();
+const STICK_AXIS = new THREE.Vector3();
+const STICK_DELTA = new THREE.Quaternion();
+const STICK_TARGET = new THREE.Quaternion();
+const STICK_CAMERA = new THREE.Quaternion();
+const STICK_UP = new THREE.Vector3();
+const STICK_VEL = new THREE.Vector3();
+const STICK_ACCEL = new THREE.Vector3();
+const STICK_BODY_FWD = new THREE.Vector3();
 const FPV_ATTEMPT = Object.freeze({
   READY: 'ready',
   FLYING: 'flying',
@@ -1431,6 +1445,8 @@ export class DroneController {
     // at the launch yaw. Both apply to every replacement airframe too.
     this.startBattery = Math.max(20, Math.min(100, definition.startBattery ?? 100));
     this.startSpeed = definition.startSpeed ?? 0;
+    // Perch drills hand over an aircraft already in the air; everything else sits on a pad.
+    this.airStart = (definition.launch?.[1] || 0) > 3;
     this.battery = this.startBattery;
     this.signal = 1;
     // Long-range overwatch sorties can be authored per mission without changing the
@@ -1488,6 +1504,23 @@ export class DroneController {
     this.cameraVibration = definition.cameraVibration
       ?? (this.mode === 'bomber' ? 0.00048 : 0.00152);
     this.worldMaxSpeed = this.isFpvFamily ? this.maxSpeed / this.metersPerUnit : this.maxSpeed;
+    // Stick-law airframe: a 7-inch strike quad carrying a charge runs ~95-110 km/h flat out;
+    // the assisted keyboard law keeps its gentler authored cap.
+    this.stickTopSpeed = definition.stickTopSpeed ?? Math.max(27, this.maxSpeed * 1.5);
+    this.attitude = new THREE.Quaternion();
+    this.cameraAttitude = new THREE.Quaternion();
+    this.bodyRates = new THREE.Vector3();
+    this.heading = this.yaw;
+    this.stickAttitude = false;
+    this.flightLaw = 'assist';
+    // CRUISE transit autopilot: cruise speed in m/s, sim-time compression while engaged, and
+    // the hostile proximity (map units) at which it hands control back.
+    this.cruise = null;
+    this.cruiseEndReason = null;
+    this.cruiseSpeed = definition.cruiseSpeed ?? (this.mode === 'bomber' ? 15 : 30);
+    this.cruiseCompression = definition.cruiseCompression ?? 4;
+    this.cruiseContactRange = definition.cruiseContactRange ?? 95;
+    this.searchBox = null;
     this.worldAccel = this.isFpvFamily ? this.accel / this.metersPerUnit : this.accel;
     this.bombs = this.mode === 'bomber' ? (definition.bombs ?? 6) : 0;
     this.bombsTotal = this.bombs;
@@ -1769,9 +1802,7 @@ export class DroneController {
         <div class="fpv-link"></div>
         <div class="fpv-fiber"></div>
         <div class="fpv-warn"></div>
-        <div class="fpv-help">SIM CONTROL // ${this.mode === 'bomber'
-    ? 'WASD FLIGHT · MOUSE GIMBAL · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP · N THERMAL'
-    : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · N EO/THERMAL · CONTACT TO STRIKE'}</div>
+        <div class="fpv-help">${this.helpLine('keys')}</div>
       </div>
       <div class="fpv-map-panel">
         <div class="fpv-map-label">GROUND STATION NAV-AID // NOT CAMERA</div>
@@ -1941,6 +1972,26 @@ export class DroneController {
     // READY -> explicit pilot input -> FLYING. This keeps airframe ownership clear without
     // putting a ground-school screen between the player and the controls.
     this.prepareNextAirframe();
+  }
+
+  // The control strip under the feed speaks whichever device is flying the aircraft.
+  helpLine(source) {
+    const bomber = this.mode === 'bomber';
+    if (source === 'xr') {
+      return 'TOUCH // L-STICK THROTTLE+YAW · R-STICK PITCH+ROLL · A THERMAL · X CRUISE · B ABORT'
+        + (bomber ? ' · TRIGGERS DROP · L-GRIP+R-STICK GIMBAL' : ' · CONTACT TO STRIKE');
+    }
+    if (source === 'gamepad') {
+      return 'PAD // L-STICK THROTTLE+YAW · R-STICK PITCH+ROLL · Y THERMAL · RB CRUISE · B ABORT'
+        + (bomber ? ' · A/X DROP · D-PAD GIMBAL' : ' · CONTACT TO STRIKE');
+    }
+    if (source === 'radio') {
+      return 'RADIO // MODE 2 · SWITCHES AS BOUND IN SETTINGS > CONTROLS'
+        + (bomber ? ' · DROP SWITCH RELEASES' : ' · CONTACT TO STRIKE');
+    }
+    return `SIM CONTROL // ${bomber
+      ? 'WASD FLIGHT · MOUSE GIMBAL · RMB/Z CLIMB · CTRL/C DESCEND · FIRE/G DROP · N THERMAL · T CRUISE'
+      : 'WASD FLIGHT · MOUSE LOOK · RMB/Z CLIMB · CTRL/C DESCEND · N EO/THERMAL · T CRUISE · CONTACT TO STRIKE'}`;
   }
 
   showLesson() {
@@ -2122,6 +2173,7 @@ export class DroneController {
         }
       }
       const pad = 45;
+      this.searchBox = { x1: bx1 - pad, x2: bx2 + pad, z1: bz1 - pad, z2: bz2 + pad };
       const [sx, sz] = this.mapPoint(bx1 - pad, bz2 + pad);
       const [ex, ez] = this.mapPoint(bx2 + pad, bz1 - pad);
       ctx.strokeStyle = 'rgba(255,92,70,0.85)';
@@ -2650,6 +2702,7 @@ export class DroneController {
     if (!this.isFpvFamily || this.attemptState !== FPV_ATTEMPT.FLYING) return;
     if (outcome.expended !== false) this.airframesLost++;
     this.vel.set(0, 0, 0);
+    this.cruise = null;
     // A spent FPV or lost aircraft leaves a dead feed. A reusable bomber that merely ran
     // out of payload still has a live link, so do not misrepresent that state as full EW.
     this.signal = outcome.expended === false ? Math.max(this.signal, 0.35) : 0;
@@ -2959,6 +3012,9 @@ export class DroneController {
 
   prepareNextAirframe(readyReason = '') {
     this.detonated = false;
+    this.cruise = null;
+    this.stickAttitude = false;
+    this.bodyRates?.set(0, 0, 0);
     this.pos.copy(this.launch);
     this.pos.y += 1.7;
     this.yaw = this.launchYaw;
@@ -3030,6 +3086,14 @@ export class DroneController {
     }
     if (this.attemptState === FPV_ATTEMPT.READY
       && this.attemptStateTime > 0.25 && (input.firePressed || input.breachPressed)) {
+      // A stick-flown quad launches from the pad itself, not from the assisted law's 6 m
+      // hover point — otherwise a radio with the throttle down drops it onto its own pad.
+      if (this.mode === 'fpv' && !this.airStart && activeFlightMode() !== 'assist') {
+        const ground = groundHeight(this.frameSolids || [], this.pos.x, this.pos.z, 0.12, this.pos.y + 0.05);
+        const terrainY = droneTerrain ? droneTerrain(this.pos.x, this.pos.z) : 0;
+        this.pos.y = Math.max(ground === -Infinity ? terrainY : ground, terrainY) + 0.66;
+        this.vel.set(0, 0, 0);
+      }
       this.readyPanel.style.display = 'none';
       this.help.style.display = '';
       this.attemptState = FPV_ATTEMPT.FLYING;
@@ -3079,39 +3143,22 @@ export class DroneController {
     // stick response goes mushy before it dies. Legacy modes fly with a clean link.
     this.armTimer = Math.max(0, this.armTimer - dt);
     const control = this.isFpvFamily ? 0.3 + 0.7 * Math.max(this.signal, 0.05) : 1;
-    this.yaw -= input.lookDelta.x * 0.72 * control;
-    const minimumPitch = this.mode === 'bomber' ? -Math.PI / 2 : -1.15;
-    this.pitch = Math.max(minimumPitch, Math.min(0.72, this.pitch - input.lookDelta.y * 0.62 * control));
-    if (this.mode === 'bomber') {
-      const lockAngle = this.payloadNadir ? -76 : -80;
-      this.payloadNadir = this.pitch * 180 / Math.PI <= lockAngle;
+    // Flight law. Keyboard flies the assisted law below; analog sticks fly the FPV on a
+    // real thrust-vector model (ANGLE self-levelling or ACRO rate mode). The payload hex is
+    // a stabilized platform in every law, so sticks feed its assisted controls instead.
+    const law = this.isFpvFamily ? activeFlightMode() : 'assist';
+    if (this.cruise && !this.updateCruiseGate(input)) this.endCruise(this.cruiseEndReason);
+    else if (!this.cruise && input.cruisePressed && this.isFpvFamily) this.startCruise();
+    if (this.cruise) {
+      this.flyCruise(dt);
+    } else if (this.mode === 'fpv' && law !== 'assist') {
+      if (!this.stickAttitude) this.beginStickAttitude();
+      this.flyStickLaw(dt, law, control);
+    } else {
+      if (this.stickAttitude) this.endStickAttitude();
+      this.flyAssisted(dt, this.assistedCommand(input, dt), control);
     }
-    // The FPV camera is fixed to the airframe: lateral input banks the entire horizon.
-    // The payload platform is gimballed and therefore remains deliberately steadier.
-    const bank = this.mode === 'bomber' ? 0.1 : 0.58;
-    this.roll += ((-input.move.x * bank) - this.roll) * Math.min(1, dt * 6);
-
-    const cp = Math.cos(this.pitch);
-    this.forward.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
-    this.horizontalForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-    const thrust = -input.move.y;
-    // The Heron's payload camera is a gimbal, not the aircraft's nose. Looking down must
-    // never turn W into a descent command; horizontal translation and camera angle remain
-    // independent at every gimbal angle. FPV retains camera-coupled acro flight.
-    const thrustDirection = this.mode === 'bomber' ? this.horizontalForward : this.forward;
-    this.vel.addScaledVector(thrustDirection, thrust * this.worldAccel * control * dt);
-    this.vel.addScaledVector(this.right, input.move.x * this.worldAccel * 0.58 * control * dt);
-    const climbHeld = input.desktopAltitude ? input.droneClimb : input.ads;
-    const descendHeld = input.desktopAltitude ? input.droneDescend : input.crouch;
-    if (climbHeld) this.vel.y += (this.isFpvFamily ? 10 / this.metersPerUnit : 10) * control * dt;
-    if (descendHeld) this.vel.y -= (this.isFpvFamily ? 9 / this.metersPerUnit : 9) * dt;
-    // A stabilized bomber captures altitude as soon as the vertical control is released.
-    // This applies outside nadir lock too; the camera's gimbal angle cannot disable it.
-    if (this.mode === 'bomber' && !climbHeld && !descendHeld) this.vel.y *= Math.exp(-8 * dt);
-    const damping = Math.exp(-1.45 * dt);
-    this.vel.multiplyScalar(damping);
-    if (this.vel.length() > this.worldMaxSpeed) this.vel.setLength(this.worldMaxSpeed);
+    this.flightLaw = this.cruise ? 'cruise' : law;
 
     this.next.copy(this.pos).addScaledVector(this.vel, dt);
     this.move.copy(this.next).sub(this.pos);
@@ -3155,6 +3202,16 @@ export class DroneController {
     // Ceiling rides the ground under the aircraft: service height is above terrain, so a
     // rise does not silently eat the drone's working band.
     this.pos.y = Math.max(floor, Math.min(this.ceiling + Math.max(0, terrainY), this.pos.y));
+    // The stick law has real gravity: resting on the ground (below detonation speed) is a
+    // landing, so stop the fall and let skids drag instead of sliding forever.
+    if (this.stickAttitude && this.pos.y <= floor + 0.001 && this.vel.y < 0) {
+      this.vel.y = 0;
+      const skid = Math.exp(-5 * dt);
+      this.vel.x *= skid;
+      this.vel.z *= skid;
+    }
+    // At the ceiling the climb is spent; drop the vertical speed so it does not bank up.
+    if (this.pos.y >= this.ceiling + Math.max(0, terrainY) - 0.001 && this.vel.y > 0) this.vel.y = 0;
     if (this.updateFiberControl(dt)) return;
 
     const fromLaunch = this.pos.distanceTo(this.launch);
@@ -3230,7 +3287,14 @@ export class DroneController {
     const buzzPitch = Math.sin(this.flightTime * 91) * vibration * vibrationLoad;
     const buzzYaw = Math.sin(this.flightTime * 67 + 1.7) * vibration * vibrationLoad * 0.55;
     const buzzRoll = Math.sin(this.flightTime * 113 + 0.4) * vibration * vibrationLoad * 0.8;
-    this.camera.rotation.set(this.pitch + buzzPitch, this.yaw + buzzYaw, this.roll + buzzRoll);
+    if (this.stickAttitude) {
+      this.camera.quaternion.copy(this.cameraAttitude);
+      this.camera.rotateX(buzzPitch);
+      this.camera.rotateY(buzzYaw);
+      this.camera.rotateZ(buzzRoll);
+    } else {
+      this.camera.rotation.set(this.pitch + buzzPitch, this.yaw + buzzYaw, this.roll + buzzRoll);
+    }
 
     this.recordAttemptTelemetry(dt, solids);
     if (this.isFpvFamily && this.training.allowAbort && input.breachPressed) {
@@ -3413,6 +3477,313 @@ export class DroneController {
       }
       if (this.complete) this.completionTimer = setTimeout(() => this.onComplete?.(), 650);
     }
+  }
+
+  // Keyboard/mouse (or sticks in the assisted law) reduced to one command shape.
+  assistedCommand(input, dt) {
+    if (this.isFpvFamily && sticks.active) {
+      const throttle = sticks.sprung ? sticks.throttle : (sticks.throttle - 0.5) * 2;
+      const lift = Math.abs(throttle) < 0.12 ? 0 : throttle;
+      return {
+        // Full yaw stick ~ 95 deg/s; gimbal stick ~ 60 deg/s of camera tilt.
+        lookX: sticks.yaw * 1.66 * dt / 0.72,
+        lookY: -sticks.gimbal * 1.05 * dt / 0.62,
+        moveX: sticks.roll,
+        moveY: -sticks.pitch,
+        climb: Math.max(0, lift),
+        descend: Math.max(0, -lift),
+      };
+    }
+    return {
+      lookX: input.lookDelta.x,
+      lookY: input.lookDelta.y,
+      moveX: input.move.x,
+      moveY: input.move.y,
+      climb: (input.desktopAltitude ? input.droneClimb : input.ads) ? 1 : 0,
+      descend: (input.desktopAltitude ? input.droneDescend : input.crouch) ? 1 : 0,
+    };
+  }
+
+  flyAssisted(dt, cmd, control) {
+    this.yaw -= cmd.lookX * 0.72 * control;
+    const minimumPitch = this.mode === 'bomber' ? -Math.PI / 2 : -1.15;
+    this.pitch = Math.max(minimumPitch, Math.min(0.72, this.pitch - cmd.lookY * 0.62 * control));
+    if (this.mode === 'bomber') {
+      const lockAngle = this.payloadNadir ? -76 : -80;
+      this.payloadNadir = this.pitch * 180 / Math.PI <= lockAngle;
+    }
+    // The FPV camera is fixed to the airframe: lateral input banks the entire horizon.
+    // The payload platform is gimballed and therefore remains deliberately steadier.
+    const bank = this.mode === 'bomber' ? 0.1 : 0.58;
+    this.roll += ((-cmd.moveX * bank) - this.roll) * Math.min(1, dt * 6);
+
+    const cp = Math.cos(this.pitch);
+    this.forward.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
+    this.horizontalForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const thrust = -cmd.moveY;
+    // The Heron's payload camera is a gimbal, not the aircraft's nose. Looking down must
+    // never turn W into a descent command; horizontal translation and camera angle remain
+    // independent at every gimbal angle. FPV retains camera-coupled acro flight.
+    const thrustDirection = this.mode === 'bomber' ? this.horizontalForward : this.forward;
+    this.vel.addScaledVector(thrustDirection, thrust * this.worldAccel * control * dt);
+    this.vel.addScaledVector(this.right, cmd.moveX * this.worldAccel * 0.58 * control * dt);
+    if (cmd.climb) this.vel.y += (this.isFpvFamily ? 10 / this.metersPerUnit : 10) * control * cmd.climb * dt;
+    if (cmd.descend) this.vel.y -= (this.isFpvFamily ? 9 / this.metersPerUnit : 9) * cmd.descend * dt;
+    // A stabilized bomber captures altitude as soon as the vertical control is released.
+    // This applies outside nadir lock too; the camera's gimbal angle cannot disable it.
+    if (this.mode === 'bomber' && !cmd.climb && !cmd.descend) this.vel.y *= Math.exp(-8 * dt);
+    const damping = Math.exp(-1.45 * dt);
+    this.vel.multiplyScalar(damping);
+    if (this.vel.length() > this.worldMaxSpeed) this.vel.setLength(this.worldMaxSpeed);
+  }
+
+  // ---- Stick flight: a thrust-vector quad, the model every FPV trainer flies ----
+  // Attitude is a full quaternion (ACRO flips are legal). Thrust acts along the frame's up
+  // axis against real gravity and quadratic drag, all in metres, converted to map units at
+  // the end. The camera is bolted to the frame with uptilt, so forward speed means the frame
+  // pitches down and the picture shows it — exactly why FPV cameras are tilted up.
+  beginStickAttitude() {
+    const uptilt = controls().uptilt * DEG;
+    STICK_EULER.set(Math.max(-1.2, this.pitch - uptilt), this.yaw, this.roll, 'YXZ');
+    this.attitude.setFromEuler(STICK_EULER);
+    this.heading = this.yaw;
+    this.bodyRates.set(0, 0, 0);
+    this.stickAttitude = true;
+  }
+
+  endStickAttitude() {
+    this.stickAttitude = false;
+    this.roll = 0;
+  }
+
+  flyStickLaw(dt, law, control) {
+    const cfg = controls();
+    const mpu = this.metersPerUnit;
+    const twr = this.definition.thrustToWeight ?? 3.2;
+    if (law === 'acro') {
+      const rate = (x, centre, max) => Math.sign(x)
+        * (centre * Math.abs(x) + (max - centre) * Math.abs(x) ** 3) * DEG;
+      STICK_RATES.set(
+        -rate(sticks.pitch, cfg.centerRate, cfg.maxRate),
+        -rate(sticks.yaw, cfg.yawCenterRate, cfg.yawMaxRate),
+        -rate(sticks.roll, cfg.centerRate, cfg.maxRate),
+      ).multiplyScalar(control);
+      // A tuned quad tracks its rate setpoint in a few tens of milliseconds.
+      this.bodyRates.lerp(STICK_RATES, 1 - Math.exp(-dt / 0.035));
+      const angle = this.bodyRates.length() * dt;
+      if (angle > 1e-6) {
+        STICK_AXIS.copy(this.bodyRates).normalize();
+        STICK_DELTA.setFromAxisAngle(STICK_AXIS, angle);
+        this.attitude.multiply(STICK_DELTA).normalize();
+      }
+    } else {
+      const shape = x => x * 0.72 + x ** 3 * 0.28;
+      const limit = cfg.angleLimit * DEG;
+      const yawRate = (cfg.yawCenterRate * Math.abs(sticks.yaw)
+        + (cfg.yawMaxRate - cfg.yawCenterRate) * Math.abs(sticks.yaw) ** 3) * DEG;
+      this.heading -= Math.sign(sticks.yaw) * yawRate * control * dt;
+      STICK_EULER.set(-shape(sticks.pitch) * limit * control, this.heading,
+        -shape(sticks.roll) * limit * control, 'YXZ');
+      STICK_TARGET.setFromEuler(STICK_EULER);
+      this.attitude.slerp(STICK_TARGET, 1 - Math.exp(-dt * 13));
+    }
+    STICK_UP.set(0, 1, 0).applyQuaternion(this.attitude);
+    const g = 9.81;
+    const maxThrust = twr * g;
+    let thrust;
+    if (sticks.sprung) {
+      // Self-centring throttle (pad, Touch): centre is hover. ANGLE also compensates for
+      // tilt so a level-flight push holds altitude — the altitude-hold every pad sim adds.
+      const hover = law === 'angle' ? g / Math.max(0.42, STICK_UP.y) : g;
+      thrust = sticks.throttle >= 0
+        ? hover + (maxThrust - hover) * sticks.throttle
+        : hover * (1 + sticks.throttle * 0.9);
+    } else {
+      thrust = sticks.throttle * maxThrust;
+    }
+    thrust = Math.max(0, Math.min(maxThrust, thrust)) * (0.55 + 0.45 * control);
+    // Quadratic drag sized so full throttle at 45 deg of pitch runs at the airframe's top
+    // speed; a small linear term keeps the hover from feeling like ice.
+    const top = this.stickTopSpeed;
+    const kq = maxThrust * Math.sin(45 * DEG) / (top * top);
+    STICK_VEL.copy(this.vel).multiplyScalar(mpu);
+    const speed = STICK_VEL.length();
+    STICK_ACCEL.copy(STICK_UP).multiplyScalar(thrust);
+    STICK_ACCEL.y -= g;
+    STICK_ACCEL.addScaledVector(STICK_VEL, -(0.06 + kq * speed));
+    this.vel.addScaledVector(STICK_ACCEL, dt / mpu);
+    const cap = top * 1.25 / mpu;
+    if (this.vel.length() > cap) this.vel.setLength(cap);
+    this.syncStickCamera();
+  }
+
+  // Derive the legacy attitude fields (OSD heading, telemetry, aim tests) from the frame.
+  syncStickCamera() {
+    STICK_CAMERA.copy(this.attitude).multiply(
+      STICK_DELTA.setFromAxisAngle(X_AXIS, controls().uptilt * DEG));
+    this.cameraAttitude.copy(STICK_CAMERA);
+    this.forward.set(0, 0, -1).applyQuaternion(STICK_CAMERA);
+    STICK_BODY_FWD.set(0, 0, -1).applyQuaternion(this.attitude);
+    // Straight-down or inverted frames fall back to the up vector for heading.
+    if (Math.hypot(STICK_BODY_FWD.x, STICK_BODY_FWD.z) < 0.15) {
+      STICK_BODY_FWD.set(0, 1, 0).applyQuaternion(this.attitude).negate();
+    }
+    this.yaw = Math.atan2(-STICK_BODY_FWD.x, -STICK_BODY_FWD.z);
+    if (this.mode === 'fpv') this.heading = this.cruise ? this.yaw : this.heading;
+    this.horizontalForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    STICK_EULER.setFromQuaternion(STICK_CAMERA, 'YXZ');
+    this.pitch = STICK_EULER.x;
+    this.roll = STICK_EULER.z;
+  }
+
+  // ---- CRUISE: the transit autopilot ----
+  // Long-range crews do not hand-fly the empty ingress. The aircraft flies the briefed leg
+  // to the search area at cruise speed while the sim runs time-compressed; the battery
+  // still drains at the true rate. Anything tactical hands the sticks straight back.
+  cruiseAvailability() {
+    if (!this.isFpvFamily || this.attemptState !== FPV_ATTEMPT.FLYING) return 'NOT AIRBORNE';
+    if (this.fiberControlled) return 'FIBRE — HAND-FLY THE CABLE ROUTE';
+    if (this.lessonQueue?.length) return 'LESSON IN PROGRESS';
+    if (this.signal < 0.6) return 'LINK TOO WEAK FOR AUTOPILOT';
+    if (this.battery < 25) return 'BATTERY TOO LOW';
+    if (this.incomingPressure > 0.05) return 'UNDER FIRE';
+    if (this.egressRequired) return null;
+    if (!this.searchBox) return 'NO BRIEFED SEARCH AREA';
+    if (this.inSearchBox(this.pos)) return 'ALREADY IN THE SEARCH AREA';
+    if (this.hostileContactWithin(this.cruiseContactRange)) return 'HOSTILE CONTACT CLOSE';
+    return null;
+  }
+
+  inSearchBox(p, pad = 0) {
+    const b = this.searchBox;
+    return !!b && p.x > b.x1 - pad && p.x < b.x2 + pad && p.z > b.z1 - pad && p.z < b.z2 + pad;
+  }
+
+  hostileContactWithin(range) {
+    const r2 = range * range;
+    return this.combatVehicles.some(vehicle => !vehicle.dead && !vehicle.protected
+      && vehicle.hostile !== false && !vehicle.exited
+      && (vehicle.pos.x - this.pos.x) ** 2 + (vehicle.pos.z - this.pos.z) ** 2 < r2);
+  }
+
+  startCruise() {
+    const blocked = this.cruiseAvailability();
+    if (blocked) { this.radioCall(`CRUISE UNAVAILABLE — ${blocked}`, 2600); return false; }
+    const home = this.egressRequired;
+    const waypoints = [];
+    if (home) {
+      waypoints.push(new THREE.Vector3(this.launch.x, 0, this.launch.z));
+    } else {
+      // Follow the briefed low route while it still leads toward the box, then the box.
+      const route = (this.definition.minimap?.route || []).map(([x, z]) => new THREE.Vector3(x, 0, z));
+      const b = this.searchBox;
+      const centre = new THREE.Vector3((b.x1 + b.x2) / 2, 0, (b.z1 + b.z2) / 2);
+      const toBox = Math.hypot(centre.x - this.pos.x, centre.z - this.pos.z);
+      for (const point of route) {
+        const ahead = Math.hypot(centre.x - point.x, centre.z - point.z) < toBox - 10;
+        const away = Math.hypot(point.x - this.pos.x, point.z - this.pos.z) > 20;
+        if (ahead && away && !this.inSearchBox(point)) waypoints.push(point);
+      }
+      waypoints.push(centre);
+    }
+    this.cruise = { waypoints, index: 0, home, elapsed: 0 };
+    if (this.stickAttitude) this.heading = this.yaw;
+    this.radioCall(home
+      ? `CRUISE — AUTOPILOT RTB TO ${this.training.homeLabel || 'LZ'}. ANY STICK TAKES CONTROL.`
+      : `CRUISE — AUTOPILOT TO THE SEARCH AREA, ${waypoints.length} LEG${waypoints.length > 1 ? 'S' : ''}. ANY STICK TAKES CONTROL.`, 3200);
+    return true;
+  }
+
+  // Returns false (and records why) when the autopilot must hand back control.
+  updateCruiseGate(input) {
+    const reason = (() => {
+      if (input.cruisePressed) return 'PILOT';
+      const keyed = Math.abs(input.move.x) + Math.abs(input.move.y) > 0.2
+        || Math.abs(input.lookDelta.x) + Math.abs(input.lookDelta.y) > 0.002
+        || input.droneClimb || input.droneDescend || input.firePressed;
+      if (keyed || sticks.moved) return 'PILOT';
+      if (this.signal < 0.55) return 'JAMMING';
+      if (this.incomingPressure > 0.05) return 'UNDER FIRE';
+      if (this.fiberWarning) return 'CABLE';
+      if (this.battery < 22 && !this.cruise.home) return 'BATTERY';
+      if (!this.cruise.home && this.inSearchBox(this.pos)) return 'SEARCH AREA';
+      if (!this.cruise.home && this.hostileContactWithin(this.cruiseContactRange)) return 'CONTACT';
+      return null;
+    })();
+    this.cruiseEndReason = reason;
+    return !reason;
+  }
+
+  endCruise(reason = 'PILOT') {
+    if (!this.cruise) return;
+    this.cruise = null;
+    if (this.stickAttitude) this.heading = this.yaw;
+    const text = {
+      PILOT: 'CRUISE OFF — PILOT HAS CONTROL',
+      JAMMING: 'CRUISE OFF — JAMMING. YOU HAVE CONTROL.',
+      'UNDER FIRE': 'CRUISE OFF — UNDER FIRE. YOU HAVE CONTROL.',
+      CABLE: 'CRUISE OFF — CABLE WARNING.',
+      BATTERY: 'CRUISE OFF — BATTERY RESERVE. YOU HAVE CONTROL.',
+      'SEARCH AREA': 'CRUISE OFF — ENTERING THE SEARCH AREA. YOU HAVE CONTROL.',
+      CONTACT: 'CRUISE OFF — CONTACT AHEAD. YOU HAVE CONTROL.',
+      ARRIVED: 'CRUISE OFF — OVERHEAD THE LZ. BRING IT IN.',
+    }[reason] || `CRUISE OFF — ${reason}`;
+    this.radioCall(text, 2800);
+  }
+
+  flyCruise(dt) {
+    const c = this.cruise;
+    c.elapsed += dt;
+    let wp = c.waypoints[c.index];
+    if (Math.hypot(wp.x - this.pos.x, wp.z - this.pos.z) < (c.home ? 10 : 18)) {
+      if (c.index < c.waypoints.length - 1) wp = c.waypoints[++c.index];
+      else { this.endCruise(c.home ? 'ARRIVED' : 'SEARCH AREA'); return; }
+    }
+    const mpu = this.metersPerUnit;
+    const dx = wp.x - this.pos.x, dz = wp.z - this.pos.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const dirX = dx / len, dirZ = dz / len;
+    // Terrain-following transit height, looking ahead so a rise is climbed early.
+    const terrainAt = (x, z) => (droneTerrain ? droneTerrain(x, z) : 0);
+    let ground = terrainAt(this.pos.x, this.pos.z);
+    for (const ahead of [12, 24, 40]) {
+      ground = Math.max(ground, terrainAt(this.pos.x + dirX * ahead, this.pos.z + dirZ * ahead));
+    }
+    const agl = Math.min(this.ceiling - 1.5, (c.home ? 34 : 30) / mpu);
+    const targetY = ground + agl;
+    const speed = this.cruiseSpeed / mpu;
+    const blend = 1 - Math.exp(-dt * 1.6);
+    this.vel.x += (dirX * speed - this.vel.x) * blend;
+    this.vel.z += (dirZ * speed - this.vel.z) * blend;
+    this.vel.y = Math.max(-4 / mpu, Math.min(5 / mpu, (targetY - this.pos.y) * 1.3));
+    // Turn the aircraft onto the leg; the camera shows a cruise attitude, nose on the track.
+    let turn = Math.atan2(-dirX, -dirZ) - this.yaw;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    const yaw = this.yaw + turn * Math.min(1, dt * 2.2);
+    const bank = Math.max(-0.5, Math.min(0.5, -turn * 0.8));
+    if (this.stickAttitude) {
+      STICK_EULER.set(-28 * DEG, yaw, this.mode === 'fpv' ? bank : 0, 'YXZ');
+      STICK_TARGET.setFromEuler(STICK_EULER);
+      this.attitude.slerp(STICK_TARGET, 1 - Math.exp(-dt * 6));
+      this.syncStickCamera();
+      this.heading = this.yaw;
+    } else {
+      this.yaw = yaw;
+      const cruisePitch = this.mode === 'bomber' ? Math.min(this.pitch, -0.35) : -0.12;
+      this.pitch += (cruisePitch - this.pitch) * Math.min(1, dt * 2);
+      this.roll += ((this.mode === 'fpv' ? bank * 0.6 : 0) - this.roll) * Math.min(1, dt * 4);
+      const cp = Math.cos(this.pitch);
+      this.forward.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
+      this.horizontalForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    }
+  }
+
+  // Sim-time multiplier the main loop applies while the autopilot flies the transit.
+  get timeCompression() {
+    return this.cruise ? this.cruiseCompression : 1;
   }
 
   updateFpvFamily(dt, input, solids) {
@@ -3637,6 +4008,11 @@ export class DroneController {
   updateFpvOsd(dt) {
     const osd = this.osd;
     if (!osd) return;
+    const helpSource = sticks.active ? sticks.source : 'keys';
+    if (helpSource !== this.helpSource) {
+      this.helpSource = helpSource;
+      this.help.textContent = this.helpLine(helpSource);
+    }
     const signal = this.frozen ? 0 : this.signal;
     // Analog snow at television cadence. A hint of sparkle even on a clean link; a wall of
     // it when the bubble wins. Frozen (expended/lost) is a dead feed: full snow, no video.
@@ -3674,8 +4050,19 @@ export class DroneController {
     const minutes = String(Math.floor(this.flightTime / 60)).padStart(2, '0');
     const seconds = String(Math.floor(this.flightTime % 60)).padStart(2, '0');
     osd.timer.textContent = `${minutes}:${seconds}`;
-    if (osd.mode && this.mode === 'bomber') {
-      osd.mode.textContent = this.payloadNadir ? 'NADIR LOCK // ALT HOLD' : 'GIMBAL // ALT HOLD';
+    if (osd.mode) {
+      if (this.cruise) {
+        const legs = this.cruise.waypoints.length;
+        osd.mode.textContent = `CRUISE x${this.cruiseCompression} // ${this.cruise.home ? 'RTB'
+          : `LEG ${this.cruise.index + 1}/${legs}`}`;
+      } else if (this.mode === 'bomber') {
+        osd.mode.textContent = this.payloadNadir ? 'NADIR LOCK // ALT HOLD' : 'GIMBAL // ALT HOLD';
+      } else {
+        const law = this.flightLaw === 'cruise' ? 'assist' : this.flightLaw;
+        osd.mode.textContent = `${law === 'assist' ? 'ACRO' : law === 'angle' ? 'ANGLE' : 'ACRO'}`
+          + ` // ${this.armTimer > 0 ? 'ARMING' : 'ARMED'}`
+          + (law === 'assist' ? '' : ` // ${sticks.source === 'xr' ? 'TOUCH' : sticks.source.toUpperCase()}`);
+      }
     }
     // 6S pack: 4.2 V/cell full, 3.3 V/cell flat — the numbers a pilot actually flies by.
     const cell = 3.3 + (this.battery / 100) * 0.9;

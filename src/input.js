@@ -15,6 +15,8 @@ export const input = {
   nvgPressed: false,
   breath: false,
   pausePressed: false,
+  cruisePressed: false,          // edge: CRUISE transit autopilot toggle (T / stick button)
+  stickFire: false,              // held fire from a stick source
   crouch: false,
   // Dedicated held controls for multirotor altitude. Z/C also retain their infantry
   // meanings, but the drone must never inherit crouch's latched state as a descent command.
@@ -195,7 +197,7 @@ export function initInput() {
   const SWALLOW = new Set([
     'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
     'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyG', 'KeyX', 'KeyF', 'KeyH',
-    'KeyB', 'KeyN', 'KeyP', 'KeyZ', 'KeyC', 'KeyQ', 'KeyE',
+    'KeyB', 'KeyN', 'KeyP', 'KeyZ', 'KeyC', 'KeyQ', 'KeyE', 'KeyT',
     'ShiftLeft', 'ControlLeft',
   ]);
   window.addEventListener('keydown', e => {
@@ -210,6 +212,7 @@ export function initInput() {
     if (e.code === 'KeyH') input.hostageCommandPressed = true;
     if (e.code === 'KeyB') input.flashPressed = true;
     if (e.code === 'KeyN') input.nvgPressed = true;
+    if (e.code === 'KeyT') input.cruisePressed = true;
     if (e.code === 'Escape' || e.code === 'KeyP') input.pausePressed = true;
     if (e.code === 'ShiftLeft') input.breath = true;
     // Keyboard aim, held like the mouse button. Right-click was the ONLY way to scope,
@@ -300,6 +303,7 @@ export function clearEdges() {
   input.hostageCommandPressed = false;
   input.nvgPressed = false;
   input.pausePressed = false;
+  input.cruisePressed = false;
   input.lookDelta.x = 0;
   input.lookDelta.y = 0;
 }
