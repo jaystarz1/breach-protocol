@@ -29,6 +29,7 @@ import {
 import { addVisualProps } from './visual-kit.js';
 import { addInteriorMissionArt } from './interior-mission-art.js';
 import { createRenderPipeline } from './renderer/render-pipeline.js';
+import { createGoggles } from './xr/goggles.js';
 import {
   CAMPAIGN,
   briefingText,
@@ -78,6 +79,9 @@ const renderPipeline = createRenderPipeline(canvas, quality);
 // Kept as a local alias because environment-map generation and light setup legitimately need
 // the underlying Three renderer. Frame rendering itself goes only through renderPipeline.
 const renderer = renderPipeline.renderer;
+// Dronerium only: the headset is a pair of FPV goggles on the same page (src/xr/goggles.js).
+const goggles = GAME.id === 'drone' ? createGoggles(renderer) : null;
+renderPipeline.setXR(goggles);
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 500);
 let scene = null;
 // Re-centred on the camera every frame: a 460m dome that stays at the origin would clip
@@ -2998,17 +3002,16 @@ const QUIET_INPUT = Object.freeze({
 });
 
 function frame() {
-  requestAnimationFrame(frame);
   const now = performance.now();
   let dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
-  pollSticks(null, mode === 'playing');
+  pollSticks(goggles?.session || null, mode === 'playing');
 
   if (skyMesh) skyMesh.position.copy(camera.position);
   // The first-person rig renders as an overlay pass from its own scene (see weapons.js).
   const viewmodel = weapons ? { scene: weapons.viewScene, rig: weapons.viewRoot } : null;
   if (mode !== 'playing' || !world) {
-    if (scene) renderPipeline.render(scene, camera, {
+    if (scene || goggles?.presenting) renderPipeline.render(scene, camera, {
       adaptive: false, viewmodel, fpv: world?.drone?.feedVisualState?.(),
     });
     clearEdges();
@@ -3346,7 +3349,8 @@ function frame() {
   renderPipeline.render(scene, camera, { adaptive: true, viewmodel });
   clearEdges();
 }
-frame();
+// setAnimationLoop is requestAnimationFrame on a monitor and the XR frame loop in a headset.
+renderer.setAnimationLoop(frame);
 
 // Touch hardening: menu buttons fire on touchend directly (no 300ms ambiguity, no lost taps)
 for (const b of document.querySelectorAll('.menu-btn, #menu-refresh')) {

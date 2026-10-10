@@ -1,4 +1,4 @@
-const CACHE = 'breach-protocol-v172-sticks-cruise';
+const CACHE = 'breach-protocol-v173-xr-goggles';
 const ASSETS = [
   './', 'index.html', 'shooter.html', 'ui.css', 'manifest.json', 'shooter.webmanifest',
   'lib/three.module.js', 'lib/GLTFLoader.js', 'lib/SkeletonUtils.js', 'lib/BufferGeometryUtils.js',
@@ -12,7 +12,7 @@ const ASSETS = [
   'src/quality.js', 'src/textures.js', 'src/world.js', 'src/squad.js', 'src/street-sweep-art.js',
   'src/visual-kit.js', 'src/character-assets.js', 'src/interior-mission-art.js',
   'src/frontline-art.js',
-  'src/drone.js', 'src/sticks.js', 'src/controls-ui.js',
+  'src/drone.js', 'src/sticks.js', 'src/controls-ui.js', 'src/xr/goggles.js', 'src/xr/dom-mirror.js',
   'src/campaign.js', 'src/renderer/capabilities.js', 'src/renderer/adaptive-resolution.js',
   'src/renderer/render-pipeline.js',
   'src/renderer/telemetry.js',

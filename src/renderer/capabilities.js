@@ -32,6 +32,9 @@ export function resolveRendererMode(stored) {
   const choice = normalizeMode(queryMode() || stored);
   if (choice === 'desktop') return desktopSupported() ? 'desktop' : 'compatibility';
   if (choice === 'compatibility') return 'compatibility';
+  // Quest Browser: a Quest 2 renders the feed in the headset at a fixed 72 Hz on a phone-class
+  // GPU. AUTO starts it on the light path; DESKTOP remains selectable in Settings.
+  if (/OculusBrowser|Quest/i.test(navigator.userAgent)) return 'compatibility';
   // A touch screen no longer disqualifies a capable desktop. Coarse-only input does: that is
   // the retained phone/tablet path, and it no longer limits desktop content.
   const coarseOnly = matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches;
